@@ -1,0 +1,53 @@
+# Wiring Autoencoder — Apple Silicon (MPS) profile
+#
+# Memory-safe defaults for M-series Macs (M1/M2/M3/M4 Pro/Max/Ultra).
+# All three OOM levers are set to their minimal safe values.
+#
+# Peak memory budget on Cora (N=2708) with these settings:
+#   L(z) sparse COO   : B x E x 4B  = 16 x 40620 x 4  ~  2.5 MB
+#   eigvecs (tau=8)   : B x N x k   = 16 x 2708 x 8   ~  1.4 MB
+#   gradient buffers  : ~2x forward = ~8 MB
+#   model params      : ~10 MB
+#   Total peak        : < 25 MB   (vs ~30 GB without fixes)
+#
+# Usage:
+#   python train.py   --config configs/mps.yaml
+#   python benchmark.py --config configs/mps.yaml --device mps
+
+model:
+  latent_dim: 32
+  hidden_dim: 256
+  n_wiring_heads: 4
+  tau_modes: 8            # lever 3: half eigvec storage
+  beta: 1.0
+  alpha: 0.1
+  use_lambda_features: true
+
+graph:
+  knn_k: 10               # slightly smaller neighbourhood to cut E further
+  sigma: 0.5
+  normalised: true
+  sparse: true            # lever 1: sparse Laplacian — never materialise (B,N,N)
+
+training:
+  epochs: 200
+  batch_size: 16          # lever 2: safe batch size for M4 Pro 24 GB
+  mps_batch_size: 16
+  lr: 3.0e-4
+  weight_decay: 1.0e-5
+  scheduler: cosine
+  warmup_epochs: 10
+  grad_clip: 1.0
+  seed: 42
+  device: auto
+
+dataset:
+  name: cora
+  root: ./data
+  split: [0.8, 0.1, 0.1]
+
+logging:
+  use_wandb: false
+  project: wiring-autoencoder
+  log_every: 10
+  save_dir: ./checkpoints

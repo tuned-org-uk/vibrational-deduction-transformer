@@ -4,10 +4,13 @@ Wiring Autoencoder — training entry point.
 Usage
 -----
     python train.py --config configs/default.yaml --dataset cora
+    python train.py --config configs/mps.yaml     --dataset cora   # Apple Silicon
     python train.py --config configs/mnist.yaml   --dataset mnist
 
 All hyperparameters live in the YAML config.  CLI flags override config values.
 Device selection is automatic (MPS → CUDA → CPU) via wae.device.get_device().
+When MPS is selected, batch_size is automatically reduced to mps_batch_size
+(default 16) if that key is present in the config.
 """
 from __future__ import annotations
 import argparse
@@ -50,6 +53,17 @@ def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def resolve_batch_size(cfg: dict, device: torch.device) -> int:
+    """Return mps_batch_size when on MPS, otherwise batch_size."""
+    tc = cfg["training"]
+    if device.type == "mps" and "mps_batch_size" in tc:
+        bs = tc["mps_batch_size"]
+        print(f"[WAE] MPS device detected — using mps_batch_size={bs} "
+              f"(override batch_size={tc['batch_size']})")
+        return bs
+    return tc["batch_size"]
 
 
 def train_one_epoch(
@@ -110,7 +124,6 @@ def main() -> None:
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
-    # CLI overrides
     if args.dataset:  cfg["dataset"]["name"] = args.dataset
     if args.epochs:   cfg["training"]["epochs"] = args.epochs
     if args.lr:       cfg["training"]["lr"] = args.lr
@@ -121,37 +134,38 @@ def main() -> None:
     set_seed(seed)
 
     # ------------------------------------------------------------------ #
-    # Device selection — MPS → CUDA → CPU, with MPS fallback env-var set  #
+    # Device + batch size                                                  #
     # ------------------------------------------------------------------ #
-    device = get_device(force=args.device, verbose=True)
-    print(f"[WAE] device={device}, dataset={cfg['dataset']['name']}")
+    device     = get_device(force=args.device, verbose=True)
+    batch_size = resolve_batch_size(cfg, device)
+    print(f"[WAE] device={device}, dataset={cfg['dataset']['name']}, batch_size={batch_size}")
 
-    # Data
     tc = cfg["training"]
     dc = cfg["dataset"]
-    data = load_dataset(dc["name"], root=dc["root"], device=device)
-    loaders = make_loaders(data, batch_size=tc["batch_size"])
-    E = data["E"]   # (N, D)
-    meta = data["meta"]
+    gc = cfg["graph"]
+
+    data    = load_dataset(dc["name"], root=dc["root"], device=device)
+    loaders = make_loaders(data, batch_size=batch_size)
+    E       = data["E"]
+    meta    = data["meta"]
     print(f"[WAE] nodes={meta['n_nodes']}, feat_dim={meta['feat_dim']}, classes={meta['n_classes']}")
 
-    # Model
     model = WiringAutoencoder.from_config(cfg, E).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[WAE] trainable params: {n_params:,}")
 
-    # Pre-build base Laplacian for lambda-fingerprint (no-grad)
     from wae.laplacian import DifferentiableLaplacian
+    use_sparse = gc.get("sparse", device.type == "mps")  # auto-enable sparse on MPS
     base_lap = DifferentiableLaplacian.from_embeddings(
         E,
-        knn_k=cfg["graph"]["knn_k"],
-        sigma=cfg["graph"]["sigma"],
-        normalised=cfg["graph"]["normalised"],
+        knn_k=gc["knn_k"],
+        sigma=gc["sigma"],
+        normalised=gc["normalised"],
+        sparse=use_sparse,
     ).to(device)
     with torch.no_grad():
         base_L = base_lap(base_lap.base_weights.unsqueeze(0)).squeeze(0)
 
-    # Optimiser + scheduler
     optimizer = optim.AdamW(
         model.parameters(), lr=tc["lr"], weight_decay=tc.get("weight_decay", 1e-5)
     )
@@ -159,13 +173,11 @@ def main() -> None:
     if tc.get("scheduler") == "cosine":
         scheduler = CosineAnnealingLR(optimizer, T_max=tc["epochs"])
 
-    # W&B
     lc = cfg["logging"]
     if lc.get("use_wandb"):
         import wandb
         wandb.init(project=lc["project"], config=cfg)
 
-    # CSV logger
     save_dir = Path(lc.get("save_dir", "./checkpoints"))
     save_dir.mkdir(parents=True, exist_ok=True)
     log_path = save_dir / "training_log.csv"
@@ -205,8 +217,8 @@ def main() -> None:
             dt = time.time() - t0
             print(
                 f"Epoch {epoch:4d}/{tc['epochs']}  "
-                f"train_loss={train_metrics['loss']:.4f}  "
-                f"val_loss={val_metrics['loss']:.4f}  "
+                f"train={train_metrics['loss']:.4f}  "
+                f"val={val_metrics['loss']:.4f}  "
                 f"kl={val_metrics['kl_loss']:.4f}  "
                 f"freq={val_metrics['freq_loss']:.4f}  "
                 f"({dt:.1f}s)"
@@ -214,8 +226,8 @@ def main() -> None:
 
         if val_metrics["loss"] < best_val:
             best_val = val_metrics["loss"]
-            ckpt_path = save_dir / "best.pt"
-            torch.save({"epoch": epoch, "model": model.state_dict(), "cfg": cfg}, ckpt_path)
+            torch.save({"epoch": epoch, "model": model.state_dict(), "cfg": cfg},
+                       save_dir / "best.pt")
 
     csv_f.close()
     print(f"[WAE] Training complete. Best val loss: {best_val:.4f}")

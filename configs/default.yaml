@@ -1,10 +1,11 @@
 # Wiring Autoencoder — default hyperparameters
+# For Apple Silicon (MPS) use configs/mps.yaml which overrides the memory levers.
 
 model:
   latent_dim: 32          # dim(z)
   hidden_dim: 256         # encoder / decoder hidden width
   n_wiring_heads: 4       # mixture heads for the wiring decoder
-  tau_modes: 16           # number of eigenvectors kept in tau-mode diffusion
+  tau_modes: 8            # eigenvectors kept in tau-mode diffusion (was 16; halves eigvec RAM)
   beta: 1.0               # KL weight in ELBO
   alpha: 0.1              # J_freq spectral regulariser weight
   use_lambda_features: true  # enrich encoder input with ArrowSpace lambda fingerprint
@@ -13,17 +14,19 @@ graph:
   knn_k: 15               # base kNN graph degree
   sigma: 0.5              # RBF kernel bandwidth
   normalised: true        # use normalised Laplacian
+  sparse: true            # use sparse COO Laplacian — avoids materialising (B,N,N) on MPS
 
 training:
   epochs: 200
-  batch_size: 256
+  batch_size: 32          # was 256; 32 keeps peak L(z) buffer ~0.9 GB on Cora
+  mps_batch_size: 16      # overrides batch_size when device=mps (set automatically in train.py)
   lr: 3.0e-4
   weight_decay: 1.0e-5
   scheduler: cosine       # cosine | step | none
   warmup_epochs: 10
   grad_clip: 1.0
   seed: 42
-  device: auto            # auto | cpu | cuda
+  device: auto            # auto | cpu | cuda | mps
 
 dataset:
   name: cora              # cora | pubmed | mnist | custom
@@ -33,5 +36,5 @@ dataset:
 logging:
   use_wandb: false
   project: wiring-autoencoder
-  log_every: 10           # steps
+  log_every: 10           # epochs
   save_dir: ./checkpoints
