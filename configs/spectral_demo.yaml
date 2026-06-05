@@ -1,0 +1,31 @@
+# Spectral Graph-Generation Demo  —  reproducible config  (issue #13)
+# Run: python demos/spectral_generation_demo.py --config configs/spectral_demo.yaml
+
+demo:
+  n_graphs:    400       # number of synthetic spring-network graphs
+  n_nodes:     16        # nodes per graph
+  k_neigh:     3         # max k-NN degree
+  tau_modes:   6         # vibrational modes used as node features
+  n_gen:       500       # samples for generation evaluation
+
+model:
+  latent_dim:  12
+  hidden:      64
+  n_heads:     4         # WiringDecoder MoE heads
+  beta:        0.5       # KL weight
+  alpha:       0.05      # J_freq spectral cost weight
+
+training:
+  epochs:      60
+  batch_size:  128
+  lr:          3.0e-4
+  scheduler:   cosine
+  seed:        42
+
+entropy_control:
+  n_candidates: 500
+  tol:          0.05     # |H_gen - H_target| < tol counts as a match
+
+output:
+  dir:   results/spectral_demo
+  device: cpu
