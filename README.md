@@ -54,6 +54,49 @@ python train.py --config configs/default.yaml --dataset cora
 python benchmark.py --dataset cora --output results/
 ```
 
+## Flagship Demo — Molecular / Spectral Graph Generation
+
+> **Why this is a distinctive WAE application:** Standard VAEs decode `z` into
+> flat feature vectors.  The WAE decodes `z` into a *graph wiring* — a
+> Laplacian — whose eigenvalues are the vibrational modes of the system
+> (cf. Rayleigh's Theory of Sound).  This means the latent space directly
+> encodes spectral geometry, enabling **entropy-controlled generation**:
+> sample novel wirings whose Laplacian spectrum matches a target entropy level.
+
+```bash
+# Train on synthetic spring-network graphs and run all evaluations
+python demos/spectral_generation_demo.py --n-graphs 400 --epochs 60
+
+# Interactive pluot + static visualisations (reads the CSVs produced above)
+python demos/visualise_spectral_demo.py --results results/spectral_demo
+```
+
+Outputs written to `results/spectral_demo/`:
+
+| File | Content |
+|---|---|
+| `spectral_demo_results.csv` | Per-generated-sample spectral entropy + Frobenius distance to nearest training Laplacian |
+| `entropy_control_results.csv` | Entropy-targeting experiment: target vs best error vs match rate |
+| `training_log.csv` | Epoch-level ELBO, reconstruction MSE, KL, J_freq |
+| `figures/training_curves.png` | Loss component curves |
+| `figures/entropy_distribution.png` | Dataset vs generated spectral entropy histogram |
+| `figures/spectral_distance.png` | Distribution of nearest-neighbour spectral distances |
+| `figures/latent_entropy.png` | PCA-2D latent space coloured by spectral entropy |
+| `figures/mode_shapes.png` | First 4 vibrational mode shapes of a sample spring network |
+| `figures/entropy_target_error.png` | Entropy targeting precision across entropy range |
+| `figures/pluot_manifest.json` | Load in [pluot](https://github.com/keller-mark/pluot) for interactive view |
+
+### Quantitative Evaluation
+
+| Metric | What it measures |
+|---|---|
+| Reconstruction MSE | Quality of x̂ recovered through wiring path |
+| KL divergence | Regularisation of latent z |
+| J_freq (spectral cost) | Smoothness of learned wiring (low = low-frequency, ordered) |
+| Spectral entropy H(Λ) | Shannon entropy of normalised eigenvalue spectrum of L(z) |
+| Frobenius distance to NN | Novelty: how far are generated Laplacians from training set? |
+| Entropy match rate | Fraction of samples within tol=0.05 of a target entropy |
+
 ## Benchmarks (CORA, 7-class node classification)
 
 Run `benchmark.py` to reproduce. Reported metrics: reconstruction MSE,
