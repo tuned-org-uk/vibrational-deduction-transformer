@@ -125,6 +125,44 @@ class TestWiringEncoder:
 
 
 # ---------------------------------------------------------------------------
+# DiffusionDecoder — explicit shape contract tests
+# ---------------------------------------------------------------------------
+class TestDiffusionDecoder:
+    def test_per_node_shape(self, small_graph):
+        """With node_idx, output must be (B, D)."""
+        lap, E, N, D = small_graph
+        B = 4
+        delta = torch.randn(B, lap.base_weights.shape[0])
+        L = lap(delta)
+        node_idx = torch.randint(0, N, (B,))
+        dec = DiffusionDecoder(embedding_dim=D, hidden_dim=32, tau_modes=4)
+        out = dec(L, E, node_idx=node_idx)
+        assert out.shape == (B, D), f"Expected ({B}, {D}), got {tuple(out.shape)}"
+
+    def test_full_graph_shape(self, small_graph):
+        """Without node_idx, output must be (B, N, D)."""
+        lap, E, N, D = small_graph
+        B = 3
+        delta = torch.randn(B, lap.base_weights.shape[0])
+        L = lap(delta)
+        dec = DiffusionDecoder(embedding_dim=D, hidden_dim=32, tau_modes=4)
+        out = dec(L, E, node_idx=None)
+        assert out.shape == (B, N, D), f"Expected ({B}, {N}, {D}), got {tuple(out.shape)}"
+
+    def test_recon_loss_guards_full_graph(self, small_graph):
+        """recon_loss must raise if x_hat is not (B, D)."""
+        lap, E, N, D = small_graph
+        B = 2
+        delta = torch.randn(B, lap.base_weights.shape[0])
+        L = lap(delta)
+        dec = DiffusionDecoder(embedding_dim=D, hidden_dim=32, tau_modes=4)
+        x_hat_full = dec(L, E, node_idx=None)       # (B, N, D)
+        x = torch.randn(B, D)
+        with pytest.raises(ValueError, match="per-node"):
+            dec.recon_loss(x, x_hat_full)
+
+
+# ---------------------------------------------------------------------------
 # WiringAutoencoder end-to-end
 # ---------------------------------------------------------------------------
 class TestWiringAutoencoder:
@@ -155,14 +193,85 @@ class TestWiringAutoencoder:
         node_idx = torch.randint(0, N, (4,))
         out = model(x, E, node_idx=node_idx)
         out["loss"].backward()
-        # At least some parameters should have gradients
         grads = [p.grad for p in model.parameters() if p.grad is not None]
         assert len(grads) > 0
 
-    def test_generate(self, wae_model, small_graph):
+    # ------------------------------------------------------------------
+    # generate() — the core of issue #3
+    # ------------------------------------------------------------------
+    def test_generate_per_node_default(self, wae_model, small_graph):
+        """
+        Default generate() call: mode='per_node', no node_idx supplied.
+        x_hat must be (n_samples, D) — same shape as reconstruction path.
+        node_idx key must be present and have shape (n_samples,).
+        """
         model, E = wae_model
-        lap, _, N, D = small_graph
-        gen = model.generate(E, n_samples=3)
-        assert gen["z"].shape    == (3, 8)
-        assert gen["L"].shape    == (3, N, N)
-        assert gen["x_hat"].shape == (3, D)
+        _, _, N, D = small_graph
+        n = 5
+        gen = model.generate(E, n_samples=n)
+        assert gen["z"].shape        == (n, 8),    f"z shape wrong: {gen['z'].shape}"
+        assert gen["L"].shape        == (n, N, N), f"L shape wrong: {gen['L'].shape}"
+        assert gen["node_idx"].shape == (n,),      f"node_idx shape wrong: {gen['node_idx'].shape}"
+        assert gen["x_hat"].shape    == (n, D),    f"x_hat shape wrong: {gen['x_hat'].shape}"
+
+    def test_generate_per_node_explicit_idx(self, wae_model, small_graph):
+        """
+        generate() with explicit node_idx in per_node mode.
+        Output x_hat must match the supplied node indices' geometry.
+        """
+        model, E = wae_model
+        _, _, N, D = small_graph
+        n = 4
+        node_idx = torch.arange(n)   # nodes 0,1,2,3
+        gen = model.generate(E, n_samples=n, node_idx=node_idx, mode="per_node")
+        assert gen["x_hat"].shape == (n, D)
+        assert torch.equal(gen["node_idx"], node_idx)
+
+    def test_generate_full_graph(self, wae_model, small_graph):
+        """
+        generate() in full_graph mode.
+        x_hat must be (n_samples, N, D).
+        node_idx must be None.
+        """
+        model, E = wae_model
+        _, _, N, D = small_graph
+        n = 3
+        gen = model.generate(E, n_samples=n, mode="full_graph")
+        assert gen["x_hat"].shape == (n, N, D), f"Expected ({n},{N},{D}), got {tuple(gen['x_hat'].shape)}"
+        assert gen["node_idx"] is None
+
+    def test_generate_invalid_mode(self, wae_model, small_graph):
+        """Passing an unknown mode must raise ValueError."""
+        model, E = wae_model
+        with pytest.raises(ValueError, match="mode must be"):
+            model.generate(E, n_samples=2, mode="bad_mode")
+
+    def test_generate_node_idx_shape_mismatch(self, wae_model, small_graph):
+        """Wrong node_idx length must raise ValueError."""
+        model, E = wae_model
+        with pytest.raises(ValueError, match="node_idx must have shape"):
+            model.generate(E, n_samples=4, node_idx=torch.arange(3))
+
+    def test_generate_sanity_encode_decode_round_trip(self, wae_model, small_graph):
+        """
+        Encode a real node, then generate from that z in per_node mode.
+        The generated embedding for the same node_idx should be finite
+        and have the correct dtype.
+        """
+        model, E = wae_model
+        _, _, N, D = small_graph
+        model.eval()
+        # pick a real node
+        node_idx = torch.tensor([0])
+        x = E[node_idx]         # (1, D)  ground-truth embedding
+        # forward pass to get z
+        with torch.no_grad():
+            out = model(x, E, node_idx=node_idx)
+        z_real = out["z"]       # (1, latent)
+        # generate from same z via per-node mode
+        with torch.no_grad():
+            L, _ = model.wiring_decoder(z_real)
+            x_hat = model.diffusion_decoder(L, E, node_idx=node_idx)
+        assert x_hat.shape == (1, D)
+        assert torch.isfinite(x_hat).all(), "Generated embedding contains NaN/Inf"
+        assert x_hat.dtype == torch.float32
