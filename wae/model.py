@@ -108,7 +108,8 @@ class WiringAutoencoder(nn.Module):
         lam_fp = None
         if self.encoder.use_lambda_features and base_L is not None:
             with torch.no_grad():
-                lam_fp = lambda_fingerprint(base_L, tau_modes=self.tau_modes)
+                lam_fp = lambda_fingerprint(base_L, tau_modes=self.tau_modes)  # (1, n_bins)
+                lam_fp = lam_fp.expand(x.shape[0], -1).contiguous()            # (B, n_bins)
                 # Repeat fingerprint for batch
                 if lam_fp.dim() == 1:
                     lam_fp = lam_fp.unsqueeze(0).expand(x.shape[0], -1)
