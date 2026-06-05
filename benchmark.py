@@ -12,25 +12,24 @@ Metrics reported (saved to CSV + printed as table):
 Usage
 -----
     python benchmark.py --dataset cora --output results/ --epochs 100
+    python benchmark.py --dataset cora --device mps     # force MPS
+    python benchmark.py --dataset cora --device cpu     # force CPU
 """
 from __future__ import annotations
 import argparse
-import os
 import csv
 import yaml
 from pathlib import Path
-from typing import Optional
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
 import numpy as np
 
-from wae import WiringAutoencoder
+from wae import WiringAutoencoder, get_device
 from wae.encoder import WiringEncoder
 from wae.dataset import load_dataset, make_loaders
 from wae.laplacian import DifferentiableLaplacian
@@ -77,7 +76,7 @@ class LinearAE(nn.Module):
 
     def __init__(self, input_dim: int, latent_dim: int) -> None:
         super().__init__()
-        self.W = nn.Linear(input_dim, latent_dim, bias=False)
+        self.W   = nn.Linear(input_dim, latent_dim, bias=False)
         self.dec = nn.Linear(latent_dim, input_dim, bias=False)
 
     def forward(self, x: torch.Tensor) -> dict:
@@ -169,14 +168,19 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--dataset",  default="cora")
     p.add_argument("--output",   default="results/")
-    p.add_argument("--epochs",   type=int, default=50)
+    p.add_argument("--epochs",   type=int,   default=50)
     p.add_argument("--lr",       type=float, default=3e-4)
-    p.add_argument("--latent",   type=int, default=32)
-    p.add_argument("--hidden",   type=int, default=256)
+    p.add_argument("--latent",   type=int,   default=32)
+    p.add_argument("--hidden",   type=int,   default=256)
     p.add_argument("--config",   default="configs/default.yaml")
+    p.add_argument("--device",   default=None,
+                   help="Force device: 'mps', 'cuda', 'cpu'. Default: auto-detect.")
     args = p.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # ------------------------------------------------------------------ #
+    # Device selection — MPS → CUDA → CPU, with MPS fallback env-var set  #
+    # ------------------------------------------------------------------ #
+    device = get_device(force=args.device, verbose=True)
     print(f"[Benchmark] device={device}, dataset={args.dataset}")
 
     with open(args.config) as f:

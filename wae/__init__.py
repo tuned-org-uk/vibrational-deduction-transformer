@@ -1,18 +1,7 @@
-"""Wiring Autoencoder package."""
+"""
+wae — Wiring Autoencoder public API.
+"""
 from .model import WiringAutoencoder
-from .laplacian import DifferentiableLaplacian
-from .spectral import TauModeDiffusion, spectral_freq_cost, lambda_fingerprint
-from .encoder import WiringEncoder
-from .wiring_decoder import WiringDecoder
-from .diffusion_decoder import DiffusionDecoder
+from .device import get_device
 
-__all__ = [
-    "WiringAutoencoder",
-    "DifferentiableLaplacian",
-    "TauModeDiffusion",
-    "spectral_freq_cost",
-    "lambda_fingerprint",
-    "WiringEncoder",
-    "WiringDecoder",
-    "DiffusionDecoder",
-]
+__all__ = ["WiringAutoencoder", "get_device"]

@@ -7,10 +7,10 @@ Usage
     python train.py --config configs/mnist.yaml   --dataset mnist
 
 All hyperparameters live in the YAML config.  CLI flags override config values.
+Device selection is automatic (MPS → CUDA → CPU) via wae.device.get_device().
 """
 from __future__ import annotations
 import argparse
-import os
 import time
 import yaml
 import csv
@@ -19,9 +19,8 @@ from pathlib import Path
 import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from tqdm import tqdm
 
-from wae import WiringAutoencoder
+from wae import WiringAutoencoder, get_device
 from wae.dataset import load_dataset, make_loaders
 
 
@@ -30,25 +29,20 @@ from wae.dataset import load_dataset, make_loaders
 # ---------------------------------------------------------------------------
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Train Wiring Autoencoder")
-    p.add_argument("--config",  default="configs/default.yaml")
-    p.add_argument("--dataset", default=None, help="Override dataset.name in config")
-    p.add_argument("--epochs",  type=int, default=None)
-    p.add_argument("--lr",      type=float, default=None)
-    p.add_argument("--seed",    type=int, default=None)
+    p.add_argument("--config",   default="configs/default.yaml")
+    p.add_argument("--dataset",  default=None, help="Override dataset.name in config")
+    p.add_argument("--epochs",   type=int,   default=None)
+    p.add_argument("--lr",       type=float, default=None)
+    p.add_argument("--seed",     type=int,   default=None)
+    p.add_argument("--device",   default=None,
+                   help="Force device: 'mps', 'cuda', 'cpu'. Default: auto-detect.")
     p.add_argument("--no-wandb", action="store_true")
     return p.parse_args()
 
 
 # ---------------------------------------------------------------------------
-# Training utilities
+# Utilities
 # ---------------------------------------------------------------------------
-def get_device(cfg: dict) -> torch.device:
-    spec = cfg["training"].get("device", "auto")
-    if spec == "auto":
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    return torch.device(spec)
-
-
 def set_seed(seed: int) -> None:
     import random, numpy as np
     random.seed(seed)
@@ -126,7 +120,10 @@ def main() -> None:
     seed = cfg["training"].get("seed", 42)
     set_seed(seed)
 
-    device = get_device(cfg)
+    # ------------------------------------------------------------------ #
+    # Device selection — MPS → CUDA → CPU, with MPS fallback env-var set  #
+    # ------------------------------------------------------------------ #
+    device = get_device(force=args.device, verbose=True)
     print(f"[WAE] device={device}, dataset={cfg['dataset']['name']}")
 
     # Data
@@ -152,7 +149,6 @@ def main() -> None:
         normalised=cfg["graph"]["normalised"],
     ).to(device)
     with torch.no_grad():
-        # Build single N x N base Laplacian
         base_L = base_lap(base_lap.base_weights.unsqueeze(0)).squeeze(0)
 
     # Optimiser + scheduler
