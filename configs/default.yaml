@@ -1,0 +1,37 @@
+# Wiring Autoencoder — default hyperparameters
+
+model:
+  latent_dim: 32          # dim(z)
+  hidden_dim: 256         # encoder / decoder hidden width
+  n_wiring_heads: 4       # mixture heads for the wiring decoder
+  tau_modes: 16           # number of eigenvectors kept in tau-mode diffusion
+  beta: 1.0               # KL weight in ELBO
+  alpha: 0.1              # J_freq spectral regulariser weight
+  use_lambda_features: true  # enrich encoder input with ArrowSpace lambda fingerprint
+
+graph:
+  knn_k: 15               # base kNN graph degree
+  sigma: 0.5              # RBF kernel bandwidth
+  normalised: true        # use normalised Laplacian
+
+training:
+  epochs: 200
+  batch_size: 256
+  lr: 3.0e-4
+  weight_decay: 1.0e-5
+  scheduler: cosine       # cosine | step | none
+  warmup_epochs: 10
+  grad_clip: 1.0
+  seed: 42
+  device: auto            # auto | cpu | cuda
+
+dataset:
+  name: cora              # cora | pubmed | mnist | custom
+  root: ./data
+  split: [0.8, 0.1, 0.1]
+
+logging:
+  use_wandb: false
+  project: wiring-autoencoder
+  log_every: 10           # steps
+  save_dir: ./checkpoints

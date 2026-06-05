@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=67", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "wiring-autoencoder"
+version = "0.1.0"
+description = "Variational Autoencoder with a differentiable graph-wiring generative path"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Lorenzo Moriondo", email = "tunedconsulting@gmail.com" }]
+keywords = ["graph", "laplacian", "variational-autoencoder", "spectral", "arrowspace"]
+
+dependencies = [
+    "torch>=2.2",
+    "torch_geometric>=2.5",
+    "scipy>=1.12",
+    "numpy>=1.26",
+    "scikit-learn>=1.4",
+    "pyyaml>=6.0",
+    "tqdm>=4.66",
+    "pandas>=2.2",
+    "matplotlib>=3.8",
+    "wandb>=0.17",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.4", "mypy>=1.10"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.mypy]
+ignore_missing_imports = true

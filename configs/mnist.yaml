@@ -1,0 +1,21 @@
+# MNIST override — dense pixel features, no pre-built graph
+defaults:
+  - default
+
+model:
+  latent_dim: 16
+  hidden_dim: 512
+  tau_modes: 8
+  use_lambda_features: false   # no pre-built ArrowSpace for MNIST
+
+graph:
+  knn_k: 10
+  sigma: 1.0
+
+training:
+  epochs: 100
+  batch_size: 512
+
+dataset:
+  name: mnist
+  root: ./data
