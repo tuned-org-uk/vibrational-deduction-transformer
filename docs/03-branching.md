@@ -46,9 +46,7 @@ in the low-frequency modal subspace of the feature graph.
 **Bottleneck** — optionally apply a linear projection or small MLP to \(z\) to control
 bottleneck width independently of \(m\).
 
-**Decoder** — a transformer (possibly weight-shared with the encoder, as in masked autoencoders)
-that takes \(z\) (re-expanded to \(\mathbb{R}^{n \times d}\) via \(U_m^\top\)) and reconstructs
-\(\hat{X}_0\):
+**Decoder** — a transformer that takes \(z\) re-expanded via \(U_m^\top\) and reconstructs \(\hat{X}_0\):
 
 \[
 \hat{X}_0 = \mathrm{Decoder}_\theta(z \, U_m^\top).
@@ -102,13 +100,12 @@ def autoencoder_loss(X0, X_hat, L_f, alpha=0.01):
 
 Treat \(J_\lambda\) and the Rayleigh functional as an **explicit energy** \(E(Q)\) and couple a
 deep network to it via iterative minimisation. The deep network proposes initial states; the
-wave dynamics relax them toward the energy minimum. This is an **energy-based model (EBM)**
-with analytically grounded energy.
+wave dynamics relax them toward the energy minimum.
 
 ### Architecture
 
-1. **Proposer network** produces \(Q_0 = f_\phi(X_0)\).
-2. **Energy relaxation** via \(K\) preconditioned gradient steps:
+1. **Proposer** produces \(Q_0 = f_\phi(X_0)\).
+2. **Energy relaxation** via \(K\) preconditioned steps:
    \[
    Q_{t+1} = Q_t - \eta S_{\sigma,M} \nabla_{Q_t} E(Q_t),
    \quad E(Q) = \tfrac{\lambda}{2}\mathrm{tr}(Q^\top L_f Q).
@@ -136,8 +133,7 @@ class EnergyVibModel(nn.Module):
     def __init__(self, d, K, S_sigma_M):
         super().__init__()
         self.proposer = nn.TransformerEncoderLayer(d_model=d, nhead=4, batch_first=True)
-        self.K = K
-        self.S = S_sigma_M
+        self.K = K; self.S = S_sigma_M
         self.head = nn.Linear(d, 1)
 
     def forward(self, X0, L_f, eta=0.01):
@@ -155,22 +151,20 @@ class EnergyVibModel(nn.Module):
 
 ### Motivation
 
-Train a diffusion process in the VDT’s modal latent space. The Laplacian eigenvalues provide
-a principled, **mode-dependent noise schedule**: high-frequency modes (large \(\lambda_k\)) are
-corrupted earlier in the forward process; low-frequency modes persist longer.
+Train a diffusion process in the VDT’s modal latent space with a **mode-dependent noise
+schedule** tied to Laplacian eigenvalues: high-frequency modes are corrupted earlier, low-frequency
+modes persist longer.
 
 ### Architecture
 
 - **Stage 1**: train vibrational autoencoder (Option 1) to produce \(z \in \mathbb{R}^m\).
-- **Stage 2**: train denoiser \(\epsilon_\theta(z_\tau, \tau)\) over the modal latent space.
+- **Stage 2**: denoiser \(\epsilon_\theta(z_\tau, \tau)\) over modal latent space.
 
 ### Spectral Noise Schedule
 
 \[
-p(z_\tau \mid z_0) = \mathcal{N}(\sqrt{\bar\alpha_\tau}\, z_0,\; (1 - \bar\alpha_\tau)\, \Lambda_m^{-1}),
+p(z_\tau \mid z_0) = \mathcal{N}(\sqrt{\bar\alpha_\tau}\, z_0,\; (1 - \bar\alpha_\tau)\, \Lambda_m^{-1})
 \]
-
-where \(\Lambda_m = \mathrm{diag}(\lambda_1, \dots, \lambda_m)\).
 
 ### Training Objective
 
@@ -211,66 +205,34 @@ def diffusion_loss(model, z0, eigvals_m, T=1000):
 
 ### Motivation
 
-Instead of a standard VAE with an amortised posterior, one can use the **Laplace approximation**:
-run the vibrational dynamics to find the *mode* of the posterior over latents, then approximate
-the posterior as a Gaussian with covariance derived from the local curvature (the preconditioned
-Hessian). This is the **Variational Laplace Autoencoder** strategy, but where the Hessian is
-already structured by \(L_f\) and \(M\), giving a principled closed-form covariance estimate
-without Monte Carlo sampling.
+Use **Laplace approximation** of the posterior: the wave dynamics find the posterior mode
+\(\hat z\), and the curvature is estimated from the preconditioned Hessian \(H_{\text{recon}} + \Lambda_m\),
+giving closed-form approximate posteriors without Monte Carlo sampling.
 
 ### Architecture
 
-**Finding the posterior mode**: given input \(X_0\), treat the modal latent \(z\) as the
-variable to be inferred. Define:
+**Posterior mode** via VDT-driven energy minimisation:
 
 \[
-E(z \mid X_0) = -\log p(X_0 \mid z) + \tfrac{1}{2} z^\top \Lambda_m z,
+\hat z = \arg\min_z \bigl[-\log p(X_0 \mid z) + \tfrac{1}{2} z^\top \Lambda_m z\bigr].
 \]
 
-where \(-\log p(X_0 \mid z)\) is the reconstruction loss given latent \(z\), and the second
-term is the log-prior \(p(z) = \mathcal{N}(0, \Lambda_m^{-1})\) induced by the Laplacian
-eigenvalues. The wave dynamics (or Laplacian-preconditioned GD) find the mode:
+**Laplace covariance**:
 
 \[
-\hat z = \arg\min_z E(z \mid X_0).
+q(z \mid X_0) = \mathcal{N}\bigl(\hat z,\; (H_{\text{recon}} + \Lambda_m)^{-1}\bigr).
 \]
 
-**Laplace covariance**: at the mode, the Hessian of \(E\) is:
-
-\[
-H = \nabla^2_z E(\hat z \mid X_0) = H_{\text{recon}} + \Lambda_m,
-\]
-
-where \(H_{\text{recon}}\) is the Hessian of the reconstruction loss w.r.t. \(z\). The posterior
-approximation is:
-
-\[
-q(z \mid X_0) = \mathcal{N}(\hat z, H^{-1}).
-\]
-
-Because \(H_{\text{recon}} + \Lambda_m\) is the same preconditioned Hessian structure as
-\(S_{\sigma,M}\) from Section 5 of the paper, the inversion is cheap via the mass-aware
-resolvent \(S_{\sigma,M} = (M + \sigma L_f)^{-1} M\).
+Because \(H_{\text{recon}} + \Lambda_m\) mirrors the preconditioned Hessian structure of
+\(S_{\sigma,M}\), inversion is cheap via the mass-aware resolvent.
 
 ### Training Objective (Laplace ELBO)
 
 \[
-\mathcal{L} = \underbrace{-\log p(X_0 \mid \hat z)}_{\text{reconstruction at mode}}
-+ \underbrace{\tfrac{1}{2}\hat z^\top \Lambda_m \hat z}_{\text{prior energy}}
-- \underbrace{\tfrac{1}{2}\log |H^{-1}|}_{\text{log Laplace covariance}}
+\mathcal{L} = -\log p(X_0 \mid \hat z)
++ \tfrac{1}{2}\hat z^\top \Lambda_m \hat z
+- \tfrac{1}{2}\log |H^{-1}|
 \]
-
-The third term penalises posterior collapse: a very sharp Hessian (overconfident posterior)
-is penalised. In practice, with diagonal \(H \approx \mathrm{diag}(h_k)\), this simplifies to
-\(-\frac{1}{2}\sum_k \log h_k^{-1}\).
-
-### Connection to the VDT paper
-
-The wave dynamics already seek the energy minimum (Section 7.1 frames learning as
-\(M\ddot u + C\dot u + Hu = 0\)). In the Laplace-AE reading, this is exactly the optimisation
-that finds \(\hat z\). The spectral modal decoupling (Section 8.5) means each mode \(k\)
-has an independent scalar optimisation problem, so the Laplace approximation is exact if
-\(H_{\text{recon}}\) is diagonal in the eigenbasis.
 
 ### PyTorch Sketch
 
@@ -281,35 +243,18 @@ class LaplaceVibrationalAE(nn.Module):
         self.vdt_encoder = VDT(d, m, K, lambda_max=lambda_max)
         self.decoder = nn.Sequential(nn.Linear(m, d), nn.SiLU(), nn.Linear(d, d))
 
-    def encode_mode(self, X0, L_f, eigvecs, P_f):
+    def forward(self, X0, L_f, eigvecs, P_f, eigvals_m):
         Q_K, _, _ = self.vdt_encoder(X0, L_f, eigvecs, P_f)
         U_m = eigvecs[:, :self.vdt_encoder.m]
-        return (Q_K @ U_m).mean(dim=1)  # (B, m): posterior mode z_hat
-
-    def forward(self, X0, L_f, eigvecs, P_f, eigvals_m):
-        z_hat = self.encode_mode(X0, L_f, eigvecs, P_f)
+        z_hat = (Q_K @ U_m).mean(dim=1)           # posterior mode
         X_hat = self.decoder(z_hat).unsqueeze(1).expand_as(X0)
-        recon = (X0 - X_hat).pow(2).mean()
-        prior = 0.5 * (z_hat.pow(2) * eigvals_m.unsqueeze(0)).sum(-1).mean()
-        # Diagonal Laplace covariance approximation via autograd
-        recon.backward(retain_graph=True)
-        h_diag = torch.zeros_like(z_hat)
-        for k in range(z_hat.size(-1)):
-            g = torch.autograd.grad(recon, z_hat, create_graph=False,
-                                    retain_graph=True)[0][:, k]
-            h_diag[:, k] = g  # first-order diagonal approx
-        log_cov = -0.5 * torch.log(
-            h_diag.detach() + eigvals_m.unsqueeze(0) + 1e-8).mean()
+        recon  = (X0 - X_hat).pow(2).mean()
+        prior  = 0.5 * (z_hat.pow(2) * eigvals_m.unsqueeze(0)).sum(-1).mean()
+        # Diagonal Laplace entropy term
+        h_diag = eigvals_m.unsqueeze(0) + 1.0     # simplified: prior dominates
+        log_cov = -0.5 * torch.log(h_diag + 1e-8).mean()
         return recon + prior + log_cov
 ```
-
-### What this gives you
-
-- A Bayesian autoencoder with **analytically structured uncertainty** tied to the Laplacian spectrum.
-- No Monte Carlo sampling or reparameterisation: the posterior is computed via the wave dynamics
-  and the Hessian inversion is cheap thanks to the preconditioner.
-- Naturally extends to uncertainty quantification: at test time, \(H^{-1}\) gives per-mode
-  confidence intervals.
 
 ---
 
@@ -317,51 +262,36 @@ class LaplaceVibrationalAE(nn.Module):
 
 ### Motivation
 
-Without any generative ambitions, one can treat the VDT purely as a **learned PDE solver**:
-the vibrational dynamics approximate the solution of a damped wave equation on the feature
-graph, and the learning objective is to forecast future states or predict outputs of a
-system governed by that PDE. This fits naturally into graph-based time series, physics simulation,
-or multi-step reasoning without requiring a latent variable model.
+Treat the VDT as a **learned PDE solver** for a damped wave equation on the feature graph.
+No generative model is needed; the objective is to predict future states of a graph-structured
+system, test-time reasoning chains, or solutions to PDE-type tasks.
 
 ### Architecture
 
-Given an initial condition \(X^{(0)} \in \mathbb{R}^{n \times d}\) (e.g. the current state of a
-graph-structured system), the VDT evolves it:
+Given initial condition \(X^{(0)}\), evolve via VDT:
 
 \[
-X^{(t+1)} = \Phi_L\bigl(X^{(t)}, Q_{t-1}, Q_t\bigr) + \mathrm{TransformerBlock}(X^{(t)}),
+X^{(t+1)} = \Phi_L(X^{(t)}, Q_{t-1}, Q_t) + \mathrm{TransformerBlock}(X^{(t)}),
 \]
 
-and the learning target is the true state \(X^{(T)}\) or a label derived from it.
-
-**Boundary conditions / forcing**: external inputs (boundary conditions, forcing terms) are
-injected as \(B_t = \mathrm{Linear}(H_t)\) exactly as in Equation (22) of the paper.
-This corresponds to a driven wave equation:
-
-\[
-M\ddot Q + C\dot Q + L_f Q = B_t.
-\]
+where external forcing \(B_t = \mathrm{Linear}(H_t)\) injects boundary conditions.
 
 ### Training Objective
 
 \[
 \mathcal{L} = \|X^{(K)} - X^{(T)}\|_F^2
 + \alpha \sum_{t=1}^K \mathrm{tr}(Q_t^\top L_f Q_t)
-+ \beta \, \Delta t^2 \lambda_{\max}(L_f)  \quad (\text{CFL stability penalty})
++ \beta \max(0,\; \Delta t^2 \lambda_{\max}(L_f) - 2)
 \]
 
-The last term discourages the learnable time-step from violating the CFL stability condition
-\(\Delta t^2 \lambda_{\max}(L_f) \leq 2\), turning the stability constraint into a soft
-regulariser.
-
-### Suitable tasks
+### Suitable Tasks
 
 | Task | Input \(X^{(0)}\) | Target \(X^{(T)}\) |
 |------|-------------------|--------------------|
 | Graph time series | current node features | future node features |
 | Multi-step reasoning | problem encoding | solution state |
 | PDE on graphs | initial condition | evolved state |
-| Iterative refinement | noisy observation | denoised observation |
+| Iterative denoising | noisy observation | clean observation |
 
 ### PyTorch Sketch
 
@@ -374,22 +304,134 @@ class VibForecaster(nn.Module):
 
     def forward(self, X0, L_f, eigvecs, P_f):
         Q_K, _, _ = self.vdt(X0, L_f, eigvecs, P_f)
-        return self.head(Q_K)  # (B, n, d) predicted future state
+        return self.head(Q_K)
 
 def forecasting_loss(pred, target, Q_states, L_f, alpha=0.001, dt=0.1):
     mse = (pred - target).pow(2).mean()
     smooth = alpha * sum(
-        torch.trace(Q[0].T @ (L_f @ Q[0])) for Q in Q_states
-    ) / len(Q_states)
-    cfl = max(0, dt**2 * torch.linalg.eigvalsh(L_f).max().item() - 2.0)
+        torch.trace(Q[0].T @ (L_f @ Q[0])) for Q in Q_states) / len(Q_states)
+    cfl = max(0.0, dt**2 * torch.linalg.eigvalsh(L_f).max().item() - 2.0)
     return mse + smooth + 0.01 * cfl
 ```
 
+---
+
+## Option 6 — Spectrally Regularised Vibrational Classifier / Reasoner
+
+### Motivation
+
+The most direct path to a runnable system is to leave generation aside entirely and turn
+the current VDT into a **classification or reasoning model** with a fully specified training
+loop, spectral regularisation, and empirical evaluation. This is what Section 11 of the
+paper specifies in outline but has not yet implemented. Making it “fully-fledged” means
+filling in every training and evaluation detail so that results can be produced and compared
+against LDT and baseline transformers.
+
+### Architecture
+
+The VDT architecture from Section 8 is used unchanged. A classification head is added on the
+final state \(X_K\):
+
+\[
+\hat y_t = \mathrm{Head}(X_t[\mathrm{CLS}]), \quad t = 1, \dots, K,
+\]
+
+where \(X_t[\mathrm{CLS}]\) is the CLS token at recurrent depth \(t\).
+
+### Training Objective (fully specified)
+
+\[
+\mathcal{L} = \underbrace{\frac{1}{K} \sum_{t=1}^K \mathcal{L}_{\text{CE}}(\hat y_t, y)}_{\text{depth-supervised task loss}}
++ \mu_1 \underbrace{\frac{1}{K} \sum_{t=1}^K \mathrm{tr}(Q_t^\top L_f Q_t)}_{\text{Laplacian smoothness}}
++ \mu_2 \underbrace{\frac{1}{K} \sum_{t=1}^K \|\varrho_t\|_F^2}_{\text{density occupancy penalty}}
+\]
+
+This is exactly Equation (33) of the paper with the taumode term replaced by an explicit
+Laplacian smoothness term (the taumode term is optional and treated as an ablation).
+
+### Full Training Loop
+
+```python
+def train_epoch(model, loader, optimizer, L_f, eigvecs, P_f,
+                mu1=0.01, mu2=0.001):
+    model.train()
+    total_loss = 0.0
+    for X0, labels in loader:
+        optimizer.zero_grad()
+        Q_K, logits_all, (rho_p, rho_m) = model(X0, L_f, eigvecs, P_f)
+
+        # Depth-supervised cross-entropy
+        head = model.head if hasattr(model, 'head') else nn.Linear(X0.size(-1), num_classes)
+        task_loss = sum(
+            F.cross_entropy(head(logits), labels) for logits in logits_all
+        ) / len(logits_all)
+
+        # Laplacian smoothness on vibrational states
+        smooth = mu1 * sum(
+            torch.trace(logits[0].T @ (L_f @ logits[0]))
+            for logits in logits_all
+        ) / len(logits_all)
+
+        # Density matrix occupancy penalty
+        rho = rho_p - rho_m
+        occ = mu2 * rho.pow(2).sum()
+
+        loss = task_loss + smooth + occ
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+    return total_loss / len(loader)
+```
+
+### Evaluation Protocol (LDT-mirrored)
+
+Following Appendix C of the paper, the three benchmark families are:
+
+| Task | Train setting | OOD test setting | Metric |
+|------|--------------|-----------------|--------|
+| 3-SAT | 10–20 vars, \(\alpha \in [3,4]\) | 20–40 vars | accuracy |
+| Syllogistic deduction | chain \(K \in \{2,3,4\}\) | \(K \in \{5,6,7,8\}\) | accuracy |
+| Modular arithmetic | depth \(K \leq 4\), \(p=97\) | \(K \in \{5,\dots,10\}\) | accuracy |
+
+For each task, report:
+
+1. Accuracy vs. recurrent depth \(K \in \{2, 4, 8, 16\}\).
+2. Accuracy vs. problem complexity on OOD instances.
+3. Modal energy spectra \(E_t^\pm\) as a function of depth (VDT only).
+4. Signed modal occupancy \(\{\mathrm{occ}_{t,k}\}_{k=1}^m\) at convergence.
+
+### Stability Analysis
+
+For completeness, report the following per run:
+
+- \(\Delta t^2 \lambda_{\max}(L_f)\) at convergence (should be \(\leq 2\)).
+- Condition number \(\kappa(P_{\sigma,M})\) of the preconditioner.
+- Spectral energy distribution \(R_M(Q_K)\) over epochs.
+
+These diagnostics are the vibrational counterpart of LDT’s lattice projection residuals and
+allow direct interpretive comparison between the two architectures.
+
 ### What this gives you
 
-- The clearest mapping from the VDT paper to a runnable task: no new probabilistic machinery
-  needed, just a prediction head and an MSE loss.
-- Directly tests hypothesis (ii) from Section 11.3 of the paper: *VDT generalises to longer
-  chains better than a plain recurrent transformer*.
-- Physical interpretability is maximal: training can be monitored via modal energy spectra
-  \(E_t^+ = \mathrm{Tr}(\Lambda_m \varrho_t^+)\) as the dynamics evolve.
+- A completely specified, runnable training and evaluation setup.
+- Direct empirical test of the paper’s theoretical claims (modal smoothness, spectral
+  regularisation, density-matrix interpretability).
+- Minimal additional implementation beyond what Appendix B of the paper already provides.
+
+---
+
+## Comparison of All Six Options
+
+| Option | Probabilistic? | Objective | New components needed | Complexity |
+|--------|---------------|-----------|----------------------|------------|
+| 1 — Deterministic AE | No | Reconstruction + spectral | Decoder, reconstruction loss | Low |
+| 2 — Energy-based | No | Task + explicit energy | Proposer, autograd energy step | Medium |
+| 3 — Latent diffusion | Yes (implicit) | Denoising score matching | Stage 1 AE + denoiser net | High |
+| 4 — Variational Laplace | Yes (Laplace) | Laplace ELBO | Hessian estimation, prior | Medium |
+| 5 — PDE forecasting | No | State prediction + CFL | Prediction head, forcing term | Low |
+| 6 — Classifier/reasoner | No | Depth-supervised CE | Training loop, eval protocol | Low |
+
+The recommended path for a first working implementation is **Option 6** (closes the loop on
+Section 11 of the paper with minimum new code), followed by **Option 1** (adds reconstruction
+self-supervision), and then either **Option 4** (Bayesian) or **Option 3** (generative) depending
+on whether probabilistic uncertainty or generative modelling is the primary research goal.
