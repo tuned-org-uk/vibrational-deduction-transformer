@@ -1,54 +1,101 @@
 """
-Diffusion Decoder  —  L(z), E  →  x̂.
+Diffusion Decoder  —  L(z), E  →  x_hat.
 
-Given the learned Laplacian L(z) and a fixed embedding table E (N, D),
-produces reconstructed embeddings by tau-mode diffusion.
+This module implements the final decoding stage of the Wiring Autoencoder:
+given the learned Laplacian ``L(z)`` and the shared embedding table ``E``,
+it produces reconstructed embeddings via tau-mode spectral diffusion
+followed by an optional per-node MLP refinement.
 
-The Gaussian likelihood is:
-    log p(x | z) = -||x - x̂||^2 / (2 * sigma^2)
+Architectural context
+---------------------
+``DiffusionDecoder`` is the last block in the WAE data flow::
 
-where sigma is a learnable scalar.
+    L(z)  (B, N, N)  +  E  (N, D)
+      |  TauModeDiffusion  (heat kernel K_tau = U exp(-tΛ) U^T)
+      |  [optional MLP refinement  — per-node mode only]
+      v
+    x_hat  (B, D)   (per-node, normal training path)
 
-Architecture
-------------
-    L(z)  [shape (B, N, N)]  +  E [shape (N, D)]
-        ↓  TauModeDiffusion  →  x̂_raw
-        ↓  MLP refinement (per-node mode only, i.e. when node_idx is given)
-        →  x̂
+The Gaussian likelihood is::
+
+    log p(x | z) = -||x - x_hat||² / (2σ²) - D log σ
+
+where ``σ = exp(log_sigma)`` is a learnable scalar.
 
 Output shape contract
 ---------------------
-    node_idx given  →  x̂ has shape (B, D)      — per-node reconstruction
-    node_idx=None   →  x̂ has shape (B, N, D)   — full-graph reconstruction
-                       MLP refinement is NOT applied in this case because the
-                       MLP expects (B, D) input. Callers that need per-node
-                       semantics must always provide node_idx.
+``node_idx`` provided  →  ``x_hat`` shape ``(B, D)``   (per-node reconstruction)
+``node_idx = None``    →  ``x_hat`` shape ``(B, N, D)`` (full-graph diagnostic)
+
+Always pass ``node_idx`` during training.  The full-graph path bypasses
+the MLP refinement step (which expects ``(B, D)`` input) and is intended
+only for post-training visualisation and probing.
+
+Spectral context
+----------------
+The diffusion time ``t`` is learnable.  At convergence it encodes the
+optimal spectral scale for reconstruction: a small ``t`` keeps many modes,
+a large ``t`` blurs toward the graph mean.  The interaction between ``t``
+and the CFL bound on Δt is analysed in
+`docs/04-stability.md § 3
+<https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/04-stability.md#3-numerical-stability-of-the-wave-update>`_.
+
+See also `docs/00-architecture.md § DiffusionDecoder
+<https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#waediffusion_decoderpy--diffusiondecoder>`_
+for the full module description.
 """
 from __future__ import annotations
 import torch
 import torch.nn as nn
 from .spectral import TauModeDiffusion
-from typing import Optional
+from typing import Optional, Tuple
 
 
 class DiffusionDecoder(nn.Module):
     """
+    Decode a batch of Laplacians ``L(z)`` and an embedding table ``E``
+    into reconstructed node embeddings ``x_hat`` via tau-mode spectral
+    diffusion.
+
+    Internally delegates the spectral step to ``TauModeDiffusion`` and
+    optionally refines the per-node result with a small residual MLP.
+
+    Performance: ``eig_cache``
+    --------------------------
+    The dominant cost in the training forward pass is the O(N³) CPU
+    eigendecomposition inside ``TauModeDiffusion``.  This can be eliminated
+    by passing ``eig_cache``::
+
+        # Once before training loop in train.py
+        base_eigvals, base_eigvecs = _safe_eigh(base_L)
+        spectral_cache = (base_eigvals, base_eigvecs)
+
+        # Each training step
+        x_hat = decoder(L, E, node_idx=idx, eig_cache=spectral_cache)
+
+    See `issue #22
+    <https://github.com/tuned-org-uk/wiring-autoencoder/issues/22>`_
+    for the full analysis.
+
     Parameters
     ----------
     embedding_dim : int
-        D — dimension of E and of x.
+        ``D`` — dimension of each node embedding in ``E`` and in ``x``.
     hidden_dim : int
-        Hidden width for optional MLP refinement (per-node mode only).
+        Hidden width for the optional MLP refinement network.
     tau_modes : int
-        k — number of eigenvectors in tau-mode diffusion.
+        ``k`` — number of eigenvectors kept in tau-mode diffusion.
+        Should match the ``tau_modes`` used in ``spectral_freq_cost``
+        and in the encoder's ``lambda_fingerprint`` call.
     diffusion_time : float
-        Initial heat-kernel time t.
+        Initial value of the learnable diffusion time ``t``.
     use_mlp_refinement : bool
-        If True, pass x̂_raw through a small MLP before outputting.
-        The MLP is only applied when node_idx is provided (per-node mode).
-        In full-graph mode (node_idx=None) it is always skipped.
+        If ``True`` (default), apply a residual two-layer MLP to
+        ``x_hat_raw`` in per-node mode.  Skipped automatically in full-graph
+        mode because the MLP expects ``(B, D)`` input.
     init_log_sigma : float
-        Log of initial noise std for Gaussian likelihood.
+        Initial value of ``log_sigma``.  ``σ = exp(log_sigma)`` is the
+        noise standard deviation in the Gaussian likelihood.
     """
 
     def __init__(
@@ -77,46 +124,76 @@ class DiffusionDecoder(nn.Module):
 
     def forward(
         self,
-        L: torch.Tensor,          # (B, N, N)
-        E: torch.Tensor,          # (N, D)
-        node_idx: Optional[torch.Tensor] = None,  # (B,) → per-node; None → full-graph
+        L: torch.Tensor,
+        E: torch.Tensor,
+        node_idx: Optional[torch.Tensor] = None,
+        eig_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     ) -> torch.Tensor:
         """
+        Run tau-mode diffusion and optionally refine with the MLP.
+
         Parameters
         ----------
-        L : Tensor  (B, N, N)   batch of Laplacians
-        E : Tensor  (N, D)      embedding table (shared across batch)
-        node_idx : Tensor or None
-            Long tensor of shape (B,) selecting one node per sample.
-            When provided the output is (B, D) and the MLP refinement
-            is applied.  When None the output is (B, N, D) and the MLP
-            is skipped (MLP is per-node only).
+        L : torch.Tensor
+            Batch of Laplacians.  Shape ``(B, N, N)``.
+        E : torch.Tensor
+            Embedding table.  Shape ``(N, D)``.
+        node_idx : torch.Tensor or None
+            Long tensor ``(B,)`` selecting one node per sample.
+            When given the output is ``(B, D)`` and MLP refinement is
+            applied.  When ``None`` the output is ``(B, N, D)`` and the
+            MLP is skipped (MLP expects ``(B, D)`` — see contract above).
+        eig_cache : tuple(eigvals, eigvecs) or None
+            Pre-computed spectral cache from the fixed ``base_L``.
+            Passed directly to ``TauModeDiffusion.forward`` to skip the
+            per-step eigensolver call.
+            ``eigvals`` shape ``(N,)``; ``eigvecs`` shape ``(N, N)``.
 
         Returns
         -------
-        x_hat : Tensor
-            Shape (B, D)    when node_idx is not None  (per-node mode)
-            Shape (B, N, D) when node_idx is None      (full-graph mode)
+        torch.Tensor
+            ``(B, D)``    when ``node_idx`` is not ``None``.
+            ``(B, N, D)`` when ``node_idx`` is ``None``.
         """
-        x_raw = self.diffusion(L, E, node_idx=node_idx)
-        # MLP refinement is per-node only: it expects (B, D) input.
-        # Guard explicitly so full-graph callers never hit a shape error.
+        x_raw = self.diffusion(L, E, node_idx=node_idx, eig_cache=eig_cache)
         if self.use_mlp_refinement and node_idx is not None:
-            x_raw = x_raw + self.refine_mlp(x_raw)        # residual
+            x_raw = x_raw + self.refine_mlp(x_raw)   # residual connection
         return x_raw
 
     def recon_loss(
         self,
-        x: torch.Tensor,     # (B, D)  ground-truth
-        x_hat: torch.Tensor, # (B, D)  reconstruction  (per-node mode only)
+        x: torch.Tensor,
+        x_hat: torch.Tensor,
         reduction: str = "mean",
     ) -> torch.Tensor:
         """
-        Gaussian reconstruction loss (per-node mode only)::
+        Gaussian negative log-likelihood reconstruction loss.
 
-            -log p(x|z) = ||x - x_hat||^2 / (2 sigma^2) + D * log sigma
+        Computes the per-node ELBO reconstruction term::
 
-        x_hat must be (B, D).  Do not call this in full-graph mode.
+            -log p(x | z) = ||x - x_hat||² / (2σ²) + D log σ
+
+        This is the ``E_q[log p(x|z)]`` term in the WAE-ELBO::
+
+            L_WAE = E_q[log p(x|z)] - β KL - α J_freq
+
+        See `docs/00-architecture.md § ELBO Derivation
+        <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#elbo-derivation>`_.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Ground-truth embeddings.  Shape ``(B, D)``.
+        x_hat : torch.Tensor
+            Reconstructed embeddings.  Must be ``(B, D)``; call this only
+            in per-node mode.  Raises ``ValueError`` if ``x_hat.dim() != 2``.
+        reduction : str
+            ``'mean'`` (default) or ``'sum'``.
+
+        Returns
+        -------
+        torch.Tensor
+            Scalar reconstruction loss.
         """
         if x_hat.dim() != 2:
             raise ValueError(
@@ -125,7 +202,7 @@ class DiffusionDecoder(nn.Module):
                 "Pass node_idx to forward() when computing training loss."
             )
         sigma = self.log_sigma.exp().clamp(min=1e-3)
-        sq_err = ((x - x_hat) ** 2).sum(dim=-1)    # (B,)
+        sq_err = ((x - x_hat) ** 2).sum(dim=-1)   # (B,)
         D = x.shape[-1]
         nll = sq_err / (2 * sigma ** 2) + D * self.log_sigma
         return nll.mean() if reduction == "mean" else nll.sum()

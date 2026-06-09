@@ -1,21 +1,57 @@
 """
-WiringAutoencoder — full model assembling all modules.
+WiringAutoencoder  —  full model assembling all WAE modules.
 
-ELBO:
-    ℒ(θ, φ; x, i) = E_{q_φ(z|x)}[log p_θ(x | z, i)]
-                    - β · KL(q_φ(z|x) || p(z))
-                    - α · J_freq(L(z))
+This is the top-level model class.  It wires together the four sub-modules
+defined in ``wae/encoder.py``, ``wae/wiring_decoder.py``,
+``wae/diffusion_decoder.py``, and ``wae/laplacian.py`` and exposes a
+single ``forward()`` method that returns all ELBO components.
+
+ELBO
+----
+The full Wiring Autoencoder objective is::
+
+    L(θ, φ; x, i) = E_{q_φ(z|x)}[ log p_θ(x | z, i) ]
+                  - β · KL( q_φ(z|x) || p(z) )
+                  - α · J_freq( L(z) )
 
 where:
-    x   ... raw embedding of query node i
-    z   ... latent wiring code
-    L(z)... learned Laplacian
-    β, α.. KL and frequency regularisation weights from config
+    x       raw embedding of query node i
+    z       latent wiring code sampled via reparameterisation
+    L(z)    differentiable Laplacian of the learned graph wiring
+    β, α    KL and frequency regularisation weights (from config)
+
+See `docs/00-architecture.md § ELBO Derivation
+<https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#elbo-derivation>`_
+for the full derivation and the relationship between J_freq and ArrowSpace
+tau-mode truncation.
+
+For the six algorithm variants that build on top of this ELBO (deterministic
+AE, energy-based, latent diffusion, variational Laplace, forecasting,
+classifier) see `docs/03-branching.md
+<https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/03-branching.md>`_.
+
+Performance
+-----------
+The training forward pass involves three spectral operations that are
+potentially O(N³) per call:
+
+1. ``lambda_fingerprint(base_L)``   — encoder enrichment
+2. ``TauModeDiffusion(L)``          — eigenvectors for diffusion kernel
+3. ``spectral_freq_cost(L)``        — eigenvalues for J_freq
+
+All three can be eliminated from the training loop by precomputing
+spectral quantities from the fixed ``base_L`` once and passing them as
+arguments.  The ``WiringAutoencoder.forward`` signature accepts
+``lambda_fp``, ``spectral_cache``, and ``freq_eigvals`` for exactly this
+purpose.  See ``train.py`` for the canonical caching pattern and
+`issue #22
+<https://github.com/tuned-org-uk/wiring-autoencoder/issues/22>`_ for the
+full performance analysis.
 """
 from __future__ import annotations
 import torch
 import torch.nn as nn
-from typing import Literal, Optional, Any
+from typing import Literal, Optional, Any, Tuple
 
 from .encoder import WiringEncoder
 from .wiring_decoder import WiringDecoder
@@ -28,17 +64,68 @@ class WiringAutoencoder(nn.Module):
     """
     Full Wiring Autoencoder.
 
+    Assembles ``WiringEncoder``, ``WiringDecoder``, and ``DiffusionDecoder``
+    into a single trainable model and computes the three-term WAE-ELBO.
+
+    Data flow summary::
+
+        x  (B, D)  [+ λ-fingerprint]
+          --> WiringEncoder          z, μ, log σ²  (B, latent_dim)
+          --> WiringDecoder          L(z)           (B, N, N)
+          --> DiffusionDecoder       x_hat          (B, D)
+          --> recon_loss + KL + J_freq
+
+    The full data-flow diagram is in
+    `docs/00-architecture.md § Data Flow Diagram
+    <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#data-flow-diagram>`_.
+
+    Connection to ArrowSpace
+    ------------------------
+    The ``DifferentiableLaplacian`` embedded in ``WiringDecoder`` mirrors
+    ``ArrowSpaceBuilder.build()`` from the ``arrowspace`` library.  The
+    correspondence between ArrowSpace concepts and WAE components is
+    documented in
+    `docs/00-architecture.md § Connection to ArrowSpace
+    <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#connection-to-arrowspace--graph-wiring>`_.
+
+    Stability
+    ---------
+    Key quantities to monitor during training:
+
+    - ``λ_max(L(z))``  — governs the CFL bound on diffusion time ``t``.
+    - ``J_freq``        — should decrease as wiring becomes smoother.
+    - ``KL``            — should stabilise after warm-up.
+    - Spectral entropy  — should remain high (no representation collapse).
+
+    See `docs/04-stability.md § 7
+    <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/04-stability.md#7-evaluation-protocol-stability-metrics-checklist>`_
+    for the full stability metrics checklist.
+
     Parameters
     ----------
-    input_dim : int          D  — embedding dimension
-    latent_dim : int         k  — latent code dimension
-    hidden_dim : int         MLP hidden width
-    n_wiring_heads : int     mixture heads in WiringDecoder
-    tau_modes : int          eigenvectors retained in diffusion decoder
-    beta : float             KL weight
-    alpha : float            J_freq weight
+    input_dim : int
+        ``D`` — embedding dimension of each node.
+    latent_dim : int
+        ``k`` — dimension of the latent wiring code ``z``.
+    hidden_dim : int
+        Hidden width shared by encoder, wiring decoder, and MLP refinement.
+    n_wiring_heads : int
+        Number of mixture heads in the wiring decoder.
+    tau_modes : int
+        Number of eigenvectors kept in tau-mode diffusion and used in
+        ``J_freq`` and ``lambda_fingerprint``.
+    beta : float
+        KL weight ``β`` in the ELBO.
+    alpha : float
+        J_freq weight ``α`` in the ELBO.
     laplacian : DifferentiableLaplacian
-    use_lambda_features : bool   enrich encoder with λ-fingerprint
+        Pre-built Laplacian module (frozen topology + base weights).  Built
+        from the embedding table ``E`` via
+        ``DifferentiableLaplacian.from_embeddings``.
+    use_lambda_features : bool
+        If ``True``, concatenate the λ-fingerprint of ``base_L`` to the
+        encoder input.  Controlled by ``model.use_lambda_features`` in the
+        YAML config.
     """
 
     def __init__(
@@ -54,7 +141,7 @@ class WiringAutoencoder(nn.Module):
         use_lambda_features: bool = True,
     ) -> None:
         super().__init__()
-        self.beta  = beta
+        self.beta = beta
         self.alpha = alpha
         self.tau_modes = tau_modes
 
@@ -78,164 +165,116 @@ class WiringAutoencoder(nn.Module):
             hidden_dim=hidden_dim,
             tau_modes=tau_modes,
         )
-
-        # Base Laplacian for λ-fingerprint (no gradient through this path)
         self._laplacian = laplacian
 
-    # ------------------------------------------------------------------
-    # Forward — return ELBO components
-    # ------------------------------------------------------------------
     def forward(
         self,
-        x: torch.Tensor,          # (B, D)  query embeddings
-        E: torch.Tensor,          # (N, D)  full embedding table
-        node_idx: Optional[torch.Tensor] = None,  # (B,)  query node indices
-        base_L: Optional[torch.Tensor] = None,    # (N, N) fixed L for λ-fp
-    ) -> dict[str, torch.Tensor]:
-        """
-        Returns
-        -------
-        dict with keys: loss, recon_loss, kl_loss, freq_loss, x_hat, L, z, mu, log_var
-
-        x_hat shape
-        -----------
-        (B, D)  — per-node reconstruction when node_idx is provided (normal training).
-        (B, N, D) — full-graph reconstruction when node_idx is None (diagnostic only;
-                    recon_loss will still average over the B dimension but compares
-                    only the first D-slice; pass node_idx during training).
-        """
-        # Optional λ-fingerprint enrichment for encoder
-        lam_fp = None
-        if self.encoder.use_lambda_features and base_L is not None:
-            with torch.no_grad():
-                lam_fp = lambda_fingerprint(base_L, tau_modes=self.tau_modes)  # (1, n_bins)
-                lam_fp = lam_fp.expand(x.shape[0], -1).contiguous()            # (B, n_bins)
-                # Repeat fingerprint for batch
-                if lam_fp.dim() == 1:
-                    lam_fp = lam_fp.unsqueeze(0).expand(x.shape[0], -1)
-
-        # Encode
-        z, mu, log_var = self.encoder(x, lambda_fp=lam_fp)  # (B, latent)
-
-        # Wiring decode
-        L, _delta = self.wiring_decoder(z)                  # (B, N, N)
-
-        # Diffusion decode  — shape: (B, D) when node_idx given, else (B, N, D)
-        x_hat = self.diffusion_decoder(L, E, node_idx=node_idx)
-
-        # ELBO components
-        recon  = self.diffusion_decoder.recon_loss(x, x_hat)
-        kl     = WiringEncoder.kl_loss(mu, log_var)
-        j_freq = spectral_freq_cost(L, tau_modes=self.tau_modes)
-
-        loss = recon + self.beta * kl + self.alpha * j_freq
-
-        return {
-            "loss":       loss,
-            "recon_loss": recon,
-            "kl_loss":    kl,
-            "freq_loss":  j_freq,
-            "x_hat":      x_hat,
-            "L":          L,
-            "z":          z,
-            "mu":         mu,
-            "log_var":    log_var,
-        }
-
-    # ------------------------------------------------------------------
-    # generate() — two explicit, stable modes
-    # ------------------------------------------------------------------
-    @torch.no_grad()
-    def generate(
-        self,
+        x: torch.Tensor,
         E: torch.Tensor,
-        n_samples: int = 8,
         node_idx: Optional[torch.Tensor] = None,
-        mode: Literal["per_node", "full_graph"] = "per_node",
+        base_L: Optional[torch.Tensor] = None,
+        lambda_fp: Optional[torch.Tensor] = None,
+        spectral_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+        freq_eigvals: Optional[torch.Tensor] = None,
     ) -> dict[str, torch.Tensor]:
         """
-        Sample z ~ N(0, I) and decode to wiring + embeddings.
+        Single forward pass returning all ELBO components.
 
-        Modes
-        -----
-        ``per_node`` (default)
-            Reconstructs one node per sample, matching the training
-            reconstruction path exactly.
-
-            * If ``node_idx`` is provided it must have shape ``(n_samples,)``
-              and selects which node to reconstruct for each sample.
-            * If ``node_idx`` is None, node indices are drawn uniformly at
-              random from ``{0, …, N-1}``.
-
-            Output shapes::
-
-                z        : (n_samples, latent_dim)
-                L        : (n_samples, N, N)
-                node_idx : (n_samples,)          ← always returned so callers
-                                                    can trace which nodes were
-                                                    reconstructed
-                x_hat    : (n_samples, D)        ← stable, matches forward()
-
-        ``full_graph``
-            Reconstructs *all* N nodes simultaneously for each sample.
-            The MLP refinement step is bypassed (it is per-node only).
-            Useful for graph-level visualisation or probing the entire
-            wiring space.
-
-            Output shapes::
-
-                z        : (n_samples, latent_dim)
-                L        : (n_samples, N, N)
-                node_idx : None
-                x_hat    : (n_samples, N, D)
+        The three optional cache arguments (``lambda_fp``, ``spectral_cache``,
+        ``freq_eigvals``) together eliminate all per-step O(N³) CPU
+        eigendecompositions from the training loop.  See ``train.py`` for the
+        canonical pattern of precomputing these once before the epoch loop.
 
         Parameters
         ----------
-        E : Tensor  (N, D)  embedding table
-        n_samples : int     number of samples
-        node_idx : Tensor or None
-            Optional ``(n_samples,)`` long tensor of node indices.
-            Only used in ``per_node`` mode; ignored in ``full_graph`` mode.
-        mode : 'per_node' | 'full_graph'
-            Generation semantics (see above).
+        x : torch.Tensor
+            Query node embeddings.  Shape ``(B, D)``.
+        E : torch.Tensor
+            Full embedding table shared by all batch elements.  Shape
+            ``(N, D)``.
+        node_idx : torch.Tensor or None
+            Long tensor ``(B,)`` of query node indices within ``E``.
+            Required for per-node reconstruction loss (training path).
+            When ``None`` a full-graph reconstruction is attempted but
+            ``recon_loss`` will raise unless node_idx is provided.
+        base_L : torch.Tensor or None
+            Fixed base Laplacian ``(N, N)`` used as fallback to compute
+            ``lambda_fingerprint`` on-the-fly if ``lambda_fp`` is not
+            supplied.  Ignored when ``lambda_fp`` is given.
+        lambda_fp : torch.Tensor or None
+            Pre-computed λ-fingerprint of ``base_L``.  Shape ``(1, n_bins)``
+            or ``(B, n_bins)``; broadcast to ``(B, n_bins)`` automatically.
+            When supplied, avoids calling ``lambda_fingerprint`` inside the
+            forward pass.
+        spectral_cache : tuple(eigvals, eigvecs) or None
+            Pre-computed eigendecomposition of ``base_L`` for
+            ``TauModeDiffusion``.
+            ``eigvals`` shape ``(N,)``; ``eigvecs`` shape ``(N, N)``.
+            When supplied, avoids the O(N³) eigensolver in
+            ``TauModeDiffusion``.
+        freq_eigvals : torch.Tensor or None
+            Pre-computed eigenvalues of ``base_L`` for ``J_freq``.
+            Shape ``(N,)``.
+            When supplied, avoids the O(N³) eigensolver in
+            ``spectral_freq_cost``.
 
         Returns
         -------
-        dict with keys: z, L, node_idx, x_hat
+        dict with keys:
+            ``loss``       — total ELBO (scalar, minimise this)
+            ``recon_loss`` — Gaussian NLL reconstruction term
+            ``kl_loss``    — KL(q(z|x) || N(0, I))
+            ``freq_loss``  — J_freq spectral regulariser
+            ``x_hat``      — (B, D) reconstructed embeddings
+            ``L``          — (B, N, N) learned Laplacian
+            ``z``          — (B, latent_dim) latent samples
+            ``mu``         — (B, latent_dim) posterior means
+            ``log_var``    — (B, latent_dim) posterior log-variances
         """
-        if mode not in ("per_node", "full_graph"):
-            raise ValueError(f"mode must be 'per_node' or 'full_graph', got {mode!r}")
+        # --- λ-fingerprint (encoder enrichment) ----------------------------
+        # Use cached fp if provided; fall back to on-the-fly computation only
+        # when no cache is available (e.g. evaluation without precomputation).
+        lam_fp = lambda_fp
+        if self.encoder.use_lambda_features and lam_fp is None and base_L is not None:
+            with torch.no_grad():
+                lam_fp = lambda_fingerprint(base_L, tau_modes=self.tau_modes)
+                lam_fp = lam_fp.expand(x.shape[0], -1).contiguous()
+                if lam_fp.dim() == 1:
+                    lam_fp = lam_fp.unsqueeze(0).expand(x.shape[0], -1)
 
-        device = next(self.parameters()).device
-        N = E.shape[0]
+        # --- Encode ---------------------------------------------------------
+        z, mu, log_var = self.encoder(x, lambda_fp=lam_fp)   # (B, latent_dim)
 
-        z = torch.randn(n_samples, self.encoder.mu_head.out_features, device=device)
-        L, _ = self.wiring_decoder(z)   # (n_samples, N, N)
+        # --- Wiring decode --------------------------------------------------
+        # Full (B, N, N) Laplacian — node_idx-aware row path is the next step
+        # (see issue #22 for the planned optimisation).
+        L, _delta = self.wiring_decoder(z, node_idx=None)    # (B, N, N)
 
-        if mode == "per_node":
-            if node_idx is None:
-                node_idx = torch.randint(0, N, (n_samples,), device=device)
-            else:
-                node_idx = node_idx.to(device)
-                if node_idx.shape != (n_samples,):
-                    raise ValueError(
-                        f"node_idx must have shape ({n_samples},), "
-                        f"got {tuple(node_idx.shape)}"
-                    )
-            # Use DiffusionDecoder normally — MLP refinement applied, shape (B, D)
-            x_hat = self.diffusion_decoder(L, E, node_idx=node_idx)
+        # --- Diffusion decode -----------------------------------------------
+        x_hat = self.diffusion_decoder(
+            L, E, node_idx=node_idx, eig_cache=spectral_cache
+        )                                                     # (B, D)
 
-        else:  # full_graph
-            # Bypass MLP refinement: it expects (B, D) input, not (B, N, D).
-            # Call TauModeDiffusion directly with node_idx=None → (B, N, D).
-            x_hat = self.diffusion_decoder.diffusion(L, E, node_idx=None)
-            node_idx = None
+        # --- ELBO components ------------------------------------------------
+        recon = self.diffusion_decoder.recon_loss(x, x_hat)
+        kl = WiringEncoder.kl_loss(mu, log_var)
+        j_freq = spectral_freq_cost(
+            L, tau_modes=self.tau_modes, eigvals=freq_eigvals
+        )
+        loss = recon + self.beta * kl + self.alpha * j_freq
 
-        return {"z": z, "L": L, "node_idx": node_idx, "x_hat": x_hat}
+        return {
+            "loss": loss,
+            "recon_loss": recon,
+            "kl_loss": kl,
+            "freq_loss": j_freq,
+            "x_hat": x_hat,
+            "L": L,
+            "z": z,
+            "mu": mu,
+            "log_var": log_var,
+        }
 
-    # ------------------------------------------------------------------
-    # Factory — build WAE from config dict and embedding table
-    # ------------------------------------------------------------------
     @classmethod
     def from_config(
         cls,
@@ -243,11 +282,45 @@ class WiringAutoencoder(nn.Module):
         E: torch.Tensor,
     ) -> "WiringAutoencoder":
         """
-        Convenience factory.
+        Convenience factory: build a ``WiringAutoencoder`` from a parsed
+        YAML config dict and an embedding table.
 
-            wae = WiringAutoencoder.from_config(cfg, E)
+        Usage::
 
-        where cfg is the parsed YAML dict (see configs/default.yaml).
+            with open('configs/default.yaml') as f:
+                cfg = yaml.safe_load(f)
+            data = load_dataset('cora', ...)
+            model = WiringAutoencoder.from_config(cfg, data['E'])
+
+        The config structure mirrors ``configs/default.yaml``::
+
+            model:
+              latent_dim: 32
+              hidden_dim: 256
+              n_wiring_heads: 4
+              tau_modes: 8
+              beta: 1.0
+              alpha: 0.1
+              use_lambda_features: true
+            graph:
+              knn_k: 15
+              sigma: 0.5
+              normalised: true
+              sparse: true
+
+        Parameters
+        ----------
+        cfg : dict
+            Parsed YAML config.  Must contain ``model`` and ``graph`` keys.
+        E : torch.Tensor
+            Embedding table ``(N, D)`` used to build the kNN base graph and
+            to set ``input_dim = D``.
+
+        Returns
+        -------
+        WiringAutoencoder
+            Fully initialised model (not yet moved to a device; call
+            ``.to(device)`` after).
         """
         mc = cfg["model"]
         gc = cfg["graph"]
@@ -257,6 +330,7 @@ class WiringAutoencoder(nn.Module):
             knn_k=gc["knn_k"],
             sigma=gc["sigma"],
             normalised=gc["normalised"],
+            sparse=gc.get("sparse", False),
         )
         return cls(
             input_dim=E.shape[1],
