@@ -1,5 +1,5 @@
 """
-Diffusion Decoder  —  L(z), E  →  x\u0302.
+Diffusion Decoder  —  L(z), E  →  x_hat.
 
 This module implements the final decoding stage of the Wiring Autoencoder:
 given the learned Laplacian ``L(z)`` and the shared embedding table ``E``,
@@ -11,21 +11,21 @@ Architectural context
 ``DiffusionDecoder`` is the last block in the WAE data flow::
 
     L(z)  (B, N, N)  +  E  (N, D)
-      |  TauModeDiffusion  (heat kernel K_tau = U exp(-t\u039b) U\u1d40)
+      |  TauModeDiffusion  (heat kernel K_tau = U exp(-tΛ) U^T)
       |  [optional MLP refinement  — per-node mode only]
       v
-    x\u0302  (B, D)   (per-node, normal training path)
+    x_hat  (B, D)   (per-node, normal training path)
 
 The Gaussian likelihood is::
 
-    log p(x | z) = -||x - x\u0302||\u00b2 / (2\u03c3\u00b2) - D log \u03c3
+    log p(x | z) = -||x - x_hat||² / (2σ²) - D log σ
 
-where ``\u03c3 = exp(log_sigma)`` is a learnable scalar.
+where ``σ = exp(log_sigma)`` is a learnable scalar.
 
 Output shape contract
 ---------------------
-``node_idx`` provided  → ``x\u0302`` shape ``(B, D)``   (per-node reconstruction)
-``node_idx = None``    → ``x\u0302`` shape ``(B, N, D)`` (full-graph diagnostic)
+``node_idx`` provided  →  ``x_hat`` shape ``(B, D)``   (per-node reconstruction)
+``node_idx = None``    →  ``x_hat`` shape ``(B, N, D)`` (full-graph diagnostic)
 
 Always pass ``node_idx`` during training.  The full-graph path bypasses
 the MLP refinement step (which expects ``(B, D)`` input) and is intended
@@ -36,11 +36,11 @@ Spectral context
 The diffusion time ``t`` is learnable.  At convergence it encodes the
 optimal spectral scale for reconstruction: a small ``t`` keeps many modes,
 a large ``t`` blurs toward the graph mean.  The interaction between ``t``
-and the CFL bound on ``\u0394t`` is analysed in
-`docs/04-stability.md \u00a7 3
+and the CFL bound on Δt is analysed in
+`docs/04-stability.md § 3
 <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/04-stability.md#3-numerical-stability-of-the-wave-update>`_.
 
-See also `docs/00-architecture.md \u00a7 DiffusionDecoder
+See also `docs/00-architecture.md § DiffusionDecoder
 <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#waediffusion_decoderpy--diffusiondecoder>`_
 for the full module description.
 """
@@ -54,7 +54,7 @@ from typing import Optional, Tuple
 class DiffusionDecoder(nn.Module):
     """
     Decode a batch of Laplacians ``L(z)`` and an embedding table ``E``
-    into reconstructed node embeddings ``x\u0302`` via tau-mode spectral
+    into reconstructed node embeddings ``x_hat`` via tau-mode spectral
     diffusion.
 
     Internally delegates the spectral step to ``TauModeDiffusion`` and
@@ -62,7 +62,7 @@ class DiffusionDecoder(nn.Module):
 
     Performance: ``eig_cache``
     --------------------------
-    The dominant cost in the training forward pass is the O(N\u00b3) CPU
+    The dominant cost in the training forward pass is the O(N³) CPU
     eigendecomposition inside ``TauModeDiffusion``.  This can be eliminated
     by passing ``eig_cache``::
 
@@ -80,21 +80,21 @@ class DiffusionDecoder(nn.Module):
     Parameters
     ----------
     embedding_dim : int
-        ``D`` \u2014 dimension of each node embedding in ``E`` and in ``x``.
+        ``D`` — dimension of each node embedding in ``E`` and in ``x``.
     hidden_dim : int
         Hidden width for the optional MLP refinement network.
     tau_modes : int
-        ``k`` \u2014 number of eigenvectors kept in tau-mode diffusion.
+        ``k`` — number of eigenvectors kept in tau-mode diffusion.
         Should match the ``tau_modes`` used in ``spectral_freq_cost``
         and in the encoder's ``lambda_fingerprint`` call.
     diffusion_time : float
         Initial value of the learnable diffusion time ``t``.
     use_mlp_refinement : bool
         If ``True`` (default), apply a residual two-layer MLP to
-        ``x\u0302_raw`` in per-node mode.  Skipped automatically in full-graph
+        ``x_hat_raw`` in per-node mode.  Skipped automatically in full-graph
         mode because the MLP expects ``(B, D)`` input.
     init_log_sigma : float
-        Initial value of ``log_sigma``.  ``\u03c3 = exp(log_sigma)`` is the
+        Initial value of ``log_sigma``.  ``σ = exp(log_sigma)`` is the
         noise standard deviation in the Gaussian likelihood.
     """
 
@@ -142,7 +142,7 @@ class DiffusionDecoder(nn.Module):
             Long tensor ``(B,)`` selecting one node per sample.
             When given the output is ``(B, D)`` and MLP refinement is
             applied.  When ``None`` the output is ``(B, N, D)`` and the
-            MLP is skipped (MLP expects ``(B, D)`` \u2014 see contract above).
+            MLP is skipped (MLP expects ``(B, D)`` — see contract above).
         eig_cache : tuple(eigvals, eigvecs) or None
             Pre-computed spectral cache from the fixed ``base_L``.
             Passed directly to ``TauModeDiffusion.forward`` to skip the
@@ -171,13 +171,13 @@ class DiffusionDecoder(nn.Module):
 
         Computes the per-node ELBO reconstruction term::
 
-            -log p(x | z) = ||x - x\u0302||\u00b2 / (2\u03c3\u00b2) + D log \u03c3
+            -log p(x | z) = ||x - x_hat||² / (2σ²) + D log σ
 
         This is the ``E_q[log p(x|z)]`` term in the WAE-ELBO::
 
-            \u2112_WAE = E_q[log p(x|z)] - \u03b2 KL - \u03b1 J_freq
+            L_WAE = E_q[log p(x|z)] - β KL - α J_freq
 
-        See `docs/00-architecture.md \u00a7 ELBO Derivation
+        See `docs/00-architecture.md § ELBO Derivation
         <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#elbo-derivation>`_.
 
         Parameters

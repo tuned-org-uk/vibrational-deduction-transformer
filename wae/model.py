@@ -10,17 +10,17 @@ ELBO
 ----
 The full Wiring Autoencoder objective is::
 
-    \u2112(\u03b8, \u03c6; x, i) = E_{q_\u03c6(z|x)}[ log p_\u03b8(x | z, i) ]
-                    - \u03b2 \u00b7 KL( q_\u03c6(z|x) || p(z) )
-                    - \u03b1 \u00b7 J_freq( L(z) )
+    L(θ, φ; x, i) = E_{q_φ(z|x)}[ log p_θ(x | z, i) ]
+                  - β · KL( q_φ(z|x) || p(z) )
+                  - α · J_freq( L(z) )
 
 where:
     x       raw embedding of query node i
     z       latent wiring code sampled via reparameterisation
     L(z)    differentiable Laplacian of the learned graph wiring
-    \u03b2, \u03b1   KL and frequency regularisation weights (from config)
+    β, α    KL and frequency regularisation weights (from config)
 
-See `docs/00-architecture.md \u00a7 ELBO Derivation
+See `docs/00-architecture.md § ELBO Derivation
 <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#elbo-derivation>`_
 for the full derivation and the relationship between J_freq and ArrowSpace
 tau-mode truncation.
@@ -33,11 +33,11 @@ classifier) see `docs/03-branching.md
 Performance
 -----------
 The training forward pass involves three spectral operations that are
-potentially O(N\u00b3) per call:
+potentially O(N³) per call:
 
-1. ``lambda_fingerprint(base_L)``   \u2014 encoder enrichment
-2. ``TauModeDiffusion(L)``          \u2014 eigenvectors for diffusion kernel
-3. ``spectral_freq_cost(L)``        \u2014 eigenvalues for J_freq
+1. ``lambda_fingerprint(base_L)``   — encoder enrichment
+2. ``TauModeDiffusion(L)``          — eigenvectors for diffusion kernel
+3. ``spectral_freq_cost(L)``        — eigenvalues for J_freq
 
 All three can be eliminated from the training loop by precomputing
 spectral quantities from the fixed ``base_L`` once and passing them as
@@ -69,14 +69,14 @@ class WiringAutoencoder(nn.Module):
 
     Data flow summary::
 
-        x  (B, D)  [+ \u03bb-fingerprint]
-          --> WiringEncoder          z, \u03bc, log\u03c3\u00b2  (B, latent_dim)
-          --> WiringDecoder          L(z)            (B, N, N)
-          --> DiffusionDecoder       x\u0302              (B, D)
+        x  (B, D)  [+ λ-fingerprint]
+          --> WiringEncoder          z, μ, log σ²  (B, latent_dim)
+          --> WiringDecoder          L(z)           (B, N, N)
+          --> DiffusionDecoder       x_hat          (B, D)
           --> recon_loss + KL + J_freq
 
     The full data-flow diagram is in
-    `docs/00-architecture.md \u00a7 Data Flow Diagram
+    `docs/00-architecture.md § Data Flow Diagram
     <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#data-flow-diagram>`_.
 
     Connection to ArrowSpace
@@ -85,28 +85,28 @@ class WiringAutoencoder(nn.Module):
     ``ArrowSpaceBuilder.build()`` from the ``arrowspace`` library.  The
     correspondence between ArrowSpace concepts and WAE components is
     documented in
-    `docs/00-architecture.md \u00a7 Connection to ArrowSpace
+    `docs/00-architecture.md § Connection to ArrowSpace
     <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#connection-to-arrowspace--graph-wiring>`_.
 
     Stability
     ---------
     Key quantities to monitor during training:
 
-    - ``\u03bb_max(L(z))``  — governs the CFL bound on diffusion time ``t``.
+    - ``λ_max(L(z))``  — governs the CFL bound on diffusion time ``t``.
     - ``J_freq``        — should decrease as wiring becomes smoother.
     - ``KL``            — should stabilise after warm-up.
     - Spectral entropy  — should remain high (no representation collapse).
 
-    See `docs/04-stability.md \u00a7 7
+    See `docs/04-stability.md § 7
     <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/04-stability.md#7-evaluation-protocol-stability-metrics-checklist>`_
     for the full stability metrics checklist.
 
     Parameters
     ----------
     input_dim : int
-        ``D`` \u2014 embedding dimension of each node.
+        ``D`` — embedding dimension of each node.
     latent_dim : int
-        ``k`` \u2014 dimension of the latent wiring code ``z``.
+        ``k`` — dimension of the latent wiring code ``z``.
     hidden_dim : int
         Hidden width shared by encoder, wiring decoder, and MLP refinement.
     n_wiring_heads : int
@@ -115,15 +115,15 @@ class WiringAutoencoder(nn.Module):
         Number of eigenvectors kept in tau-mode diffusion and used in
         ``J_freq`` and ``lambda_fingerprint``.
     beta : float
-        KL weight ``\u03b2`` in the ELBO.
+        KL weight ``β`` in the ELBO.
     alpha : float
-        J_freq weight ``\u03b1`` in the ELBO.
+        J_freq weight ``α`` in the ELBO.
     laplacian : DifferentiableLaplacian
         Pre-built Laplacian module (frozen topology + base weights).  Built
         from the embedding table ``E`` via
         ``DifferentiableLaplacian.from_embeddings``.
     use_lambda_features : bool
-        If ``True``, concatenate the \u03bb-fingerprint of ``base_L`` to the
+        If ``True``, concatenate the λ-fingerprint of ``base_L`` to the
         encoder input.  Controlled by ``model.use_lambda_features`` in the
         YAML config.
     """
@@ -181,7 +181,7 @@ class WiringAutoencoder(nn.Module):
         Single forward pass returning all ELBO components.
 
         The three optional cache arguments (``lambda_fp``, ``spectral_cache``,
-        ``freq_eigvals``) together eliminate all per-step O(N\u00b3) CPU
+        ``freq_eigvals``) together eliminate all per-step O(N³) CPU
         eigendecompositions from the training loop.  See ``train.py`` for the
         canonical pattern of precomputing these once before the epoch loop.
 
@@ -202,7 +202,7 @@ class WiringAutoencoder(nn.Module):
             ``lambda_fingerprint`` on-the-fly if ``lambda_fp`` is not
             supplied.  Ignored when ``lambda_fp`` is given.
         lambda_fp : torch.Tensor or None
-            Pre-computed \u03bb-fingerprint of ``base_L``.  Shape ``(1, n_bins)``
+            Pre-computed λ-fingerprint of ``base_L``.  Shape ``(1, n_bins)``
             or ``(B, n_bins)``; broadcast to ``(B, n_bins)`` automatically.
             When supplied, avoids calling ``lambda_fingerprint`` inside the
             forward pass.
@@ -210,28 +210,28 @@ class WiringAutoencoder(nn.Module):
             Pre-computed eigendecomposition of ``base_L`` for
             ``TauModeDiffusion``.
             ``eigvals`` shape ``(N,)``; ``eigvecs`` shape ``(N, N)``.
-            When supplied, avoids the O(N\u00b3) eigensolver in
+            When supplied, avoids the O(N³) eigensolver in
             ``TauModeDiffusion``.
         freq_eigvals : torch.Tensor or None
             Pre-computed eigenvalues of ``base_L`` for ``J_freq``.
             Shape ``(N,)``.
-            When supplied, avoids the O(N\u00b3) eigensolver in
+            When supplied, avoids the O(N³) eigensolver in
             ``spectral_freq_cost``.
 
         Returns
         -------
         dict with keys:
-            ``loss``       \u2014 total ELBO (scalar, minimise this)
-            ``recon_loss`` \u2014 Gaussian NLL reconstruction term
-            ``kl_loss``    \u2014 KL(q(z|x) || N(0, I))
-            ``freq_loss``  \u2014 J_freq spectral regulariser
-            ``x_hat``      \u2014 (B, D) reconstructed embeddings
-            ``L``          \u2014 (B, N, N) learned Laplacian
-            ``z``          \u2014 (B, latent_dim) latent samples
-            ``mu``         \u2014 (B, latent_dim) posterior means
-            ``log_var``    \u2014 (B, latent_dim) posterior log-variances
+            ``loss``       — total ELBO (scalar, minimise this)
+            ``recon_loss`` — Gaussian NLL reconstruction term
+            ``kl_loss``    — KL(q(z|x) || N(0, I))
+            ``freq_loss``  — J_freq spectral regulariser
+            ``x_hat``      — (B, D) reconstructed embeddings
+            ``L``          — (B, N, N) learned Laplacian
+            ``z``          — (B, latent_dim) latent samples
+            ``mu``         — (B, latent_dim) posterior means
+            ``log_var``    — (B, latent_dim) posterior log-variances
         """
-        # --- \u03bb-fingerprint (encoder enrichment) ----------------------------
+        # --- λ-fingerprint (encoder enrichment) ----------------------------
         # Use cached fp if provided; fall back to on-the-fly computation only
         # when no cache is available (e.g. evaluation without precomputation).
         lam_fp = lambda_fp

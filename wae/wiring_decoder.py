@@ -23,14 +23,14 @@ Architectural context
 Gradients from the reconstruction loss and J_freq flow back through
 ``L(z)`` to ``edge_delta`` and then to ``z``.  This is the full
 differentiable wiring path described in
-`docs/00-architecture.md \u00a7 WiringDecoder
+`docs/00-architecture.md § WiringDecoder
 <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#waewiring_decoderpy--wiringdecoder>`_.
 
 Mixture-of-experts design
 -------------------------
 Each of ``n_heads`` heads learns a full prototype edge-weight template
 over all E edges.  The gate network predicts per-sample softmax weights
-over the heads, so the mixture ``\u03a3_h gate_h \u00b7 template_h`` selects and
+over the heads, so the mixture ``Σ_h gate_h · template_h`` selects and
 interpolates between qualitatively different wiring modes.  This gives
 the latent space a natural "wiring mode" interpretation: each head
 corresponds to a distinct topological prototype.
@@ -41,7 +41,7 @@ The wiring decoder is shared across all six algorithm variants described
 in `docs/03-branching.md
 <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/03-branching.md>`_.
 For Option 1 (Deterministic AE) the decoder output feeds directly into
-the spectral reconstruction term.  For Options 2\u20136 the same ``L(z)`` is
+the spectral reconstruction term.  For Options 2–6 the same ``L(z)`` is
 used as the graph Laplacian that governs wave dynamics, energy, or
 classification.
 """
@@ -64,8 +64,8 @@ class WiringDecoder(nn.Module):
           h  (B, hidden_dim)
           |-- n_heads Linear(hidden_dim, E) --> head_deltas (B, n_heads, E)
           |-- gate Linear(hidden_dim, n_heads) --> gates (B, n_heads) [softmax]
-          |--> delta = sum_h gate_h * head_delta_h    (B, E)
-          |--> DifferentiableLaplacian(delta)         (B, N, N) or (B, N)
+          |--> delta = Σ_h gate_h * head_delta_h    (B, E)
+          |--> DifferentiableLaplacian(delta)        (B, N, N) or (B, N)
 
     The edge weight for edge (i,j) is::
 
@@ -77,7 +77,7 @@ class WiringDecoder(nn.Module):
 
     For the full derivation of why differentiability through ``L(z)`` is
     critical to end-to-end learning see
-    `docs/00-architecture.md \u00a7 DifferentiableLaplacian
+    `docs/00-architecture.md § DifferentiableLaplacian
     <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#waelaplacianpy--differentiablelaplacian>`_.
 
     Parameters
@@ -91,7 +91,7 @@ class WiringDecoder(nn.Module):
         Width of the shared trunk MLP.
     n_heads : int
         Number of mixture heads.  More heads = richer wiring vocabulary
-        at higher parameter cost.  Typical range: 2\u20138.
+        at higher parameter cost.  Typical range: 2–8.
     laplacian : DifferentiableLaplacian
         Pre-built differentiable Laplacian module holding the frozen graph
         topology (edge_index, base_weights) as registered buffers.
@@ -137,7 +137,7 @@ class WiringDecoder(nn.Module):
             Long tensor of shape ``(B,)`` of query node indices.
             When provided the Laplacian is returned as a row tensor
             ``(B, N)`` using the memory-efficient per-node path of
-            ``DifferentiableLaplacian`` (no N\u00d7N matrix materialised).
+            ``DifferentiableLaplacian`` (no N×N matrix materialised).
             When ``None`` the full ``(B, N, N)`` Laplacian is returned.
 
             .. note::

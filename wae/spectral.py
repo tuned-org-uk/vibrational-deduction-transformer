@@ -6,10 +6,10 @@ of the WAE training loop:
 
     TauModeDiffusion    differentiable truncated spectral diffusion decoder
     spectral_freq_cost  J_freq high-frequency energy penalty (training signal)
-    lambda_fingerprint  ArrowSpace-style \u03bb-distribution summary (encoder enrichment)
+    lambda_fingerprint  ArrowSpace-style λ-distribution summary (encoder enrichment)
 
 All three primitives share the same underlying eigensystem of the graph
-Laplacian L(z).  To avoid redundant O(N\u00b3) CPU eigendecompositions at every
+Laplacian L(z).  To avoid redundant O(N³) CPU eigendecompositions at every
 training step, every public function accepts an optional ``eigvals`` /
 ``eig_cache`` argument that allows the caller to pass precomputed spectral
 quantities from outside the training loop.  See ``train.py`` for the
@@ -24,8 +24,8 @@ for the full data-flow diagram and module reference.
 The J_freq cost and tau-mode diffusion kernel correspond directly to the
 ArrowSpace spectral cost function described in the Module Reference section::
 
-    J_freq = sum_{j > tau_modes} lambda_j( L(z) )
-    K_tau  = U_k \u00b7 exp(-t\u039b_k) \u00b7 U_k\u1d40           (heat kernel, k = tau_modes)
+    J_freq = sum_{j > tau_modes} λ_j( L(z) )
+    K_tau  = U_k · exp(-tΛ_k) · U_k^T           (heat kernel, k = tau_modes)
 
 Stability note
 --------------
@@ -35,7 +35,7 @@ through ``_precondition()`` which applies two conditioning steps before
 handing the matrix to LAPACK:
 
 1. **Symmetrisation** ``L = (L + L^T) / 2``
-   The sparse COO \u2192 dense path in ``DifferentiableLaplacian`` can leave tiny
+   The sparse COO → dense path in ``DifferentiableLaplacian`` can leave tiny
    (~1e-7) asymmetry residuals from float32 ``scatter_add`` accumulation.
    LAPACK dsyevd assumes exact symmetry; violations cause error code 2707.
 
@@ -45,7 +45,7 @@ handing the matrix to LAPACK:
    below spectral resolution but well above the float32 noise floor.
 
 For the full stability analysis of eigenvalue conditioning, CFL bounds, and
-the relationship between \u03bb_max and the Courant criterion see
+the relationship between λ_max and the Courant criterion see
 `docs/04-stability.md Section 3
 <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/04-stability.md#3-numerical-stability-of-the-wave-update>`_.
 """
@@ -76,10 +76,10 @@ def _precondition(L: torch.Tensor) -> torch.Tensor:
 
     The two steps it performs are:
 
-    1. **Symmetrisation** ``L_sym = (L + L^T) / 2`` \u2014 removes float32
+    1. **Symmetrisation** ``L_sym = (L + L^T) / 2`` — removes float32
        accumulation residuals left by the sparse COO path in
        ``DifferentiableLaplacian._sparse_laplacian``.
-    2. **Tikhonov shift** ``L_sym += _EIGSOLVE_EPS * I`` \u2014 prevents
+    2. **Tikhonov shift** ``L_sym += _EIGSOLVE_EPS * I`` — prevents
        LAPACK convergence failures on matrices with repeated zero
        eigenvalues (e.g. a graph Laplacian with multiple connected
        components).
@@ -195,12 +195,12 @@ class TauModeDiffusion(nn.Module):
 
     Given Laplacian L and embedding table E (N, D) the diffusion kernel is::
 
-        U, \u039b = eig_k(L)                   # (N, k), (k,)  \u2014 k = tau_modes
-        K_tau  = U \u00b7 diag(exp(-t\u039b)) \u00b7 U\u1d40   # (N, N)  heat kernel at time t
-        x\u0302_i   = K_tau[i, :] \u00b7 E              # (D,)    diffused embedding for node i
+        U, Λ = eig_k(L)                   # (N, k), (k,)  — k = tau_modes
+        K_tau  = U · diag(exp(-tΛ)) · U^T  # (N, N)  heat kernel at time t
+        x_hat_i = K_tau[i, :] · E          # (D,)    diffused embedding for node i
 
-    The operator ``exp(-t\u039b)`` is a heat kernel: it exponentially damps
-    high-frequency modes.  Low-frequency modes (small \u03bb_k) survive longest.
+    The operator ``exp(-tΛ)`` is a heat kernel: it exponentially damps
+    high-frequency modes.  Low-frequency modes (small λ_k) survive longest.
     Learnable ``log_t`` controls the diffusion time and is trained jointly
     with the rest of the model.
 
@@ -209,7 +209,7 @@ class TauModeDiffusion(nn.Module):
     ``TauModeDiffusion`` is the inner computation of ``DiffusionDecoder``
     and is called once per forward pass.  In the full ELBO::
 
-        \u2112_WAE = E_q[log p(x|z)] - \u03b2 KL - \u03b1 J_freq
+        L_WAE = E_q[log p(x|z)] - β KL - α J_freq
 
     the reconstruction term ``log p(x|z)`` is computed through this module.
     See `docs/00-architecture.md
@@ -218,8 +218,8 @@ class TauModeDiffusion(nn.Module):
 
     Performance: ``eig_cache``
     --------------------------
-    By default, ``forward`` calls ``_safe_eigh(L)`` which is an O(N\u00b3) CPU
-    LAPACK operation (N \u2248 2708 for Cora, ~3 hours/epoch without caching).
+    By default, ``forward`` calls ``_safe_eigh(L)`` which is an O(N³) CPU
+    LAPACK operation (N ≈ 2708 for Cora, ~3 hours/epoch without caching).
     Pass a pre-computed ``eig_cache = (eigvals, eigvecs)`` obtained from the
     fixed ``base_L`` to skip this call entirely::
 
@@ -289,7 +289,7 @@ class TauModeDiffusion(nn.Module):
             nodes, giving output shape ``(B, N, D)``.
         eig_cache : tuple(eigvals, eigvecs) or None
             Pre-computed spectral decomposition of the **base** Laplacian.
-            When supplied, the O(N\u00b3) ``_safe_eigh`` call is skipped entirely
+            When supplied, the O(N³) ``_safe_eigh`` call is skipped entirely
             and these eigenvectors are used as a frozen approximation.
             Shape of eigvals: ``(N,)``; eigvecs: ``(N, N)``.
             If the cache is unbatched (2-D), it is automatically broadcast
@@ -357,26 +357,26 @@ def spectral_freq_cost(
     Computes the sum of all eigenvalues of ``L`` beyond the first
     ``tau_modes`` low-frequency modes::
 
-        J_freq = mean_b [ \u03a3_{j > tau_modes} \u03bb_j( L_b ) ]
+        J_freq = mean_b [ Σ_{j > tau_modes} λ_j( L_b ) ]
 
     Minimising ``J_freq`` during training encourages the learned wiring
     ``L(z)`` to concentrate energy in low-frequency modes, producing
     smooth, low-entropy vibrational states.  This is the direct spectral
     analogue of tau-mode truncation in the ArrowSpace cost function.
 
-    This term appears as the ``\u03b1 J_freq`` component of the WAE-ELBO::
+    This term appears as the ``α J_freq`` component of the WAE-ELBO::
 
-        \u2112_WAE = E_q[log p(x|z)] - \u03b2 KL - \u03b1 J_freq(L(z))
+        L_WAE = E_q[log p(x|z)] - β KL - α J_freq(L(z))
 
-    See `docs/00-architecture.md \u00a7 spectral_freq_cost
+    See `docs/00-architecture.md § spectral_freq_cost
     <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#waespectraspy--taumodediffusion-spectral_freq_cost-lambda_fingerprint>`_
-    and `docs/04-stability.md \u00a7 4.2
+    and `docs/04-stability.md § 4.2
     <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/04-stability.md#42-key-stability-parameters-to-monitor>`_
     for the stability analysis of spectral costs during optimisation.
 
     Performance: ``eigvals``
     ------------------------
-    By default this function calls ``_safe_eigvalsh(L)`` which is an O(N\u00b3)
+    By default this function calls ``_safe_eigvalsh(L)`` which is an O(N³)
     CPU LAPACK operation executed on every training step.  Supply
     ``eigvals`` (precomputed from ``base_L``) to skip it::
 
@@ -394,9 +394,9 @@ def spectral_freq_cost(
         Number of low-frequency modes excluded from the penalty.
         Should match the ``tau_modes`` used in ``TauModeDiffusion``.
     reduction : str
-        ``'mean'`` (default) \u2014 average J_freq over the batch.
-        ``'sum'``  \u2014 sum over the batch.
-        ``'none'`` \u2014 return per-batch-element cost, shape ``(B,)``.
+        ``'mean'`` (default) — average J_freq over the batch.
+        ``'sum'``  — sum over the batch.
+        ``'none'`` — return per-batch-element cost, shape ``(B,)``.
     eigvals : torch.Tensor or None
         Pre-computed eigenvalues.  Shape ``(N,)`` (unbatched, broadcast to
         all B elements) or ``(B, N)`` (per-element).
@@ -429,7 +429,7 @@ def spectral_freq_cost(
 
 
 # ---------------------------------------------------------------------------
-# \u03bb-fingerprint  —  ArrowSpace-style spectral feature
+# λ-fingerprint  —  ArrowSpace-style spectral feature
 # ---------------------------------------------------------------------------
 
 def lambda_fingerprint(
@@ -439,15 +439,15 @@ def lambda_fingerprint(
     eigvals: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
-    ArrowSpace-style \u03bb-distribution fingerprint of the Laplacian spectrum.
+    ArrowSpace-style λ-distribution fingerprint of the Laplacian spectrum.
 
     Computes a binned histogram of the ``tau_modes`` lowest eigenvalues
     of ``L``, normalised to sum to 1.  The result is a compact spectral
     summary that is concatenated to the encoder input to enrich the latent
     code ``z`` with information about the current wiring geometry.
 
-    Conceptually this mirrors the \u03bb-fingerprint computed by ArrowSpace
-    notebooks 01\u201305 and described in the Module Reference of
+    Conceptually this mirrors the λ-fingerprint computed by ArrowSpace
+    notebooks 01–05 and described in the Module Reference of
     `docs/00-architecture.md
     <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#waespectraspy--taumodediffusion-spectral_freq_cost-lambda_fingerprint>`_.
 
@@ -467,7 +467,7 @@ def lambda_fingerprint(
             base_L, tau_modes=k, eigvals=base_eigvals
         )  # shape (1, n_bins)
 
-        # Each step \u2014 broadcast to batch size B
+        # Each step — broadcast to batch size B
         batch_fp = cached_fp.expand(B, -1)
 
     See ``train.py`` for the canonical pattern.
