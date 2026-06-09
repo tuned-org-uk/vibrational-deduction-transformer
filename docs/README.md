@@ -13,16 +13,6 @@ eigenmodes define a spectral geometry for learning, compression, and generation.
 
 ---
 
-## Documents in this directory
-
-| File | Contents |
-|------|----------|
-| [`00-architecture.md`](00-architecture.md) | Module reference, data-flow diagram, and ELBO derivation for the core WAE |
-| [`01-references.md`](01-references.md) | Annotated bibliography and connection to ArrowSpace / Graph Wiring papers |
-| [`03-branching.md`](03-branching.md) | Six algorithm tracks: deterministic AE, EBM, latent diffusion, Variational Laplace, PDE forecasting, and spectrally regularised reasoner |
-
----
-
 ## Conceptual Foundations
 
 The modelling chain starts from classical dimensionality reduction and moves toward
