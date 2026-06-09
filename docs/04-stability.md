@@ -33,17 +33,17 @@ Both are analysed below, together with the interaction between them.
 
 | Symbol | Meaning |
 |---|---|
-| `L_f` | Combinatorial graph Laplacian on feature space, `L_f = D_f − W_f ⪰ 0` |
-| `M` | Positive-definite diagonal mass matrix (degree mass or taumode mass) |
-| `λ_k` | k-th eigenvalue of the generalised eigenproblem `L_f u_k = λ_k M u_k`; equals squared natural frequency `ω_k²` |
-| `λ_max` | Largest eigenvalue of `L_f` (or of the generalised problem w.r.t. M) |
-| `Δt` | Learnable time-step scalar (or diagonal) in the wave update |
-| `Γ` | Learnable damping tensor `Γ ∈ ℝ^{n×d}`, element-wise applied |
-| `Q_t` | Vibrational state at recurrent depth t, shape `(n, d)` |
-| `S_{σ,M}` | Implicit mass-aware resolvent preconditioner `(M + σ L_f)^{-1} M` |
-| `H_{σ,M}` | Preconditioned Hessian `P_{σ,M} H`, where `H = (1/m) A^⊤ A` |
-| `κ(·)` | Condition number of a matrix |
-| `ϱ_t` | Signed density matrix `ϱ_t = ϱ_t^+ − ϱ_t^-`, each component PSD |
+| $$L_f$$ | Combinatorial graph Laplacian on feature space, $$L_f = D_f − W_f ⪰ 0$$ |
+| $$M$$ | Positive-definite diagonal mass matrix (degree mass or taumode mass) |
+| $$λ_k$$ | k-th eigenvalue of the generalised eigenproblem $$L_f u_k = λ_k M u_k$$; equals squared natural frequency $$ω_k²$$ |
+| $$λ_max$$ | Largest eigenvalue of $$L_f$$ (or of the generalised problem w.r.t. M) |
+| $$Δt$$ | Learnable time-step scalar (or diagonal) in the wave update |
+| $$Γ$$ | Learnable damping tensor $$Γ ∈ ℝ^{n×d}$$, element-wise applied |
+| $$Q_t$$ | Vibrational state at recurrent depth t, shape $$(n, d)$$ |
+| $$S_{σ,M}$$ | Implicit mass-aware resolvent preconditioner $$(M + σ L_f)^{-1} M$$ |
+| $$H_{σ,M}$$ | Preconditioned Hessian $$P_{σ,M} H$$, where $$H = (1/m) A^⊤ A$$ |
+| $$κ(·)$$ | Condition number of a matrix |
+| $$ϱ_t$$ | Signed density matrix $$ϱ_t = ϱ_t^+ − ϱ_t^-$$, each component PSD |
 
 ---
 
@@ -53,64 +53,64 @@ Both are analysed below, together with the interaction between them.
 
 The vibrational state block implements (paper eq. 23):
 
-```
+$$
 Q_{t+1} = 2 Q_t − Q_{t−1} − Δt² Q_t L_f^⊤ − Γ ⊙ (Q_t − Q_{t−1}) + Δt² B_t
-```
+$$
 
-In modal coordinates `Q̂_{t,k} = Q_t u_k` this decouples mode-by-mode into
+In modal coordinates $$Q̂_{t,k} = Q_t u_k$$ this decouples mode-by-mode into
 independent damped harmonic oscillators (paper eq. 24):
 
-```
+$$
 Q̂_{t+1,k} = 2 Q̂_{t,k} − Q̂_{t−1,k} − Δt² λ_k Q̂_{t,k} − Γ_k (Q̂_{t,k} − Q̂_{t−1,k}) + Δt² B̂_{t,k}
-```
+$$
 
-with natural frequency `ω_k = √λ_k`.
+with natural frequency $$ω_k = √λ_k$$.
 
 ### 3.2 CFL-type stability condition (explicit scheme)
 
-For the undamped mode (`Γ_k = 0`, `B̂_{t,k} = 0`) the characteristic equation of the
+For the undamped mode ($$Γ_k = 0$$, $$B̂_{t,k} = 0$$) the characteristic equation of the
 recurrence is:
 
-```
+$$
 r² − (2 − Δt² λ_k) r + 1 = 0
-```
+$$
 
-The roots are `r = [(2 − Δt² λ_k) ± √((2 − Δt² λ_k)² − 4)] / 2`.  Both roots lie on
+The roots are $$r = [(2 − Δt² λ_k) ± √((2 − Δt² λ_k)² − 4)] / 2$$.  Both roots lie on
 the unit circle (oscillatory but bounded) if and only if:
 
-```
+$$
 |2 − Δt² λ_k| ≤ 2   ⟺   Δt² λ_k ≤ 4
-```
+$$
 
 For a conservative bound covering all modes simultaneously:
 
-```
+$$
 Δt ≤ √(2 / λ_max(L_f))          [CFL condition]
-```
+$$
 
 This is the Courant–Friedrichs–Lewy condition for the graph wave equation, and it is
 exactly the clipping rule implemented in `VibrationalStateBlock.forward`.
 
 ### 3.3 Effect of damping
 
-With per-mode damping `γ_k = Γ_k > 0`, the characteristic roots are:
+With per-mode damping $$γ_k = Γ_k > 0$$, the characteristic roots are:
 
-```
-r = 1 − γ_k/2 ± i √(Δt² λ_k − (γ_k/2)²)    [underdamped: Δt² λ_k > (γ_k/2)²]
-r = 1 − γ_k/2 ± √((γ_k/2)² − Δt² λ_k)        [overdamped:  Δt² λ_k < (γ_k/2)²]
-```
+$$r = 1 − γ_k/2 ± i √(Δt² λ_k − (γ_k/2)²)$$
+[underdamped: Δt² λ_k > (γ_k/2)²]
 
-For the underdamped case `|r|² = (1 − γ_k/2)²`; requiring `|r| < 1` gives:
+$$r = 1 − γ_k/2 ± √((γ_k/2)² − Δt² λ_k)$$
+[overdamped:  Δt² λ_k < (γ_k/2)²]
 
-```
-0 < γ_k < 2         [mode-k amplitude decays to zero]
-```
+For the underdamped case $$|r|² = (1 − γ_k/2)²$$; requiring $$|r| < 1$$ gives:
+
+$$0 < γ_k < 2$$
+[mode-k amplitude decays to zero]
 
 For the overdamped case both roots are real and positive; the larger root is
-`1 − γ_k/2 + √(...)`, which is less than 1 only when `γ_k > Δt √λ_k`.
+$$1 − γ_k/2 + √(...)$$, which is less than 1 only when $$γ_k > Δt √λ_k$$.
 
-**Rayleigh's critical damping** for mode k occurs at `γ_k = 2 Δt √λ_k`, giving the
-fastest non-oscillatory decay.  Learning should adjust `Γ_k` toward this value for
+**Rayleigh's critical damping** for mode k occurs at $$γ_k = 2 Δt √λ_k$$, giving the
+fastest non-oscillatory decay.  Learning should adjust $$Γ_k$$ toward this value for
 modes that need to settle quickly.
 
 ### 3.4 Implicit alternative (unconditionally stable)
@@ -118,9 +118,9 @@ modes that need to settle quickly.
 The implicit resolvent from Part I of the paper provides an unconditionally stable
 alternative:
 
-```
+$$
 Q_{t+1} = (M + σ L_f)^{-1} M  Q_t + Δt² B_t
-```
+$$
 
 This is positive-definite for all `σ ≥ 0` (Proposition 5.1 in the paper) and removes
 the CFL constraint entirely, at the cost of solving a linear system per step.
@@ -134,15 +134,15 @@ the CFL constraint entirely, at the cost of solving a linear system per step.
 For the quadratic base model `J(x) = (1/2m) ‖Ax − b‖²`, preconditioned by
 `P_{σ,M} = (M + σ L_f)^{-1} M`, the iterates satisfy (paper Appendix A):
 
-```
+$$
 ‖x_{t+1} − x*‖_{P⁻¹} ≤ (1 − η μ_{σ,M}) ‖x_t − x*‖_{P⁻¹}
-```
+$$
 
 and, via norm equivalence:
 
-```
+$$
 ‖x_t − x*‖_2 ≤ √κ(P_{σ,M}) · (1 − η μ_{σ,M})^t · ‖x_0 − x*‖_2
-```
+$$
 
 where `μ_{σ,M} = λ_min(H_{σ,M})` and the step size must satisfy `η < 2 / L_{σ,M}`.
 
@@ -153,12 +153,12 @@ logged during training:
 
 | Quantity | How to compute | What it tells you |
 |---|---|---|
-| `λ_max(L_f)` | Largest eigenvalue of the Laplacian | Sets CFL bound on `Δt`; also denominator of Rayleigh quotient |
-| `κ(L_f)` | `λ_max / λ_min_nonzero(L_f)` | Condition number of the graph geometry; large κ → slow convergence |
-| `κ(P_{σ,M})` | `λ_max(P) / λ_min(P)` | Effective condition number after preconditioning; should be ≪ κ(L_f) |
-| `μ_{σ,M}` | `λ_min(H_{σ,M})` | Lower bound on contraction; smaller → slower convergence |
-| `L_{σ,M}` | `λ_max(H_{σ,M})` | Upper bound on step size `η < 2/L_{σ,M}` |
-| `η · μ_{σ,M}` | product | Convergence rate per step; should be in (0, 1) |
+| $$λ_max(L_f)$$ | Largest eigenvalue of the Laplacian | Sets CFL bound on $$Δt$$; also denominator of Rayleigh quotient |
+| $$κ(L_f)$$ | $$λ_max / λ_min_nonzero(L_f)$$ | Condition number of the graph geometry; large κ → slow convergence |
+| $$κ(P_{σ,M})$$ | $$λ_max(P) / λ_min(P)$$ | Effective condition number after preconditioning; should be ≪ κ(L_f) |
+| $$μ_{σ,M}$$ | $$λ_min(H_{σ,M})$$ | Lower bound on contraction; smaller → slower convergence |
+| $$L_{σ,M}$$ | $$λ_max(H_{σ,M})$$ | Upper bound on step size $$η < 2/L_{σ,M}$$ |
+| $$η · μ_{σ,M}$$ | product | Convergence rate per step; should be in (0, 1) |
 
 ### 4.3 Effect of σ on stability
 
@@ -184,9 +184,9 @@ of theoretical conditions and empirical diagnostics.
 
 Define the modal energy at depth t as:
 
-```
+$$
 E_t = (1/d) Σ_k λ_k ‖Q̂_{t,k}‖²_F
-```
+$$
 
 In a properly damped system with no external forcing (`B_t = 0`), `E_t` should decrease
 monotonically.  With forcing, it should remain bounded.
@@ -221,9 +221,9 @@ remain spread across the spectrum rather than collapsing to a single mode.
 
 **Diagnostic:** Compute the spectral entropy of the energy distribution:
 
-```
+$$
 H_spectral = −Σ_k p_k log p_k,    p_k = λ_k ‖Q̂_{K,k}‖² / E_K
-```
+$$
 
 A healthy model maintains high `H_spectral` across recurrent depths.  A collapsing
 model will show `H_spectral → 0` as K grows.
@@ -239,9 +239,9 @@ architecture design notes), additional stability criteria apply.
 
 The Laplacian-regularised energy functional (paper eq. 9):
 
-```
+$$
 J_λ(x) = (1/2m) ‖Ax − b‖² + (λ/2) x^⊤ L_f x
-```
+$$
 
 is strictly convex when `(1/m) A^⊤A + λ L_f ≻ 0`.  This holds whenever:
 
@@ -260,9 +260,9 @@ For the vibrational energy-based model to converge to a minimum rather than osci
 indefinitely, every mode k must satisfy the overdamped or critically damped condition
 (see Section 3.3):
 
-```
+$$
 γ_k ≥ Δt √λ_k          [mode-k is overdamped or critically damped]
-```
+$$
 
 After learning, verify this holds for the majority of modes.  If many modes are
 underdamped (`γ_k < Δt √λ_k`), the model is in an oscillatory regime: still
@@ -298,24 +298,24 @@ Use the following checklist before and during every training run.
 
 | Metric | Normal range | Warning |
 |---|---|---|
-| `Δt` (learnable) | `(0, √(2/λ_max)]` | Clamp is triggering every step → Δt gradient is fighting the CFL bound |
-| `min_k γ_k` | `> 0` | Any `γ_k ≤ 0` means a mode is undamped or anti-damped |
-| `E_t / E_{t-1}` | `≤ 1` for most steps | Consistently `> 1` → wave is amplifying |
-| `‖ϱ_t‖_F` | Bounded, decreasing after early training | Unbounded growth → density matrix diverging |
-| `λ_min(ϱ_t^+)` | `≥ 0` | Negative → PSD constraint violated |
-| `H_spectral` | Stable or increasing | Rapid decrease → representation collapse |
-| `η · μ_{σ,M}` | `∈ (0, 1)` | `> 1` → step size too large; `≈ 0` → preconditioning degenerate |
-| `κ(P_{σ,M})` | `< κ(L_f)` | Larger than `κ(L_f)` → preconditioning is worsening conditioning |
+| $$Δt$$ (learnable) | $$(0, √(2/λ_max)]$$ | Clamp is triggering every step → Δt gradient is fighting the CFL bound |
+| $$min_k γ_k$$ | $$> 0$$ | Any $$γ_k ≤ 0$$ means a mode is undamped or anti-damped |
+| $$E_t / E_{t-1}$$ | $$≤ 1$$ for most steps | Consistently $$> 1$$ → wave is amplifying |
+| $$‖ϱ_t‖_F$$ | Bounded, decreasing after early training | Unbounded growth → density matrix diverging |
+| $$λ_min(ϱ_t^+)$$ | $$≥ 0$$ | Negative → PSD constraint violated |
+| $$H_spectral$$ | Stable or increasing | Rapid decrease → representation collapse |
+| $$η · μ_{σ,M}$$ | $$∈ (0, 1)$$ | $$> 1$$ → step size too large; $$≈ 0$$ → preconditioning degenerate |
+| $$κ(P_{σ,M})$$ | $$< κ(L_f)$$ | Larger than $$κ(L_f)$$ → preconditioning is worsening conditioning |
 
 ### Post-training (convergence verification)
 
-- [ ] Plot `E_t` vs depth K for a held-out batch; confirm monotone decrease or bounded
+- [ ] Plot $$E_t$$ vs depth K for a held-out batch; confirm monotone decrease or bounded
       oscillation.
-- [ ] Plot `occ_{t,k}` for the top-m modes vs depth; confirm settling toward definite
+- [ ] Plot $$occ_{t,k}$$ for the top-m modes vs depth; confirm settling toward definite
       signs on the evaluation tasks.
-- [ ] Compute the spectral entropy `H_spectral` at K=2, 4, 8, 16; confirm it does not
+- [ ] Compute the spectral entropy $$H_spectral$$ at K=2, 4, 8, 16; confirm it does not
       collapse to zero at large K.
-- [ ] For the preconditioned GD baseline: plot `‖x_t − x*‖_2` vs iteration; confirm
+- [ ] For the preconditioned GD baseline: plot $$‖x_t − x*‖_2$$ vs iteration; confirm
       linear convergence (straight line on log scale).
 
 ---
