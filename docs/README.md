@@ -6,8 +6,8 @@ directly out of the spectral graph-wiring primitives of
 [ArrowSpace / Graph Wiring](https://github.com/tuned-org-uk) and are grounded in
 the modelling progression of *The Little Book of Generative AI Foundations* (Chen, 2026).
 
-The central object throughout is the **feature-space graph Laplacian** \(L_f\), built
-from a data matrix \(A^\top\) via a similarity kernel. Equipping that Laplacian with a
+The central object throughout is the **feature-space graph Laplacian** $$(L_f)$$, built
+from a data matrix $$(A^\top)$$ via a similarity kernel. Equipping that Laplacian with a
 positive diagonal mass matrix \(M\) turns it into a Rayleigh mass–spring system whose
 eigenmodes define a spectral geometry for learning, compression, and generation.
 
@@ -31,11 +31,11 @@ machinery of the book is replaced by its **spectral graph-wiring analogue**:
 
 | Book concept | WAE analogue | Key object |
 |---|---|---|
-| PCA | Spectral Laplacian, \(L_f = D_f - W_f\) | Graph smoothness \(z^\top L_f z\) |
-| Autoencoder | Wiring Autoencoder (deterministic, \(J_{\text{freq}}\) loss) | \(L_f\) as bottleneck geometry |
-| PPCA | Probabilistic Graph Wiring (Gaussian \(z \to L(z)\)) | Modal prior \(p(z) = \mathcal{N}(0, \Lambda_m^{-1})\) |
-| VAE + ELBO | WAE-ELBO = recon + \(\beta\)·KL + \(\alpha\)·\(J_{\text{freq}}\) | Signed density matrix \(\varrho_t\) |
-| Diffusion / Flows | WAE-Diffusion over wiring space | Spectral noise schedule via \(\Lambda_m\) |
+| PCA | Spectral Laplacian, $$L_f = D_f - W_f$$ | Graph smoothness $$z^\top L_f z$$ |
+| Autoencoder | Wiring Autoencoder (deterministic, $$J_{\text{freq}}$$ loss) | $$L_f$$ as bottleneck geometry |
+| PPCA | Probabilistic Graph Wiring (Gaussian $$z \to L(z)$$) | Modal prior $$p(z) = \mathcal{N}(0, \Lambda_m^{-1})$$ |
+| VAE + ELBO | WAE-ELBO = recon + $$(\beta\)·KL + \(\alpha\)·\(J_{\text{freq}}$$ | Signed density matrix $$\varrho_t$$ |
+| Diffusion / Flows | WAE-Diffusion over wiring space | Spectral noise schedule via $$\Lambda_m$$ |
 
 ---
 
