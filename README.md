@@ -1,5 +1,8 @@
 # Wiring Autoencoder (WAE)
 
+This architecture is related to NVIB (Nonparametric Variational Information Bottleneck). It applies pre-built semantic
+ spectral filters and inline memory to VAE to save learning steps by identifying the object of learning via spectral methods.
+
 A **Variational Autoencoder whose generative path is mediated by a graph wiring**
 (i.e. a learned Laplacian) rather than a plain linear map.  
 The progression mirrors the book *The Little Book of Generative AI Foundations*:
