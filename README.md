@@ -1,5 +1,8 @@
 # Wiring Autoencoder (WAE)
 
+This architecture is related to NVIB (Nonparametric Variational Information Bottleneck). It applies pre-built semantic
+ spectral filters and inline memory to VAE to save learning steps by identifying the object of learning via spectral methods.
+
 A **Variational Autoencoder whose generative path is mediated by a graph wiring**
 (i.e. a learned Laplacian) rather than a plain linear map.  
 The progression mirrors the book *The Little Book of Generative AI Foundations*:
@@ -9,6 +12,23 @@ PCA → PPCA → VAE
  ↕      ↕      ↕
 Graph Wiring → Probabilistic Graph Wiring → WAE
 ```
+
+---
+
+## v1 (stable) vs v2 (in development)
+
+| | v1 WAE | v2 WAE (Spectral-PPCA) |
+|---|---|---|
+| Decoder | `WiringDecoder` — edge delta logits | `SpectralLoadingDecoder` — `W = U_{1:q} diag(ω) S` |
+| ELBO | `recon + β·KL(z) + α·J_freq` | `recon + KL(z) + kl_S + kl_tau` (three-term) |
+| Spectral prior | Hard `J_freq` penalty | Variational Gamma prior `KL(q(ω) ∥ Exp(τλk))` |
+| Index `I` | Not Bayesian | Enters via frozen `(U_{1:q}, Λ_{1:q})` eigenpair of `L(I)` |
+| Memory | None | `SpectralAssociativeMemory` — outer-product Hopfield, pre-built from spectral artefact |
+| Index selection | — | ELBO Bayes factor `exp(ℒ(I1) − ℒ(I2))` |
+
+See [`docs/v2/README.md`](docs/v2/README.md) and [`docs/v2/00-architecture.md`](docs/v2/00-architecture.md) for the full v2 spec.
+
+---
 
 ## Core Idea
 
@@ -20,7 +40,7 @@ the decoder:
 3. Runs a **tau-mode diffusion** over the data embedding table using `L(z)`.
 4. Predicts `x̂` from the diffused neighbourhood, with Gaussian likelihood.
 
-The ELBO is:
+### v1 ELBO
 
 ```
 ℒ(θ,φ; x) = E_{q_φ(z|x)}[log p_θ(x|z)]  − β·KL(q_φ(z|x) ‖ p(z))
@@ -31,20 +51,41 @@ The ELBO is:
 interpretable spectral structures — the direct analogue of tau-mode truncation
 in ArrowSpace.
 
+### v2 Three-Term ELBO (Spectral-PPCA)
+
+```
+ℒ_WAEv2 = E_q[log p(x|z,W)]
+         − KL( q(z)  ‖  N(0,I)  )      [standard isotropic latent KL]
+         − KL( q(S)  ‖  p(S|I)  )      [spectral-basis KL — eigenvalue-weighted]
+         − KL( q(ω)  ‖  p(ω|τ,Λ))     [τ-mode frequency KL — Gamma vs Exp]
+```
+
+The ArrowSpace index `I` enters solely through the pre-computed frozen eigenpair
+`(U_{1:q}, Λ_{1:q})` of `L(I)` — no Laplacian is evaluated or inverted at training time.
+
+---
+
 ## Architecture Modules
 
-| Module | Role |
-|--------|------|
-| `wae/encoder.py` | Amortised posterior `q_φ(z|x)` — optional λ-fingerprint enrichment |
-| `wae/wiring_decoder.py` | `z → wiring logits → Laplacian L(z)` |
-| `wae/diffusion_decoder.py` | `L(z), E → x̂` via tau-mode diffusion |
-| `wae/model.py` | Full WAE: ELBO + spectral regulariser, reparameterisation trick |
-| `wae/laplacian.py` | Differentiable Laplacian builder from soft edge weights |
-| `wae/spectral.py` | `J_freq` cost, tau-mode truncated diffusion, λ-fingerprint |
-| `wae/dataset.py` | Dataset helpers (MNIST, CORA, PubMed, custom CSV) |
-| `train.py` | Training loop with W&B / CSV logging |
-| `benchmark.py` | Comparative benchmarks vs. plain VAE and linear AE |
-| `configs/default.yaml` | Hyperparameters |
+| Module | Role | Version |
+|--------|------|---------|
+| `wae/encoder.py` | Amortised posterior `q_φ(z|x)` — optional λ-fingerprint enrichment | v1 |
+| `wae/encoder.py` | `WiringEncoderV2` — adds `ModeWeightHead` outputting `(log_a, log_b)` for τ-mode prior; isotropic KL for `z` | v2 |
+| `wae/wiring_decoder.py` | `WiringDecoder` — `z → wiring logits → L(z)` | v1 |
+| `wae/wiring_decoder.py` | `SpectralLoadingDecoder` — `z, U_q → W = U_q diag(ω) S → L(z)` | v2 |
+| `wae/diffusion_decoder.py` | `L(z), E → x̂` via tau-mode diffusion | v1 + v2 |
+| `wae/model.py` | `WiringAutoencoder` — v1 ELBO + spectral regulariser | v1 |
+| `wae/model.py` | `WiringAutoencoderV2` — three-term ELBO + `extract_spectral_artefact()` | v2 |
+| `wae/laplacian.py` | Differentiable Laplacian builder; v2 adds `from_spectral_loading(W, L_base)` | v1 + v2 |
+| `wae/spectral.py` | `J_freq` cost, tau-mode diffusion, λ-fingerprint; v2 adds `spectral_basis_kl`, `tau_mode_kl` | v1 + v2 |
+| `wae/spectral_memory.py` | `SpectralAssociativeMemory` — Hopfield memory pre-built from spectral artefact `A(I)` | v2 |
+| `wae/stability.py` | Training diagnostics + `spectral_kl_health_check` (6-level hierarchy) | v1 + v2 |
+| `wae/dataset.py` | Dataset helpers (MNIST, CORA, PubMed, custom CSV) | v1 + v2 |
+| `train.py` | Training loop with W&B / CSV logging | v1 + v2 |
+| `benchmark.py` | Comparative benchmarks vs. plain VAE and linear AE | v1 + v2 |
+| `configs/default.yaml` | Hyperparameters | v1 + v2 |
+
+---
 
 ## Quickstart
 
@@ -53,6 +94,15 @@ pip install -e ".[dev]"
 python train.py --config configs/default.yaml --dataset cora
 python benchmark.py --dataset cora --output results/
 ```
+
+For v2:
+
+```bash
+python train.py --config configs/default.yaml --dataset cora --model_version 2
+python benchmark.py --dataset cora --output results/ --model_version 2
+```
+
+---
 
 ## Flagship Demo — Molecular / Spectral Graph Generation
 
@@ -88,6 +138,8 @@ Outputs written to `results/spectral_demo/`:
 
 ### Quantitative Evaluation
 
+#### v1 metrics
+
 | Metric | What it measures |
 |---|---|
 | Reconstruction MSE | Quality of x̂ recovered through wiring path |
@@ -97,16 +149,38 @@ Outputs written to `results/spectral_demo/`:
 | Frobenius distance to NN | Novelty: how far are generated Laplacians from training set? |
 | Entropy match rate | Fraction of samples within tol=0.05 of a target entropy |
 
+#### v2 additional metrics
+
+| Metric | What it measures |
+|---|---|
+| `kl_S` | Spectral alignment of loadings with ArrowSpace index `I` |
+| `kl_tau` | Effective frequency band selection via τ-mode prior |
+| `active_modes` | Number of modes with `E[ωk] > 0.01` contributing to `W` |
+| `memory_snr` | Retrieval quality of `SpectralAssociativeMemory` (key orthogonality) |
+| `elbo_bayes_factor` | `exp(ℒ(I1) − ℒ(I2))` — comparison of competing ArrowSpace indices |
+| `linear_probe_acc` | Discriminative quality of frozen latent `mu` |
+| Spectral entropy H(Λ) | As v1 |
+
+---
+
 ## Benchmarks (CORA, 7-class node classification)
 
 Run `benchmark.py` to reproduce. Reported metrics: reconstruction MSE,
 latent KL, downstream accuracy (linear probe), and spectral entropy of `L(z)`.
+
+---
 
 ## Connection to ArrowSpace
 
 `wae/laplacian.py` mirrors `ArrowSpaceBuilder.build()` logic from
 [pyarrowspace](https://github.com/tuned-org-uk/pyarrowspace), but implemented
 as a **differentiable PyTorch layer** so gradients flow through `L(z)`.
+
+In v2, the ArrowSpace index `I` additionally determines the frozen eigenpair
+`(U_{1:q}, Λ_{1:q})` that parametrises both the loading matrix prior and the
+τ-mode frequency prior. Index selection is made Bayesian via the ELBO Bayes factor.
+
+---
 
 ## References
 

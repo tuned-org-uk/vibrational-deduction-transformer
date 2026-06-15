@@ -4,7 +4,7 @@
 
 WAE v2 follows the same step-by-step progression as v1 and the book
 *The Little Book of Generative AI Foundations* (Chen, 2026), but upgrades
-the PPCA and VAE steps with three Spectral-PPCA structural priors:
+the PPCA and VAE steps with two Spectral-PPCA structural priors:
 
 ```
 Book progression:             v1 WAE analogue:             v2 WAE upgrade:
@@ -15,7 +15,7 @@ Autoencoder            →     Wiring AE (J_freq loss)   →  SpectralLoadingDec
   ↓                              ↓                           ↓
 PPCA                   →     modal prior N(0,Λm⁻¹)     →  IMPLEMENTED in KL
   ↓                              ↓                           ↓
-VAE + ELBO             →     recon+β·KL+α·J_freq        →  four-term ELBO
+VAE + ELBO             →     recon+β·KL+α·J_freq        →  three-term ELBO
   ↓                              ↓                           ↓
 Associative memory     →     (absent)                   →  SpectralAssociativeMemory
   ↓                              ↓                           ↓
@@ -62,12 +62,12 @@ Diffusion / Flows      →     (future) WAE-Diffusion     →  unchanged
      │
    x̂  (B, D)    ─────────────────────►  WAE v2 ELBO Loss
                                                │
-            recon  kl_z  kl_S  kl_tau  ────────┘
+            recon  kl_S  kl_tau  ──────────────┘
 ```
 
 ---
 
-## The Four-Term ELBO
+## The Three-Term ELBO
 
 The v1 objective:
 
@@ -79,10 +79,14 @@ is replaced in v2 by the Spectral-PPCA ELBO:
 
 ```
 ℒ_WAEv2 = E_q[log p(x|z,W)]
-         − KL( q(z)    ∥  p_Lap(z) )          [latent smoothness]
          − KL( q(S)    ∥  p(S|I)   )           [spectral basis KL]
          − KL( q(ω)    ∥  p(ω|τ,Λ))           [τ-mode frequency KL]
 ```
+
+The latent `z` is regularised by the standard isotropic prior `N(0,I)`,
+identical to v1. The ArrowSpace index `I` enters solely through the
+pre-computed eigenpair `(U_{1:q}, Λ_{1:q})` of `L(I)`, which are frozen
+constants at training time — no Laplacian is evaluated or inverted at runtime.
 
 ### Term 1 — Reconstruction
 
@@ -92,26 +96,7 @@ Unchanged from v1: Gaussian NLL through `TauModeDiffusion`.
 log p(x|z) = −‖x − x̂‖² / (2σ²) − D log σ
 ```
 
-### Term 2 — Laplacian-Precision Latent KL
-
-Replaces the isotropic `KL(q(z) ∥ N(0,I))`. The prior is:
-
-```
-p_Lap(z) = N(0, (I + β Ls)⁻¹)
-```
-
-where `Ls` is the sample-graph Laplacian built from the current batch of latent
-means (stop-gradient). The closed-form KL is:
-
-```
-KL = ½ [ tr(Σz (I + β Ls))  +  μz⊤ (I + β Ls) μz  −  d
-         − log det Σz  +  log det(I + β Ls)⁻¹ ]
-```
-
-The cross-term `μz⊤ Ls μz` is the graph Dirichlet energy of the latent mean —
-penalising codes that vary sharply across sample-graph neighbours.
-
-### Term 3 — Spectral-Basis KL
+### Term 2 — Spectral-Basis KL
 
 The loading matrix `S` lives in the Laplacian eigenbasis. Prior:
 
@@ -121,8 +106,10 @@ p(S|I) ∝ exp(−λs/2 · tr(S⊤ Λ_{1:q} S))
 
 Eigenvalue-weighted shrinkage: high-frequency components (large λk) are penalised
 more strongly, implementing a spectral Occam's razor. Closed-form Gaussian KL.
+`Λ_{1:q}` comes from the pre-computed eigendecomposition of `L(I)` — it is a
+frozen constant throughout training.
 
-### Term 4 — τ-Mode Frequency KL
+### Term 3 — τ-Mode Frequency KL
 
 Replaces the hard `J_freq` penalty. Mode weights `ω_k > 0` carry an exponential prior:
 
@@ -138,6 +125,8 @@ Closed-form KL between Gamma and Exponential:
 KL(Gamma(a,b) ∥ Exp(r)) = log(b) − log(r) + lgamma(a)
                           + (1−a)·digamma(a) + a·b/r
 ```
+
+`λk` values are taken from the same frozen `Λ_{1:q}` used in Term 2.
 
 ---
 
@@ -160,33 +149,26 @@ added as a class method:
 
 **`lambda_fingerprint`** — unchanged.
 
-**NEW: `laplacian_precision_kl(mu, log_var, Ls, beta)`**
-- Computes KL(q(z) ∥ N(0,(I+βLs)⁻¹)).
-- Uses stop-gradient `Ls = build_knn_laplacian(mu.detach())`.
-- Returns scalar KL loss.
-
 **NEW: `spectral_basis_kl(S, log_var_S, eigvals_q, lam_s)`**
 - Computes KL(q(S) ∥ p(S|I)) under eigenvalue-weighted Gaussian prior.
 - `S (B, q, q)`, `eigvals_q (q,)`.
+- `eigvals_q` is a frozen constant from the pre-computed eigendecomposition of `L(I)`.
 
 **NEW: `tau_mode_kl(log_a, log_b, eigvals_q, tau)`**
 - Computes KL(Gamma(a,b) ∥ Exponential(τλk)) per mode, summed.
 - Fully closed-form, no MC sampling.
-
-**NEW: `build_knn_laplacian(z_batch, k=8)`**
-- Builds a sparse kNN Laplacian from a batch of latent vectors.
-- Returns normalised symmetric Laplacian `Ls (B, B)`.
-- Called with stop-gradient in encoder forward.
+- `eigvals_q` same frozen constant as above.
 
 ### `wae/encoder.py` — `WiringEncoderV2`
 
 Changes from v1 `WiringEncoder`:
 
-- **`kl_loss` replaced**: uses `laplacian_precision_kl` with modal prior.
-  Legacy isotropic KL available via `use_isotropic_kl=True` config flag.
+- **`kl_loss`**: standard isotropic `KL(q(z) ∥ N(0,I))`, identical to v1.
+  No Laplacian-precision term; no runtime graph construction.
 - **`ModeWeightHead` added**: small linear layer outputting `(log_a, log_b)`
   for each of the `q` mode weights. These parametrise `q(ω)`.
-- **`lambda_fingerprint` concatenation**: unchanged.
+- **`lambda_fingerprint` concatenation**: unchanged. The fingerprint is read
+  from the fixed `L(I)` — it is not rebuilt from data at runtime.
 - Outputs `(z, mu, log_var, log_a, log_b)`.
 
 ### `wae/wiring_decoder.py` — `SpectralLoadingDecoder` (new, replaces `WiringDecoder`)
@@ -208,6 +190,8 @@ No changes. `TauModeDiffusion` is already the Spectral-PPCA decoder.
 
 - Assembles `WiringEncoderV2`, `SpectralLoadingDecoder`, `DiffusionDecoder`.
 - `forward()` returns `(loss, recon, kl_z, kl_S, kl_tau, x_hat, L_z, z, mu, log_var)`.
+  `kl_z` is the standard isotropic KL, included for monitoring but not weighted
+  by the spectral priors.
 - **NEW: `extract_spectral_artefact(U_q, eigvals_q)`** — packages
   `(W_hat, omega_hat, S_memory)` as the post-training spectral artefact.
 - `generate()` unchanged.
@@ -230,7 +214,7 @@ No changes. `TauModeDiffusion` is already the Spectral-PPCA decoder.
 | Term | v1 WAE | v2 WAE |
 |---|---|---|
 | Reconstruction | `−‖x−x̂‖²/2σ²` | Same |
-| Latent KL | `KL(q(z) ∥ N(0,I))` isotropic | `KL(q(z) ∥ N(0,(I+βLs)⁻¹))` Laplacian-precision |
+| Latent KL | `KL(q(z) ∥ N(0,I))` isotropic | Same — isotropic `N(0,I)` |
 | Spectral basis KL | None | `KL(q(S) ∥ p(S|I))` eigenvalue-weighted Gaussian |
 | τ-mode term | `α·Σ_{j>k} λj` hard penalty | `KL(q(ω) ∥ Exp(τλk))` variational Gamma prior |
 | Density matrix | Stability diagnostic only | Optional: `μ2·‖ϱt‖²_F` occupancy penalty |
@@ -262,8 +246,8 @@ Key properties of `S_I`:
 
 ```
 PHASE 1 — OFFLINE (WAE v2 training)
-  ArrowSpace index I  →  L(I), U_q, Λq
-  WiringAutoencoderV2.train()  →  ELBO maximisation
+  ArrowSpace index I  →  L(I), U_q, Λq          [one-time eigendecomposition]
+  WiringAutoencoderV2.train()  →  ELBO maximisation  [no runtime Laplacian ops]
   extract_spectral_artefact()  →  A(I)
   SpectralAssociativeMemory(A(I))  →  S_I
   Optional: ELBO Bayes factor over competing indices I1, I2, ...
@@ -282,7 +266,6 @@ PHASE 2 — ONLINE (Spectral Memory Transformer)
 | Metric | How computed | What it measures |
 |---|---|---|
 | Reconstruction MSE | `‖x − x̂‖²` averaged over test set | Quality of reconstruction via wiring path |
-| KL divergence (Lap) | `KL(q(z) ∥ p_Lap(z))` | Latent smoothness w.r.t. sample graph |
 | KL spectral basis | `KL(q(S) ∥ p(S|I))` | Spectral alignment of loadings with index |
 | τ-mode KL | `KL(q(ω) ∥ Exp(τΛ))` | Effective frequency band selection |
 | Active mode count | `Σk 1[E[ωk] > δ]` | Modes contributing to W |
@@ -300,8 +283,8 @@ PHASE 2 — ONLINE (Spectral Memory Transformer)
 | `ArrowSpaceBuilder.build(E, params)` | `DifferentiableLaplacian.from_embeddings(E)` | Same + `from_spectral_loading(W, L_base)` |
 | kNN affinity graph + RBF kernel | Base graph (frozen topology, frozen base weights) | Same |
 | Edge weight tuning | `WiringDecoder` edge delta logits | `SpectralLoadingDecoder`: `W = U_{1:q} diag(ω) S` |
-| Lambda (λ) values | Eigenvalues in `J_freq` and `lambda_fingerprint` | Same + eigenvalue-weighted KL priors |
+| Lambda (λ) values | Eigenvalues in `J_freq` and `lambda_fingerprint` | Same + eigenvalue-weighted KL priors (frozen) |
 | Tau-mode truncation | `TauModeDiffusion(tau_modes=k)` | Same + `tau_mode_kl` variational prior |
 | `J_freq` cost | `spectral_freq_cost(L, tau_modes=k)` | Replaced by `tau_mode_kl`; kept as ablation |
-| λ-fingerprint | `lambda_fingerprint(L)` fed to encoder | Unchanged |
+| λ-fingerprint | `lambda_fingerprint(L)` fed to encoder | Unchanged; read from fixed `L(I)` |
 | Index selection | Not Bayesian | ELBO Bayes factor: `exp(ℒ(I1) − ℒ(I2))` |
