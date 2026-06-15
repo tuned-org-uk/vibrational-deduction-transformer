@@ -2,14 +2,20 @@
 
 > **Context.** This document extends the v1 stability analysis for the WAE v2
 > Spectral-PPCA architecture. All v1 stability conditions (CFL, damping, density
-> matrix PSD, preconditioned GD convergence) apply unchanged. Two new stability
-> considerations arise from the v2 upgrades: the on-the-fly sample Laplacian
-> feedback loop and mode weight collapse.
+> matrix PSD, preconditioned GD convergence) apply unchanged. One new stability
+> consideration arises from the v2 upgrade: mode weight collapse in the τ-mode
+> variational prior.
 
 For the full v1 stability hierarchy (CFL condition, per-mode damping, energy
 monotonicity, signed density matrix PSD, preconditioned GD convergence), refer
 to the corresponding sections of the v1 `04-stability.md`. This document records
 only the v2 additions.
+
+> **Design note.** In v2, the ArrowSpace index `I` enters the ELBO solely through
+> the pre-computed eigenpair `(U_{1:q}, Λ_{1:q})` of `L(I)`. These are frozen
+> constants at training time — no Laplacian is evaluated or inverted at runtime.
+> This eliminates the sample-Laplacian feedback loop present in earlier drafts
+> and reduces the stability hierarchy from 7 levels to 6.
 
 ---
 
@@ -17,12 +23,11 @@ only the v2 additions.
 
 | Symbol | Meaning |
 |---|---|
-| \(L_s\) | Sample-graph Laplacian built from batch of latent means \(\{\mu_{x,n}\}\) |
-| \(\beta\) | Diffusion strength in Laplacian-precision prior \((I + \beta L_s)^{-1}\) |
 | \(\omega_k\) | Mode weight for Laplacian mode \(k\); \(\omega_k > 0\) |
 | \(a_k, b_k\) | Gamma shape and rate parametrising \(q(\omega_k) = \mathrm{Gamma}(a_k, b_k)\) |
 | \(\tau\) | Temperature in τ-mode prior \(p(\omega_k) = \mathrm{Exp}(\tau\lambda_k)\) |
 | \(q_{\min}\) | Minimum number of active modes: \(|\{k : \mathbb{E}[\omega_k] > \delta\}| \ge q_{\min}\) |
+| \(\Lambda_{1:q}\) | Frozen eigenvalues from pre-computed eigendecomposition of \(L(\mathcal{I})\) |
 
 All other symbols follow the v1 notation table in `04-stability.md`.
 
@@ -44,63 +49,16 @@ Fix lower-level instabilities before diagnosing higher-level ones.
 
 ---
 
-## 2. v2 Addition: Sample Laplacian Feedback Loop
+## 2. v2 Addition: Mode Weight Collapse
 
-### 2.1 The feedback structure
-
-In v2, \(L_s\) is built on-the-fly from the batch of latent means \(\{\mu_{x,n}\}\),
-which are themselves outputs of the encoder trained under the KL that uses \(L_s\).
-This creates a feedback loop:
-
-```
-encoder parameters θ  →  latent means μ  →  L_s(μ)  →  KL(q(z) ∥ N(0,(I+βLs)⁻¹))  →  θ
-```
-
-### 2.2 Stabilisation: stop-gradient
-
-The primary stabilisation is a **stop-gradient** on the \(L_s\) construction:
-
-```python
-Ls = build_knn_laplacian(mu_z.detach())   # no gradient through Ls
-```
-
-This breaks the feedback loop: gradients flow through the KL formula
-but not through the Laplacian construction itself. The encoder is updated
-to make latent codes smooth under the current graph, but the graph is not
-differentiated with respect to the encoder.
-
-### 2.3 Alternative: frozen base Laplacian
-
-For additional stability, use a **frozen** sample Laplacian built from base
-encoder embeddings (pre-WAE) as a fixed structural prior, updated only every
-\(T_{\text{refresh}}\) epochs. This reduces the feedback to a slow outer loop.
-
-Recommended for early training: use frozen \(L_s\) for epochs 1–\(T_{\text{warmup}}\),
-then switch to stop-gradient on-the-fly construction.
-
-### 2.4 Diagnostic
-
-Monitor the **Laplacian KL per epoch**: it should decrease monotonically after warmup.
-A sudden spike indicates the feedback loop is destabilising the sample graph.
-
-| Metric | Normal range | Warning |
-|---|---|---|
-| `KL_Lap` per epoch | Decreasing after warmup | Spike > 2× previous epoch |
-| `‖Ls‖_F` across batches | Stable (< 20% variation) | High variance → graph ill-conditioned |
-| `λ_max(Ls)` | Bounded (< `λ_max(Lf) × 10`) | Exceeds bound → kNN radius too large |
-
----
-
-## 3. v2 Addition: Mode Weight Collapse
-
-### 3.1 The collapse risk
+### 2.1 The collapse risk
 
 The Gamma prior \(p(\omega_k) = \mathrm{Exp}(\tau\lambda_k)\) has rate \(\tau\lambda_k\).
 For large \(\tau\lambda_k\) (high-frequency modes), the posterior \(q(\omega_k)\) can collapse
 to a near-zero point mass. This is correct behaviour (mode selection), but if it
 extends to low-frequency modes, the loading matrix \(W\) degenerates.
 
-### 3.2 Stabilisation: shape parameter floor
+### 2.2 Stabilisation: shape parameter floor
 
 Apply a minimum floor on the Gamma shape parameter \(a_k\):
 
@@ -110,7 +68,7 @@ a_k = torch.clamp(a_k, min=a_min)   # e.g. a_min = 0.1
 
 This prevents the distribution from collapsing to a point mass for any mode.
 
-### 3.3 Stabilisation: active mode count constraint
+### 2.3 Stabilisation: active mode count constraint
 
 Track the number of active modes \(N_{\text{active}} = |\{k : \mathbb{E}[\omega_k] > \delta\}|\)
 and add a soft Lagrange multiplier penalising \(N_{\text{active}} < q_{\min}\):
@@ -121,7 +79,7 @@ mode_floor_penalty = torch.relu(q_min - active)
 loss = elbo + nu * mode_floor_penalty
 ```
 
-### 3.4 Diagnostic
+### 2.4 Diagnostic
 
 | Metric | Normal range | Warning |
 |---|---|---|
@@ -132,7 +90,7 @@ loss = elbo + nu * mode_floor_penalty
 
 ---
 
-## 4. v2 Addition: Spectral Eigenvalue Floor
+## 3. v2 Addition: Spectral Eigenvalue Floor
 
 The spectral-basis KL has precision proportional to \(\Lambda_{1:q}\). If
 \(\lambda_1 \approx 0\) (Fiedler vector near zero for a nearly disconnected graph),
@@ -145,17 +103,17 @@ eigvals_for_kl = eigvals_q.clamp(min=1e-3)
 ```
 
 This does not affect the spectral geometry but prevents numerical instability in
-the KL gradient.
+the KL gradient. Both `spectral_basis_kl` and `tau_mode_kl` should apply this floor.
 
 ---
 
-## 5. Updated Full Stability Checklist
+## 4. Updated Full Stability Checklist
 
 ### Pre-training
 
 - [ ] v1 checks: `λ_max(Lf)`, `κ(Lf)`, graph connectivity, mass matrix range.
 - [ ] Set `Δt_init ≤ √(2/λ_max(Lf))`.
-- [ ] Build initial frozen `Ls` from base embeddings. Verify `λ_max(Ls) < 10 × λ_max(Lf)`.
+- [ ] Verify frozen `Λ_{1:q}` from eigendecomposition of `L(I)` is non-degenerate.
 - [ ] Set `a_min ≥ 0.1` in `ModeWeightHead` config.
 - [ ] Set `q_min ≥ max(2, q // 4)` in config.
 - [ ] Apply eigenvalue floor `clamp(min=1e-3)` in all KL computations.
@@ -165,11 +123,9 @@ the KL gradient.
 | Metric | Normal range | Warning |
 |---|---|---|
 | All v1 metrics | See v1 `04-stability.md` | See v1 |
-| `KL_Lap` | Decreasing after warmup | Spike > 2× previous epoch |
 | `KL_S` (spectral basis) | Decreasing | Spike or oscillation |
 | `τ-mode KL` | Stable decrease | Sudden spike |
 | `N_active` | ≥ `q_min` | Drops below `q_min` |
-| `‖Ls‖_F` | Stable | High batch-to-batch variance |
 
 ### Post-training
 
@@ -183,7 +139,7 @@ the KL gradient.
 
 ---
 
-## 6. Stability Hierarchy (v2 extended)
+## 5. Stability Hierarchy (v2 extended)
 
 ```
 Level 1 — Graph geometry
@@ -196,10 +152,7 @@ Level 1 — Graph geometry
                                 └─ ϱ±_t PSD; ‖ϱ_t‖_F bounded
                                      └─ Level 5 — Optimiser
                                           └─ κ(P_{σ,M}) ≪ κ(Lf); linear convergence
-                                               └─ Level 6 (v2) — Sample Laplacian
-                                                    └─ Stop-gradient on Ls
-                                                         └─ KL_Lap monotone after warmup
-                                                              └─ Level 7 (v2) — Mode weights
-                                                                   └─ N_active ≥ q_min
-                                                                        └─ ‖Ŵ‖_F non-degenerate
+                                               └─ Level 6 (v2) — Mode weights
+                                                    └─ N_active ≥ q_min
+                                                         └─ ‖Ŵ‖_F non-degenerate
 ```
