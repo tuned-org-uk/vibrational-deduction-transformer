@@ -95,6 +95,121 @@ ArrowSpace index `I`:
                └─────────────────────────────┘
 ```
 
+Here is a complete, structured summary of the v2 docs and open issues in [tuned-org-uk/wiring-autoencoder](https://github.com/tuned-org-uk/wiring-autoencoder).
+
+***
+
+## What is WAE v2?
+
+The **Wiring Autoencoder v2 (WAE v2)** is a fully Bayesian generative model that upgrades WAE v1 with **Spectral-PPCA** — probabilistic PCA performed in the Laplacian eigenbasis of an ArrowSpace index graph.  Its latent space is shaped by graph spectral geometry, and its post-training output is a **spectral artefact** that seeds a transformer with pre-built associative memory. 
+
+***
+
+## Conceptual Progression
+
+The architecture traces the classical generative modelling ladder, replacing each step with a graph-spectral analogue:
+
+| Book concept | v1 WAE | v2 WAE |
+|---|---|---|
+| PCA | Spectral Laplacian `Lf` | Same + eigenbasis for `W` |
+| Autoencoder | Wiring AE (`J_freq` loss) | `SpectralLoadingDecoder` |
+| PPCA | Modal prior `N(0, Lm^-1)` | Implemented in KL terms |
+| VAE + ELBO | `recon + beta*KL + alpha*J_freq` | Three-term spectral ELBO |
+| Associative memory | Absent | `SpectralAssociativeMemory` |
+
+
+
+***
+
+## The Three-Term ELBO
+
+The v2 training objective replaces v1's hard `J_freq` spectral penalty with three principled variational terms: 
+
+```
+L_WAEv2 = E_q[log p(x|z,W)]
+         - KL( q(z)  || N(0,I)       )    # standard isotropic latent KL
+         - KL( q(S)  || p(S|I)       )    # spectral-basis KL
+         - KL( q(w)  || Exp(tau*lk)  )    # tau-mode frequency KL
+```
+
+- **Spectral-basis KL**: penalises the loading matrix `S` using eigenvalue-weighted Gaussian shrinkage — high-frequency eigenmodes (large `lk`) are penalised exponentially more, implementing a *spectral Occam's razor*. 
+- **Tau-mode KL**: replaces the hard penalty by placing an Exponential prior over mode weights `w_k`, with heavy support on low-frequency modes and a closed-form Gamma/Exponential KL. 
+
+***
+
+## Key Modules
+
+### `WiringEncoderV2` (`encoder.py`)
+Wraps the `VDT` vibrational recurrence (discrete damped wave equation) and adds a `ModeWeightHead` — a linear layer outputting variational Gamma parameters `(log_a, log_b)` for each spectral mode.  It uses **standard isotropic KL** for the latent `z` (the Laplacian-precision KL path was removed in PR #35). 
+
+### `SpectralLoadingDecoder` (`wiring_decoder.py`)
+Replaces `WiringDecoder` as the v2 default. Maps `z (B, q)` to a loading matrix `W = U_q @ diag(w) @ S` in the Laplacian eigenbasis.  Edge weights are synthesised via `DifferentiableLaplacian.from_spectral_loading(W, L_base)`, fully differentiable back to `z`. 
+
+### `WiringAutoencoderV2` (`model.py`)
+Top-level assembly of encoder, spectral decoder, and diffusion decoder. Its `forward()` returns a 9-key dict: `{loss, recon, kl_z, kl_S, kl_tau, x_hat, z, mu, log_var}`.  After training, `extract_spectral_artefact()` packages the mean loading matrix `W_hat`, posterior mode weights `omega_hat`, and the associative memory matrix `S_I`. 
+
+### `SpectralAssociativeMemory` (`spectral_memory.py`)
+Wraps the spectral artefact into a pre-built Hopfield/outer-product memory: 
+
+```
+S_I = sum_k  E[w_k] * d_theta(w_hat_k) * w_hat_k^T
+```
+
+Keys `w_hat_k` are Laplacian eigenvector-aligned loading directions (approximately orthonormal for high retrieval SNR). Values `d_theta(w_hat_k)` are decoder responses per frequency band. Supports online delta-rule updates. 
+
+***
+
+## Two-Phase Architecture
+
+The system separates offline spectral learning from online inference: 
+
+- **Phase 1 (Offline):** One-time eigendecomposition of `L(I)` → train `WiringAutoencoderV2` via ELBO → extract artefact `A(I)` → build `S_I`. Frozen eigenpairs `(U_q, Lq)` are constants at runtime; no Laplacian is built during training.
+- **Phase 2 (Online):** Transformer FFN / cross-attention initialised from `S_I`. Self-attention handles dynamic short-term associations; `S_I` supplies long-term spectral prior memory; delta-rule writes new associations online.
+
+***
+
+## Six Algorithm Tracks
+
+The docs define six branching implementation options: 
+
+- **Option 1** — Deterministic AE with `SpectralLoadingDecoder` (ablation: `J_freq` hard vs tau-mode soft penalty)
+- **Option 3** — Latent diffusion with per-mode spectral noise schedule (`a_tau^(k) = exp(-tau * lk * tau_step)`)
+- **Option 4** — Variational Laplace AE (no MC sampling; Laplace posterior + spectral-basis/tau-mode KLs)
+- **Option 6** — Vibrational classifier/reasoner with `SpectralAssociativeMemory` key-matrix init and depth-supervised CE loss
+
+Recommended implementation sequence: **6 → 1 → 4 → 3**. 
+
+***
+
+## Open Issues (19 total)
+
+All issues are part of the v2 roadmap tracked under (https://github.com/tuned-org-uk/wiring-autoencoder/issues/34), organised into five phases:
+
+| Phase | Issues | Focus |
+|---|---|---|
+| **0 — Foundations** | #16, #17, #19, #24 | `laplacian.py`, `vdt.py`, `stability.py`, two KL functions in `spectral.py` |
+| **1 — Encoder/Decoder** | #25, #26 | `WiringEncoderV2` (isotropic KL + `ModeWeightHead`), `SpectralLoadingDecoder` |
+| **2 — Model assembly** | #27 | `WiringAutoencoderV2`, three-term ELBO, `extract_spectral_artefact()` |
+| **3 — Memory & Metrics** | #28, #32 | `SpectralAssociativeMemory`, 7-metric evaluation suite |
+| **4 — App Tracks** | #18/#29, #20/#30, #21/#31, #33 | Options 6, 1, 4, 3 respectively |
+| **5 — Benchmarks/Demo** | #9, #13 | Multi-seed results on Cora/PubMed, updated generation demo |
+
+Key architectural decisions locked in by **PR #35**: the ELBO is three-term (Laplacian-precision latent KL removed); `kl_z` uses isotropic `N(0,I)`; `L_z` key dropped from `forward()` return dict; no runtime Laplacian construction during training. 
+
+***
+
+## Benchmark Metrics (v2)
+
+Seven active metrics are tracked by `evaluate_v2()`: 
+
+- `kl_S` — spectral basis KL
+- `kl_tau` — tau-mode frequency KL
+- `active_modes` — count of modes with `E[w_k] > 0.01`
+- `memory_snr` — retrieval SNR via key orthogonality
+- `elbo_bayes_factor` — `exp(L(I1) - L(I2))` for ArrowSpace index comparison
+- `linear_probe_acc` — logistic regression on frozen `mu`
+- `spectral_entropy H(L)` — diversity of generated wirings
+
 ---
 
 ## Document Map
