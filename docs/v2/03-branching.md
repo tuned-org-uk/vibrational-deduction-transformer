@@ -7,7 +7,8 @@ extended with the specific v2 upgrade that applies to it.
 The shared foundation in all cases remains the feature-space graph Laplacian \(L_f\),
 the mass matrix \(M\), the Rayleigh quotient \(R_M(z)\), and the discrete damped wave
 operator \(\Phi_L\). In v2, all tracks additionally have access to the spectral
-eigenbasis \(U_{1:q}\), the Laplacian-precision prior, and the spectral artefact.
+eigenbasis \(U_{1:q}\) and \(\Lambda_{1:q}\) — both frozen constants from the
+pre-computed eigendecomposition of \(L(\mathcal{I})\) — and the spectral artefact.
 
 ---
 
@@ -71,14 +72,16 @@ Stage 2: denoiser \(\epsilon_\theta(z_\tau, \tau)\) over modal latent space.
 
 ### v2 Upgrade
 
-- **Stage 1 prerequisite** is now `WiringAutoencoderV2` (Option 1 with v2 upgrades),
-  so the modal latent \(z\) is already shaped by the Laplacian-precision prior.
+- **Stage 1 prerequisite** is the simplified three-term `WiringAutoencoderV2`
+  (reconstruction + spectral-basis KL + τ-mode KL; no sample Laplacian).
+  The modal latent \(z\) is still shaped by the spectral loading prior and τ-mode prior.
 - **Spectral noise schedule** uses the modal prior covariance directly:
 
 $$p(z_\tau \mid z_0) = \mathcal{N}\!\left(\sqrt{\bar\alpha_\tau}\, z_0,\; (1-\bar\alpha_\tau)\,\Lambda_m^{-1}\right)$$
 
   High-frequency modes are corrupted earlier (smaller \(\bar\alpha_\tau\) for large \(\lambda_k\));
-  low-frequency modes persist longer.
+  low-frequency modes persist longer. \(\Lambda_m\) comes from the frozen eigendecomposition
+  of \(L(\mathcal{I})\) — no runtime Laplacian computation required.
 - The τ-mode distribution now provides the **noise schedule**: set
   \(\bar\alpha_\tau^{(k)} = \exp(-\tau \lambda_k \tau_{\text{step}})\) per mode.
 
@@ -98,17 +101,19 @@ are related as follows:
 | Option 4 (Laplace) | WAE v2 (full MC ELBO) |
 |---|---|
 | Posterior mode \(\hat{z} = \arg\min\) | Posterior mean \(\mu_z\) from encoder |
-| Laplace covariance \((H + \Lambda_m)^{-1}\) | Diagonal \(\Sigma_z\) from encoder |
-| \(H_{\text{recon}} + \Lambda_m\) precision | Laplacian-precision KL term |
-| Entropy term \(-\frac{1}{2}\log|H^{-1}|\) | \(-\frac{1}{2}\log\det\Sigma_z\) in KL |
+| Laplace covariance \((H + I)^{-1}\) | Diagonal \(\Sigma_z\) from encoder |
+| Reconstruction Hessian \(H_{\text{recon}}\) | Isotropic latent KL term |
+| Spectral-basis prior on \(\hat{S}\) | `spectral_basis_kl` |
+| τ-mode prior on \(\hat{\omega}\) | `tau_mode_kl` |
 
 When MC sampling is too expensive, use Option 4 as a deterministic approximation to
-the full v2 ELBO. The spectral-basis KL and τ-mode KL are equally applicable in the
-Laplace setting by plugging \(\hat{S}\) and \(\hat{\omega}\) into the KL formulas.
+the full v2 ELBO. Both the spectral-basis KL and τ-mode KL are directly applicable
+in the Laplace setting by plugging \(\hat{S}\) and \(\hat{\omega}\) into the KL formulas.
+All eigenvalues come from the frozen \(\Lambda_{1:q}\).
 
 ### Training Objective (Laplace ELBO)
 
-$$\mathcal{L} = -\log p(X_0 \mid \hat{z}) + \tfrac{1}{2}\hat{z}^\top \Lambda_m \hat{z} - \tfrac{1}{2}\log|H^{-1}|$$
+$$\mathcal{L} = -\log p(X_0 \mid \hat{z}) + \tfrac{1}{2}\|\hat{z}\|^2 - \tfrac{1}{2}\log|H^{-1}|$$
 
 ---
 
@@ -171,5 +176,5 @@ $$\mathcal{L} = \frac{1}{K}\sum_{t=1}^K \mathcal{L}_{\text{CE}}(\hat{y}_t, y) + 
 1. **Option 6** — closes the loop on Section 11 with spectral memory ablation. Minimal new code.
 2. **Option 1** — adds reconstruction objective; validates `SpectralLoadingDecoder` deterministic mode.
 3. **Option 4** — Laplace ELBO with spectral-basis + τ-mode KL. No MC sampling needed.
-4. **Option 3** — full generative model; requires Option 1 as Stage 1 prerequisite.
+4. **Option 3** — full generative model; Stage 1 prerequisite is now the simpler three-term WAE v2.
 5. **Option 2 / 5** — depending on classification (energy) or forecasting (PDE) application.
