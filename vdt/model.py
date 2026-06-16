@@ -138,11 +138,6 @@ class WiringAutoencoder(nn.Module):
         n_heads: int = 4,
         dropout: float = 0.1,
     ) -> None:
-        if not _V2_IMPORTS_OK:
-            raise ImportError(
-                "WiringAutoencoder requires SpectralLoadingDecoder and "
-                "spectral KL helpers.  Ensure phase-1 modules are present."
-            )
         super().__init__()
         self.q = q
         self.lam_s = lam_s
