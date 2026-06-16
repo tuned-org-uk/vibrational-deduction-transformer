@@ -21,10 +21,24 @@ Data flow::
       --> WiringEncoder      z, mu, log_var, log_a, log_b
       --> SpectralLoadingDecoder  W (B, d, q), omega (B, q), S (B, q, q),
                                   L_z (B, N, N)
-      --> DiffusionDecoder     x_hat (B, D)
+      --> DiffusionDecoder   uses self.embedding (N, D) as the node table
+                             x_hat (B, D)
       --> three-term ELBO
 
 The L_z key is NOT included in the return dict (PR #35).
+
+Embedding table
+---------------
+DiffusionDecoder.forward() requires an embedding table E of shape (N, D)
+(the full per-node feature matrix) so that the heat-kernel row
+k_row (B, N) can be multiplied against E_b (B, N, D).  The per-batch
+query x (B, D) must NOT be used as E -- its leading dimension is B, not N.
+
+WiringAutoencoder therefore stores ``self.embedding`` as an nn.Parameter
+of shape (n_nodes, input_dim), initialised to zeros.  Callers should
+populate it (e.g. with pre-trained node embeddings) before training.
+forward() passes self.embedding as E by default; an explicit
+``embedding_table`` kwarg overrides it for inference on a new graph.
 
 v1 (WiringAutoencoder) has been removed.  Only version 2 is supported.
 
@@ -73,6 +87,18 @@ class WiringAutoencoder(nn.Module):
     removed per PR #35.  The L_z tensor is also not returned from forward()
     for the same reason.
 
+    Embedding table
+    ---------------
+    ``self.embedding`` is a learnable nn.Parameter of shape
+    ``(n_nodes, input_dim)``.  It is the canonical node embedding table E
+    passed to DiffusionDecoder at every forward call.  Initialised to zeros;
+    callers should overwrite it with pre-trained embeddings before training::
+
+        model.embedding.data.copy_(pretrained_E)
+
+    The per-batch query ``x`` (shape ``(B, D)``) is the reconstruction
+    target and encoder input; it is NOT the embedding table.
+
     Data flow::
 
         x  (B, D),  U_q (N, q),  eigvals_q (q,),  L_f (B, N, N)
@@ -88,6 +114,7 @@ class WiringAutoencoder(nn.Module):
                 S        (B, q, q)        -- rotation matrix
                 L_z      (B, N, N)        -- synthesised Laplacian (internal)
           --> DiffusionDecoder
+                uses self.embedding  (N, D) as the node embedding table
                 x_hat    (B, D)
           --> three-term ELBO
 
@@ -151,6 +178,14 @@ class WiringAutoencoder(nn.Module):
             n_nodes = laplacian.n_nodes
         self._n_nodes = n_nodes
 
+        # Canonical node embedding table E of shape (N, D).
+        # DiffusionDecoder requires the full (N, D) table, not the per-batch
+        # query x (B, D).  Initialised to zeros; overwrite with pre-trained
+        # embeddings before training: model.embedding.data.copy_(E_pretrained)
+        self.embedding = nn.Parameter(
+            torch.zeros(n_nodes, input_dim), requires_grad=True
+        )
+
         # WiringEncoder  signature:
         #   input_dim, latent_dim, n_nodes, feat_dim, n_layers, ...
         # hidden_dim plays the role of feat_dim (per-node feature channels).
@@ -191,6 +226,7 @@ class WiringAutoencoder(nn.Module):
         node_idx: Optional[torch.Tensor] = None,
         spectral_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         L_f: Optional[torch.Tensor] = None,
+        embedding_table: Optional[torch.Tensor] = None,
     ) -> dict[str, torch.Tensor]:
         """
         Single forward pass returning all three-term ELBO components.
@@ -198,7 +234,9 @@ class WiringAutoencoder(nn.Module):
         Parameters
         ----------
         x : torch.Tensor
-            Query node embeddings.  Shape (B, D).
+            Query node embeddings used as encoder input and reconstruction
+            target.  Shape (B, D).  NOTE: this is NOT the embedding table
+            passed to DiffusionDecoder -- see ``embedding_table`` below.
         U_q : torch.Tensor
             Leading q eigenvectors of the frozen index Laplacian L(I).
             Shape (N, q).  Passed to both WiringEncoder (as eigvecs) and
@@ -216,6 +254,11 @@ class WiringAutoencoder(nn.Module):
             Feature-space Laplacian (B, N, N) or (N, N) for WiringEncoder.
             When None, a uniform Laplacian is synthesised from U_q and
             eigvals_q on the fly.
+        embedding_table : torch.Tensor or None
+            Full node embedding table of shape (N, D) to pass to
+            DiffusionDecoder instead of the stored self.embedding buffer.
+            Use this to override the buffer at inference time on a new graph.
+            When None (default), self.embedding is used.
 
         Returns
         -------
@@ -258,9 +301,10 @@ class WiringAutoencoder(nn.Module):
             z, U_q, self._laplacian.base_laplacian
         )
 
-        # In  the caller passes x as both query and per-node embedding
-        # table for the diffusion step.
-        E = x  # (B, D)
+        # Embedding table E must be (N, D) -- the full node feature matrix.
+        # Using x (shape (B, D)) here would cause a shape mismatch inside
+        # TauModeDiffusion when k_row (B, N) is bmm'd against E_b (B, N, D).
+        E = embedding_table if embedding_table is not None else self.embedding
 
         # --- Diffusion decode ---------------------------------------------
         x_hat = self.diffusion_decoder(
@@ -444,7 +488,8 @@ def from_config(
     cfg : dict
         Parsed YAML config.  Must contain a 'model' key.
     E : torch.Tensor
-        Embedding table (N, D).
+        Embedding table (N, D).  Also used to initialise the model's
+        internal self.embedding buffer.
 
     Returns
     -------
@@ -467,7 +512,7 @@ def from_config(
         normalised=gc.get("normalised", True),
         sparse=gc.get("sparse", False),
     )
-    return WiringAutoencoder(
+    model = WiringAutoencoder(
         input_dim=E.shape[1],
         latent_dim=mc["latent_dim"],
         hidden_dim=mc.get("hidden_dim", 256),
@@ -480,3 +525,6 @@ def from_config(
         n_heads=mc.get("n_heads", 4),
         dropout=mc.get("dropout", 0.1),
     )
+    # Initialise the embedding buffer with the supplied table.
+    model.embedding.data.copy_(E)
+    return model
