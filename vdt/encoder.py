@@ -8,16 +8,21 @@ Two encoder classes are provided:
 
 Both share the same reparameterise / kl_loss utilities.
 
-Typical usage ()
+Typical usage
 ------------------
     encoder = WiringEncoder(
-        input_dim=512, latent_dim=64,
+        input_dim=512, latent_dim=64, q=16,
         n_nodes=128, feat_dim=32,
         n_layers=4, m_modes=16,
     )
     z, mu, log_var, log_a, log_b = encoder(
         x, L_f=L_f, eigvecs=U, lap=lap
     )
+
+    latent_dim controls the VAE reparameterisation space (z, mu, log_var).
+    q controls the number of spectral modes produced by ModeWeightHead
+    (log_a, log_b).  They are independent; WiringAutoencoder bridges them
+    with a z_to_q linear projection.
 
     The lambda-fingerprint is computed internally from 'lap' when
     use_lambda_features=True.  It is always derived from the fixed base
@@ -72,18 +77,25 @@ def kl_isotropic(
 
 class ModeWeightHead(nn.Module):
     """
-    Produce variational Gamma parameters (log_a, log_b) per latent mode.
+    Produce variational Gamma parameters (log_a, log_b) per spectral mode.
 
     A Gamma distribution Gamma(a, b) is parameterised through its
     log-shape log_a and log-rate log_b.  The Gamma KL replaces the
     isotropic Gaussian KL when use_isotropic_kl=False in WiringEncoder.
+
+    This head operates on the spectral mode count q, which is independent
+    of the VAE latent dimension latent_dim.  WiringEncoder receives q as a
+    separate constructor argument and passes it here so that log_a and
+    log_b always have shape (B, q), matching the contract of tau_mode_kl
+    in spectral.py.
 
     Parameters
     ----------
     hidden_dim : int
         Input dimension (VDT pooled output width).
     q : int
-        Number of latent modes (= latent_dim).  Output is 2*q.
+        Number of spectral latent modes.  Output is 2*q.
+        Must equal eigvals_q.shape[0] at training time.
     """
 
     def __init__(self, hidden_dim: int, q: int) -> None:
@@ -119,8 +131,16 @@ class WiringEncoder(nn.Module):
 
     The encoder projects input x to an (N, d) node-feature matrix,
     runs K VDT blocks, and reads out:
-      - (mu, log_var) from a linear head on the modal projection z,
-      - (log_a, log_b) from ModeWeightHead for the variational Gamma KL.
+      - (mu, log_var) from linear heads on the modal projection z_modal,
+        shape (B, latent_dim).
+      - (log_a, log_b) from ModeWeightHead, shape (B, q).
+
+    latent_dim vs q
+    ---------------
+    ``latent_dim`` is the dimension of the reparameterised VAE latent z
+    (and hence mu, log_var).  ``q`` is the number of spectral modes
+    produced by ModeWeightHead for the tau_mode_kl prior.  They are
+    independent.  WiringAutoencoder bridges them with a z_to_q projection.
 
     Lambda-fingerprint injection
     ----------------------------
@@ -139,7 +159,10 @@ class WiringEncoder(nn.Module):
     input_dim : int
         Raw input embedding dimension D.
     latent_dim : int
-        Latent code dimension q.
+        VAE latent code dimension.  Controls shape of z, mu, log_var.
+    q : int
+        Number of spectral modes.  Controls shape of log_a, log_b from
+        ModeWeightHead.  Must equal eigvals_q.shape[0] at training time.
     n_nodes : int
         Graph node count N (must match the Laplacian passed at forward time).
     feat_dim : int
@@ -166,6 +189,7 @@ class WiringEncoder(nn.Module):
         self,
         input_dim: int,
         latent_dim: int,
+        q: int,
         n_nodes: int,
         feat_dim: int,
         n_layers: int = 4,
@@ -210,9 +234,10 @@ class WiringEncoder(nn.Module):
         self.mu_head      = nn.Linear(feat_dim, latent_dim)
         self.log_var_head = nn.Linear(feat_dim, latent_dim)
 
-        # Variational Gamma heads.
+        # Variational Gamma heads produce (B, q) -- q is the spectral mode
+        # count, independent of latent_dim.
         self.mode_weight_head = ModeWeightHead(
-            hidden_dim=feat_dim, q=latent_dim
+            hidden_dim=feat_dim, q=q
         )
 
     def forward(
@@ -225,8 +250,8 @@ class WiringEncoder(nn.Module):
         torch.Tensor,  # z       (B, latent_dim)
         torch.Tensor,  # mu      (B, latent_dim)
         torch.Tensor,  # log_var (B, latent_dim)
-        torch.Tensor,  # log_a   (B, latent_dim)
-        torch.Tensor,  # log_b   (B, latent_dim)
+        torch.Tensor,  # log_a   (B, q)
+        torch.Tensor,  # log_b   (B, q)
     ]:
         """
         Parameters
@@ -241,7 +266,11 @@ class WiringEncoder(nn.Module):
 
         Returns
         -------
-        z, mu, log_var, log_a, log_b  -- all (B, latent_dim)
+        z       : (B, latent_dim)  reparameterised VAE latent
+        mu      : (B, latent_dim)  posterior mean
+        log_var : (B, latent_dim)  posterior log-variance
+        log_a   : (B, q)           Gamma shape log-params (spectral modes)
+        log_b   : (B, q)           Gamma rate  log-params (spectral modes)
         """
         B = x.shape[0]
 
@@ -277,7 +306,7 @@ class WiringEncoder(nn.Module):
         log_var = self.log_var_head(z_modal).clamp(-10.0, 4.0)  # (B, latent_dim)
         z       = _reparameterise(mu, log_var)
 
-        log_a, log_b = self.mode_weight_head(z_modal)  # (B, latent_dim) each
+        log_a, log_b = self.mode_weight_head(z_modal)  # (B, q) each
 
         return z, mu, log_var, log_a, log_b
 
