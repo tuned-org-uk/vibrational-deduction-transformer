@@ -33,7 +33,7 @@ Diffusion / Flows      ->    (future) VDT-Diffusion     ->  unchanged
      |                                    |
      v                                    |
  +-----------------------------------+    |
- |  WiringEncoderV2                  |    |
+ |  WiringEncoder.                   |    |
  |  (MLP + lambda-fingerprint)       |    |
  |  -> (z, mu, logS, log_a, log_b)  |    |
  +-----------------------------------+    |
@@ -159,7 +159,7 @@ The new entry point `from_spectral_loading(W, L_base)` is added as a class metho
 - Fully closed-form, no MC sampling.
 - `eigvals_q` same frozen constant as above.
 
-### `vdt/encoder.py` — `WiringEncoderV2`
+### `vdt/encoder.py` — `WiringEncoder`
 
 - **`kl_loss`**: standard isotropic `KL(q(z) || N(0,I))`. No Laplacian-precision
   term; no runtime graph construction.
@@ -186,7 +186,7 @@ No changes. `TauModeDiffusion` is already the Spectral-PPCA decoder.
 
 ### `vdt/model.py` — `WiringAutoencoderV2`
 
-- Assembles `WiringEncoderV2`, `SpectralLoadingDecoder`, `DiffusionDecoder`.
+- Assembles `WiringEncoder`, `SpectralLoadingDecoder`, `DiffusionDecoder`.
 - `forward()` returns `(loss, recon, kl_z, kl_S, kl_tau, x_hat, L_z, z, mu, log_var)`.
   `kl_z` is the standard isotropic KL, included for monitoring but not weighted
   by the spectral priors.

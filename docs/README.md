@@ -144,7 +144,7 @@ L_VDT = E_q[log p(x|z,W)]
 
 ## Key Modules
 
-### `WiringEncoderV2` (`encoder.py`)
+### `WiringEncoder` (`encoder.py`)
 Wraps the `VDT` vibrational recurrence (discrete damped wave equation) and adds a
 `ModeWeightHead` — a linear layer outputting variational Gamma parameters `(log_a, log_b)`
 for each spectral mode. It uses **standard isotropic KL** for the latent `z`
@@ -215,7 +215,7 @@ organised into five phases:
 | Phase | Issues | Focus |
 |---|---|---|
 | **0 -- Foundations** | #16, #17, #19, #24 | `laplacian.py`, `vdt.py`, `stability.py`, two KL functions in `spectral.py` |
-| **1 -- Encoder/Decoder** | #25, #26 | `WiringEncoderV2` (isotropic KL + `ModeWeightHead`), `SpectralLoadingDecoder` |
+| **1 -- Encoder/Decoder** | #25, #26 | `WiringEncoder` (isotropic KL + `ModeWeightHead`), `SpectralLoadingDecoder` |
 | **2 -- Model assembly** | #27 | `WiringAutoencoderV2`, three-term ELBO, `extract_spectral_artefact()` |
 | **3 -- Memory & Metrics** | #28, #32 | `SpectralAssociativeMemory`, 7-metric evaluation suite |
 | **4 -- App Tracks** | #18/#29, #20/#30, #21/#31, #33 | Options 6, 1, 4, 3 respectively |

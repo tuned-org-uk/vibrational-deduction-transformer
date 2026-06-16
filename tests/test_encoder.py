@@ -1,14 +1,14 @@
 """
-Unit tests for vdt/encoder.py -- WiringEncoderV2, ModeWeightHead.
+Unit tests for vdt/encoder.py -- WiringEncoder, ModeWeightHead.
 
 Acceptance criteria from issue #25
 -----------------------------------
-AC1  WiringEncoderV2.forward returns (z, mu, log_var, log_a, log_b)
+AC1  WiringEncoder.forward returns (z, mu, log_var, log_a, log_b)
      all (B, latent_dim) on (B=4, D=32, q=8) input.
 AC2  ModeWeightHead outputs finite log_a, log_b on random input.
 AC3  kl_isotropic (the only kl_z path in v2) is non-negative.
 AC4  kl_z scalar is differentiable through mu (gradcheck).
-AC5  v1 WiringEncoder still passes its 3-tuple contract.
+AC5  WiringEncoder still passes its 3-tuple contract.
 
 VDT is stubbed to avoid requiring a live graph fixture.
 All gradient paths use float64 for gradcheck precision.
@@ -19,7 +19,7 @@ import torch
 import torch.nn as nn
 from unittest.mock import patch
 
-from vdt.encoder import WiringEncoderV2, WiringEncoder, ModeWeightHead, kl_isotropic
+from vdt.encoder import WiringEncoder, ModeWeightHead, kl_isotropic
 
 torch.manual_seed(7)
 
@@ -34,7 +34,7 @@ FEAT   = 16      # feat_dim
 # Fixture helpers
 # ---------------------------------------------------------------------------
 
-def _make_encoder(**kwargs) -> WiringEncoderV2:
+def _make_encoder(**kwargs) -> WiringEncoder:
     defaults = dict(
         input_dim=D_IN,
         latent_dim=Q,
@@ -48,7 +48,7 @@ def _make_encoder(**kwargs) -> WiringEncoderV2:
         dropout=0.0,
     )
     defaults.update(kwargs)
-    return WiringEncoderV2(**defaults)
+    return WiringEncoder(**defaults)
 
 
 class _StubLap:
@@ -78,7 +78,7 @@ def _stub_modal_projection(self, Q_K, eigvecs):
 # AC1 -- forward returns correct 5-tuple shapes
 # ---------------------------------------------------------------------------
 
-class TestWiringEncoderV2Forward:
+class TestWiringEncoderForward:
 
     def _forward(self, encoder, x):
         L_f    = torch.eye(N).unsqueeze(0).expand(B, -1, -1)
@@ -168,7 +168,7 @@ class TestKlIsotropicNonNegative:
         assert kl.item() == pytest.approx(0.0, abs=1e-5)
 
     def test_only_kl_path_in_v2(self):
-        """WiringEncoderV2.kl_loss must call kl_isotropic (checked by value)."""
+        """WiringEncoder.kl_loss must call kl_isotropic (checked by value)."""
         enc     = _make_encoder(use_isotropic_kl=True)
         mu      = torch.zeros(B, Q)
         log_var = torch.zeros(B, Q)
@@ -202,27 +202,3 @@ class TestKlGradCheck:
 
         assert torch.autograd.gradcheck(fn, (log_var,), eps=1e-5, atol=1e-4)
 
-
-# ---------------------------------------------------------------------------
-# AC5 -- v1 WiringEncoder 3-tuple contract unchanged
-# ---------------------------------------------------------------------------
-
-class TestWiringEncoderV1Regression:
-
-    def test_3_tuple_forward(self):
-        enc = WiringEncoder(input_dim=D_IN, latent_dim=Q, hidden_dim=64,
-                            use_lambda_features=False)
-        x   = torch.randn(B, D_IN)
-        out = enc(x)
-        assert len(out) == 3
-        z, mu, log_var = out
-        assert z.shape       == (B, Q)
-        assert mu.shape      == (B, Q)
-        assert log_var.shape == (B, Q)
-
-    def test_kl_loss_non_negative(self):
-        enc = WiringEncoder(input_dim=D_IN, latent_dim=Q)
-        mu      = torch.randn(B, Q)
-        log_var = torch.randn(B, Q)
-        kl = enc.kl_loss(mu, log_var)
-        assert kl.item() >= -1e-6

@@ -65,7 +65,7 @@ Input x (B, D)                   Embedding table E (N, D)
     |
     v
 +----------------------------------+
-|  WiringEncoderV2                 |
+|  WiringEncoder                 |
 |  MLP + lambda-fingerprint        |
 |  -> (z, mu, logS, log_a, log_b) |
 +----------------------------------+
@@ -109,7 +109,7 @@ feed-forward / cross-attention value matrices.
 
 | Module | Role |
 |--------|------|
-| `vdt/encoder.py` | `WiringEncoderV2` -- amortised posterior with lambda-fingerprint; `ModeWeightHead` outputs `(log_a, log_b)` for tau-mode prior |
+| `vdt/encoder.py` | `WiringEncoder` -- amortised posterior with lambda-fingerprint; `ModeWeightHead` outputs `(log_a, log_b)` for tau-mode prior |
 | `vdt/wiring_decoder.py` | `SpectralLoadingDecoder` -- `z, U_q -> W = U_q diag(omega) S -> L(z)` |
 | `vdt/diffusion_decoder.py` | `L(z), E -> x_hat` via tau-mode diffusion + MLP refinement |
 | `vdt/model.py` | `WiringAutoencoderV2` -- three-term ELBO + `extract_spectral_artefact()` |

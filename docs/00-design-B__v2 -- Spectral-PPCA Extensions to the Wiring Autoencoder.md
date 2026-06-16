@@ -151,7 +151,7 @@ def tau_mode_kl(log_a: torch.Tensor, log_b: torch.Tensor,
 class WiringAutoencoderV2(nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        self.encoder = WiringEncoderV2(cfg)          # Lap-precision KL
+        self.encoder = WiringEncoder(cfg)          # Lap-precision KL
         self.spectral_decoder = SpectralLoadingDecoder(cfg.q, cfg.d, cfg.n_heads)
         self.diff_decoder = DiffusionDecoder(cfg)    # unchanged
         self.tau = nn.Parameter(torch.tensor(cfg.tau_init))  # learnable

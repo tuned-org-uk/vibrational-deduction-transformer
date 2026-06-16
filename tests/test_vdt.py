@@ -1,13 +1,13 @@
 """
 Unit tests for vdt/vdt.py (VibrationalStateBlock, VDT) and the
-WiringEncoderV2 / ModeWeightHead additions to vdt/encoder.py  (issue #17).
+WiringEncoder / ModeWeightHead additions to vdt/encoder.py  (issue #17).
 
 Acceptance criteria
 -------------------
 AC1  VDT.forward() returns (Q_K, Q_states, (rho_plus_list, rho_minus_list)).
 AC2  dt is never above dt_max_cfl in any forward pass.
 AC3  gamma > 0 always (softplus constraint enforced).
-AC4  WiringEncoderV2.forward() returns (z, mu, log_var, log_a, log_b)
+AC4  WiringEncoder.forward() returns (z, mu, log_var, log_a, log_b)
      with all shapes (B, latent_dim).
 AC5  Old WiringEncoder-based training loop still works (no regression).
 AC6  Unit tests: shape checks, CFL clamp, Q_states length K.
@@ -22,7 +22,7 @@ import torch
 import torch.nn as nn
 
 from vdt.vdt import VDT, VibrationalStateBlock
-from vdt.encoder import ModeWeightHead, WiringEncoder, WiringEncoderV2
+from vdt.encoder import ModeWeightHead, WiringEncoder, WiringEncoder
 from vdt.laplacian import DifferentiableLaplacian
 
 
@@ -83,7 +83,7 @@ def vdt_model():
 
 @pytest.fixture
 def enc_v2():
-    return WiringEncoderV2(
+    return WiringEncoder(
         input_dim=INP, latent_dim=Q,
         n_nodes=N, feat_dim=D,
         n_layers=2, m_modes=2,
@@ -212,10 +212,10 @@ class TestVDT:
 
 
 # ---------------------------------------------------------------------------
-# AC4  WiringEncoderV2
+# AC4  WiringEncoder
 # ---------------------------------------------------------------------------
 
-class TestWiringEncoderV2:
+class TestWiringEncoder:
     """AC4: 5-tuple output, correct shapes, kl_loss non-negative."""
 
     def test_forward_returns_5_tuple(self, enc_v2, L_f, eigvecs, lap):

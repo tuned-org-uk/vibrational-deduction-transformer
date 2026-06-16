@@ -388,7 +388,7 @@ def spectral_kl_health_check(
     Parameters
     ----------
     kl_z : float
-        Isotropic KL term from WiringEncoderV2.  Should be > 0.
+        Isotropic KL term from WiringEncoder.  Should be > 0.
     kl_S : float
         Spectral basis KL from spectral_basis_kl().  Should be > 0.
     kl_tau : float

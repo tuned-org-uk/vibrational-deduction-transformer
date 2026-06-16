@@ -3,15 +3,14 @@ Amortised encoder  q_phi(z | x).
 
 Two encoder classes are provided:
 
-  WiringEncoder   -- v1 MLP encoder (unchanged; preserved for backward compat).
-  WiringEncoderV2 -- v2 VDT encoder using VibrationalStateBlock recurrence
+  WiringEncoder -- v2 VDT encoder using VibrationalStateBlock recurrence
                      and variational Gamma parameters (ModeWeightHead).
 
 Both share the same reparameterise / kl_loss utilities.
 
 Typical usage (v2)
 ------------------
-    encoder = WiringEncoderV2(
+    encoder = WiringEncoder(
         input_dim=512, latent_dim=64,
         n_nodes=128, feat_dim=32,
         n_layers=4, m_modes=16,
@@ -76,7 +75,7 @@ class ModeWeightHead(nn.Module):
 
     A Gamma distribution Gamma(a, b) is parameterised through its
     log-shape log_a and log-rate log_b.  The Gamma KL replaces the
-    isotropic Gaussian KL when use_isotropic_kl=False in WiringEncoderV2.
+    isotropic Gaussian KL when use_isotropic_kl=False in WiringEncoder.
 
     Parameters
     ----------
@@ -110,109 +109,10 @@ class ModeWeightHead(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# WiringEncoder  (v1 -- unchanged).
+# WiringEncoder  (v2 VDT encoder)
 # ---------------------------------------------------------------------------
 
 class WiringEncoder(nn.Module):
-    """
-    Parameters
-    ----------
-    input_dim : int
-        Dimension of raw input embeddings (D).
-    latent_dim : int
-        Dimension of latent code z.
-    hidden_dim : int
-        Hidden layer width.
-    use_lambda_features : bool
-        If True, concatenate lambda-fingerprint (n_lambda_bins dimensions)
-        to input before encoding.
-    n_lambda_bins : int
-        Number of histogram bins in the lambda-fingerprint.
-    dropout : float
-        Dropout probability.
-    """
-
-    def __init__(
-        self,
-        input_dim: int,
-        latent_dim: int,
-        hidden_dim: int = 256,
-        use_lambda_features: bool = True,
-        n_lambda_bins: int = 16,
-        dropout: float = 0.1,
-    ) -> None:
-        super().__init__()
-        self.use_lambda_features = use_lambda_features
-        self.n_lambda_bins = n_lambda_bins
-        in_dim = input_dim + (n_lambda_bins if use_lambda_features else 0)
-
-        self.net = nn.Sequential(
-            nn.Linear(in_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-        )
-        self.mu_head      = nn.Linear(hidden_dim, latent_dim)
-        self.log_var_head = nn.Linear(hidden_dim, latent_dim)
-
-        self._init_weights()
-
-    def _init_weights(self) -> None:
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
-
-    def forward(
-        self,
-        x: torch.Tensor,
-        lambda_fp: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Returns
-        -------
-        z       : Tensor (B, latent_dim)
-        mu      : Tensor (B, latent_dim)
-        log_var : Tensor (B, latent_dim)
-        """
-        if self.use_lambda_features and lambda_fp is not None:
-            x = torch.cat([x, lambda_fp], dim=-1)
-
-        h       = self.net(x)
-        mu      = self.mu_head(h)
-        log_var = self.log_var_head(h).clamp(-10.0, 4.0)
-        z       = _reparameterise(mu, log_var)
-        return z, mu, log_var
-
-    @staticmethod
-    def _reparameterise(
-        mu: torch.Tensor, log_var: torch.Tensor
-    ) -> torch.Tensor:
-        """z = mu + eps * std,  eps ~ N(0, I)."""
-        return _reparameterise(mu, log_var)
-
-    @staticmethod
-    def kl_loss(
-        mu: torch.Tensor,
-        log_var: torch.Tensor,
-        reduction: str = "mean",
-    ) -> torch.Tensor:
-        """
-        KL( q(z|x) || N(0, I) )
-        """
-        return kl_isotropic(mu, log_var, reduction)
-
-
-# ---------------------------------------------------------------------------
-# WiringEncoderV2  (v2 VDT encoder)
-# ---------------------------------------------------------------------------
-
-class WiringEncoderV2(nn.Module):
     """
     v2 encoder: VDT recurrence + ModeWeightHead.
 

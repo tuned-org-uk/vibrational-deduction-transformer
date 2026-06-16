@@ -18,7 +18,7 @@ See docs/00-architecture.md -- ELBO Derivation for the full derivation.
 
 v2 architecture (three-term ELBO, issue #27)
 --------------------------------------------
-Assembles WiringEncoderV2, SpectralLoadingDecoder, and DiffusionDecoder
+Assembles WiringEncoder, SpectralLoadingDecoder, and DiffusionDecoder
 under the three-term objective (PR #35 -- Laplacian-precision KL removed)::
 
     L_VDTv2 = E_q[log p(x|z,W)]
@@ -29,7 +29,7 @@ under the three-term objective (PR #35 -- Laplacian-precision KL removed)::
 Data flow::
 
     x  (B, D),  U_q (N, q),  eigvals_q (q,)
-      --> WiringEncoderV2      z, mu, log_var, log_a, log_b
+      --> WiringEncoder      z, mu, log_var, log_a, log_b
       --> SpectralLoadingDecoder  W (B, d, q), omega (B, q), S (B, q, q),
                                   L_z (B, N, N)
       --> DiffusionDecoder     x_hat (B, D)
@@ -274,7 +274,7 @@ class WiringAutoencoder(nn.Module):
 # ---------------------------------------------------------------------------
 
 try:
-    from .encoder import WiringEncoderV2
+    from .encoder import WiringEncoder
     from .wiring_decoder import SpectralLoadingDecoder
     from .spectral import spectral_basis_kl, tau_mode_kl
     _V2_IMPORTS_OK = True
@@ -286,7 +286,7 @@ class WiringAutoencoderV2(nn.Module):
     """
     Wiring Autoencoder v2 -- three-term ELBO with spectral mode priors.
 
-    Assembles WiringEncoderV2, SpectralLoadingDecoder, and DiffusionDecoder
+    Assembles WiringEncoder, SpectralLoadingDecoder, and DiffusionDecoder
     under the three-term variational objective::
 
         L_VDTv2 = E_q[log p(x|z,W)]
@@ -301,7 +301,7 @@ class WiringAutoencoderV2(nn.Module):
     Data flow::
 
         x  (B, D),  U_q (N, q),  eigvals_q (q,)
-          --> WiringEncoderV2
+          --> WiringEncoder
                 z        (B, latent_dim)
                 mu       (B, latent_dim)
                 log_var  (B, latent_dim)
@@ -349,7 +349,7 @@ class WiringAutoencoderV2(nn.Module):
     ) -> None:
         if not _V2_IMPORTS_OK:
             raise ImportError(
-                "WiringAutoencoderV2 requires WiringEncoderV2 and "
+                "WiringAutoencoderV2 requires WiringEncoder and "
                 "SpectralLoadingDecoder.  Ensure phase-1 modules are present."
             )
         super().__init__()
@@ -358,7 +358,7 @@ class WiringAutoencoderV2(nn.Module):
         self.tau = tau
         self.tau_modes = tau_modes
 
-        self.encoder = WiringEncoderV2(
+        self.encoder = WiringEncoder(
             input_dim=input_dim,
             latent_dim=latent_dim,
             hidden_dim=hidden_dim,
@@ -423,7 +423,7 @@ class WiringAutoencoderV2(nn.Module):
             log_var  -- (B, latent_dim) posterior log-variances
         """
         # --- Encode -------------------------------------------------------
-        # WiringEncoderV2.forward() returns (z, mu, log_var, log_a, log_b)
+        # WiringEncoder.forward() returns (z, mu, log_var, log_a, log_b)
         z, mu, log_var, log_a, log_b = self.encoder(x)
 
         # --- Spectral decode (wiring) -------------------------------------
