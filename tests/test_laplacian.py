@@ -87,13 +87,39 @@ class TestFromSpectralLoading:
         L = DifferentiableLaplacian.from_spectral_loading(W, L_base)
         assert L.shape == (B, N, N)
 
-    def test_zero_row_sums(self):
+    def test_normalized_laplacian_properties(self):
         W, L_base = self._inputs()
         L = DifferentiableLaplacian.from_spectral_loading(W, L_base)
-        row_sums = L.sum(dim=-1)  # (B, N)
+
+        # 1) Symmetric by construction
         assert torch.allclose(
-            row_sums, torch.zeros_like(row_sums), atol=1e-5
-        ), f"Non-zero row sums: max abs = {row_sums.abs().max():.2e}"
+            L, L.transpose(-1, -2), atol=1e-6
+        ), f"Non-symmetric L: max abs diff = {(L - L.transpose(-1, -2)).abs().max():.2e}"
+
+        # 2) Off-diagonal entries are non-positive
+        eye = torch.eye(L.size(-1), device=L.device, dtype=torch.bool).unsqueeze(0)
+        offdiag = L.masked_fill(eye, 0.0)
+        assert torch.all(
+            offdiag <= 1e-6
+        ), f"Positive off-diagonal entry found: max = {offdiag.max():.2e}"
+
+        # 3) Diagonal entries are in [0, 1] and are ~1 for non-isolated nodes
+        diag = torch.diagonal(L, dim1=-2, dim2=-1)
+        assert torch.all(
+            diag >= -1e-6
+        ), f"Negative diagonal entry found: min = {diag.min():.2e}"
+        assert torch.all(
+            diag <= 1.0 + 1e-6
+        ), f"Diagonal entry > 1 found: max = {diag.max():.2e}"
+
+        # 4) Spectrum of symmetric normalised Laplacian lies in [0, 2]
+        eigvals = torch.linalg.eigvalsh(L)
+        assert torch.all(
+            eigvals >= -1e-5
+        ), f"Negative eigenvalue found: min = {eigvals.min():.2e}"
+        assert torch.all(
+            eigvals <= 2.0 + 1e-5
+        ), f"Eigenvalue > 2 found: max = {eigvals.max():.2e}"
 
     def test_offdiagonal_nonpositive(self):
         """Off-diagonal entries of the normalised Laplacian are <= 0."""
