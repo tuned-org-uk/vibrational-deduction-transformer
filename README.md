@@ -8,6 +8,8 @@ with pre-built associative memory.
 This architecture is related to NVIB (Nonparametric Variational Information Bottleneck). It applies pre-built semantic
  spectral filters and inline memory to VAE to save learning steps by identifying the object of learning via spectral methods.
 
+The feature-space Laplacian $$L_f$$ (as in Graph Wiring) replaces the basis of the latent space and the prior over mode weights, leaving reparameterization itself still diagonal and cheap .
+
 The architecture follows the progression in *The Little Book of Generative AI Foundations*
 (Chen, 2026) and is grounded in the VDT paper (Moriondo, 2026):
 
