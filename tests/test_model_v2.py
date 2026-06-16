@@ -7,8 +7,10 @@ Acceptance criteria from issue #27:
   AC2  Total loss == recon + kl_z + kl_S + kl_tau (test with known scalars).
   AC3  extract_spectral_artefact() produces S_memory with shape (d_model, d_model).
   AC4  from_config() correctly dispatches v1 vs v2 on model.version.
-  AC5  Integration: single training step on synthetic (B=4, D=32, N=16, q=8)
-       data; loss is finite and decreases after 10 SGD steps.
+  AC5  Integration: one full training loop on synthetic (B=4, D=32, N=16, q=8)
+       data; all three ELBO terms (kl_z, kl_S, kl_tau) finite at every step,
+       and the total loss strictly decreasing after 10 SGD steps.
+       (Requirement from issue #27 and roadmap issue #34.)
 """
 from __future__ import annotations
 import pytest
@@ -23,9 +25,8 @@ B, D, N, Q = 4, 32, 16, 8
 
 
 def _make_laplacian():
-    """Build a tiny symmetric PSD Laplacian (N, N) for tests."""
+    """Build a tiny symmetric PSD ring-graph Laplacian (N, N) for tests."""
     from wae.laplacian import DifferentiableLaplacian
-    # Manually construct a ring-graph Laplacian to avoid kNN dep in tests.
     W = torch.zeros(N, N)
     for i in range(N):
         j = (i + 1) % N
@@ -34,12 +35,12 @@ def _make_laplacian():
     deg = W.sum(dim=-1)
     L = torch.diag(deg) - W  # combinatorial Laplacian (N, N)
 
-    # Wrap in a DifferentiableLaplacian via its internal constructor.
-    # We set edge_index and base_weights from the ring topology.
     src, dst = W.nonzero(as_tuple=True)
-    edge_index = torch.stack([src, dst], dim=0)     # (2, E)
-    base_weights = torch.ones(src.shape[0])          # (E,)
-    lap = DifferentiableLaplacian(edge_index=edge_index, base_weights=base_weights, n_nodes=N)
+    edge_index = torch.stack([src, dst], dim=0)   # (2, E)
+    base_weights = torch.ones(src.shape[0])        # (E,)
+    lap = DifferentiableLaplacian(
+        edge_index=edge_index, base_weights=base_weights, n_nodes=N
+    )
     return lap, L
 
 
@@ -139,18 +140,15 @@ class TestExtractSpectralArtefact:
         artefact = model.extract_spectral_artefact(U_q, eigvals_q)
         assert "S_memory" in artefact
         S_mem = artefact["S_memory"]
-        # d_model == D (input_dim) as passed through SpectralLoadingDecoder
         assert S_mem.ndim == 2
         assert S_mem.shape[0] == S_mem.shape[1], "S_memory must be square"
 
     def test_w_hat_and_omega_hat_shapes(self):
         model, U_q, eigvals_q = _make_model()
         artefact = model.extract_spectral_artefact(U_q, eigvals_q)
-        omega_hat = artefact["omega_hat"]
-        W_hat = artefact["W_hat"]
-        assert omega_hat.shape == (Q,)
-        assert W_hat.ndim == 3
-        assert W_hat.shape[-1] == Q
+        assert artefact["omega_hat"].shape == (Q,)
+        assert artefact["W_hat"].ndim == 3
+        assert artefact["W_hat"].shape[-1] == Q
 
     def test_s_memory_symmetric(self):
         """S_memory is built from outer products so must be symmetric."""
@@ -236,32 +234,97 @@ class TestFromConfig:
 
 
 # ---------------------------------------------------------------------------
-# AC5  --  Integration: loss is finite and decreases after 10 SGD steps
+# AC5  --  Integration: all three ELBO terms finite per step;
+#          total loss strictly decreases after 10 SGD steps.
+#
+#  Requirement (issue #27 + roadmap issue #34):
+#    "one full training step on synthetic (B=4, D=32, N=16, q=8) data,
+#     all three ELBO terms finite and the loss decreasing after 10 steps."
+#
+#  This class tests both conditions explicitly:
+#    1. kl_z, kl_S, kl_tau each individually finite at every step.
+#    2. loss[step 9] < loss[step 0]  (strict, no tolerance padding).
 # ---------------------------------------------------------------------------
 
 class TestTrainingConvergence:
-    def test_loss_decreases_over_10_steps(self):
-        """
-        Synthetic (B=4, D=32, N=16, q=8) data.
-        Loss must be finite at step 0 and strictly lower at step 9.
-        A tolerance of 1e-4 is applied to guard against float noise.
-        """
+    """
+    Integration test for WiringAutoencoderV2 on synthetic data.
+
+    Synthetic fixture:  B=4, D=32, N=16, q=8  (ring-graph Laplacian).
+    Optimiser:          Adam, lr=1e-3.
+    Steps:              10.
+    """
+
+    @staticmethod
+    def _run_training_loop(n_steps: int = 10):
+        """Run n_steps of Adam on fixed synthetic data; return per-step records."""
         model, U_q, eigvals_q = _make_model()
         optimiser = optim.Adam(model.parameters(), lr=1e-3)
-
+        torch.manual_seed(0)
         x = torch.randn(B, D)
         node_idx = torch.arange(B)
 
-        losses = []
-        for _ in range(10):
+        records = []
+        for step in range(n_steps):
             optimiser.zero_grad()
             out = model(x, U_q, eigvals_q, node_idx=node_idx)
-            loss = out["loss"]
-            assert torch.isfinite(loss), "Loss became non-finite during training"
-            loss.backward()
+            out["loss"].backward()
             optimiser.step()
-            losses.append(loss.item())
+            records.append({
+                "step":    step,
+                "loss":    out["loss"].item(),
+                "kl_z":    out["kl_z"].item(),
+                "kl_S":    out["kl_S"].item(),
+                "kl_tau":  out["kl_tau"].item(),
+                "recon":   out["recon"].item(),
+            })
+        return records
 
-        assert losses[-1] < losses[0] + 1e-4, (
-            f"Loss did not decrease: first={losses[0]:.4f}, last={losses[-1]:.4f}"
+    def test_all_three_elbo_terms_finite_at_every_step(self):
+        """
+        AC5 (part 1): kl_z, kl_S, kl_tau are each individually finite
+        at every one of the 10 training steps.
+        """
+        records = self._run_training_loop(n_steps=10)
+        for rec in records:
+            step = rec["step"]
+            for term in ("kl_z", "kl_S", "kl_tau"):
+                val = rec[term]
+                assert (
+                    val == val and abs(val) != float("inf")
+                ), (
+                    f"ELBO term '{term}' is non-finite ({val}) at step {step}. "
+                    f"Full record: {rec}"
+                )
+
+    def test_total_loss_finite_at_every_step(self):
+        """Total loss must be finite at every step (sanity gate)."""
+        records = self._run_training_loop(n_steps=10)
+        for rec in records:
+            val = rec["loss"]
+            assert (
+                val == val and abs(val) != float("inf")
+            ), f"Loss is non-finite ({val}) at step {rec['step']}"
+
+    def test_loss_strictly_decreases_after_10_steps(self):
+        """
+        AC5 (part 2): total loss at step 9 is strictly less than at step 0.
+        No tolerance padding -- the 10-step Adam trajectory must show
+        real descent on fixed synthetic data.
+        """
+        records = self._run_training_loop(n_steps=10)
+        first, last = records[0]["loss"], records[-1]["loss"]
+        assert last < first, (
+            f"Loss did not decrease over 10 steps: "
+            f"step 0 = {first:.6f}, step 9 = {last:.6f}.\n"
+            f"Per-step losses: {[r['loss'] for r in records]}"
         )
+
+    def test_recon_term_finite_at_every_step(self):
+        """Reconstruction term must also stay finite throughout."""
+        records = self._run_training_loop(n_steps=10)
+        for rec in records:
+            val = rec["recon"]
+            assert (
+                val == val and abs(val) != float("inf")
+            ), f"'recon' is non-finite ({val}) at step {rec['step']}"
