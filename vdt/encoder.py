@@ -32,8 +32,8 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
-from wae.vdt import VDT
-from wae.laplacian import DifferentiableLaplacian
+from vdt.vdt import VDT
+from vdt.laplacian import DifferentiableLaplacian
 
 
 # ---------------------------------------------------------------------------

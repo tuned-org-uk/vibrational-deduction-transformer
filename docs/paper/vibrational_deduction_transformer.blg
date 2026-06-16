@@ -3,7 +3,7 @@ Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: vibrational_deduction_transformer.aux
 The style file: abbrvnat.bst
 Database file #1: references.bib
-Warning--I didn't find a database entry for "wae_v1"
+Warning--I didn't find a database entry for "vdt_v1"
 You've used 13 entries,
             2773 wiz_defined-function locations,
             657 strings with 6838 characters,

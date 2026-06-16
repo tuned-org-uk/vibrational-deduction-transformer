@@ -1,5 +1,5 @@
 """
-Unit tests for wae/spectral.py -- v2 additions: spectral_basis_kl, tau_mode_kl.
+Unit tests for vdt/spectral.py -- v2 additions: spectral_basis_kl, tau_mode_kl.
 
 Acceptance criteria from issue #24
 -----------------------------------
@@ -16,7 +16,7 @@ import math
 import pytest
 import torch
 
-from wae.spectral import (
+from vdt.spectral import (
     spectral_basis_kl,
     tau_mode_kl,
     TauModeDiffusion,

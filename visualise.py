@@ -89,7 +89,7 @@ def plot_benchmark(csv_path: str, out_dir: str) -> None:
                     f"{v:.3f}", ha="center", va="bottom", fontsize=9)
     ax.set_xticks(x + width)
     ax.set_xticklabels(labels)
-    ax.set_title("Benchmark: WAE vs Baseline VAE vs Linear AE", fontsize=13)
+    ax.set_title("Benchmark: VDT vs Baseline VAE vs Linear AE", fontsize=13)
     ax.legend()
     ax.grid(axis="y", alpha=0.3)
     plt.tight_layout()
@@ -106,8 +106,8 @@ def plot_benchmark(csv_path: str, out_dir: str) -> None:
 # ---------------------------------------------------------------------------
 def plot_latent(checkpoint_path: str, dataset: str, out_dir: str) -> None:
     import torch
-    from wae import WiringAutoencoder
-    from wae.dataset import load_dataset, make_loaders
+    from vdt import WiringAutoencoder
+    from vdt.dataset import load_dataset, make_loaders
     from sklearn.decomposition import PCA
 
     ckpt = torch.load(checkpoint_path, map_location="cpu")
@@ -120,7 +120,7 @@ def plot_latent(checkpoint_path: str, dataset: str, out_dir: str) -> None:
     model.load_state_dict(ckpt["model"])
     model.eval()
 
-    from wae.laplacian import DifferentiableLaplacian
+    from vdt.laplacian import DifferentiableLaplacian
     base_lap = DifferentiableLaplacian.from_embeddings(E)
     with torch.no_grad():
         base_L = base_lap(base_lap.base_weights.unsqueeze(0)).squeeze(0)
@@ -144,7 +144,7 @@ def plot_latent(checkpoint_path: str, dataset: str, out_dir: str) -> None:
     for c in range(n_classes):
         mask = Y == c
         ax.scatter(Z2[mask, 0], Z2[mask, 1], s=12, alpha=0.6, color=cmap(c), label=f"class {c}")
-    ax.set_title("WAE Latent Space (PCA-2D) — coloured by class", fontsize=12)
+    ax.set_title("VDT Latent Space (PCA-2D) — coloured by class", fontsize=12)
     ax.legend(markerscale=2, fontsize=9, ncol=2)
     ax.set_xlabel("PC1"); ax.set_ylabel("PC2")
     ax.grid(alpha=0.2)
@@ -163,8 +163,8 @@ def plot_latent(checkpoint_path: str, dataset: str, out_dir: str) -> None:
 # ---------------------------------------------------------------------------
 def plot_spectral(checkpoint_path: str, dataset: str, out_dir: str, n_samples: int = 200) -> None:
     import torch
-    from wae import WiringAutoencoder
-    from wae.dataset import load_dataset
+    from vdt import WiringAutoencoder
+    from vdt.dataset import load_dataset
 
     ckpt = torch.load(checkpoint_path, map_location="cpu")
     cfg  = ckpt["cfg"]

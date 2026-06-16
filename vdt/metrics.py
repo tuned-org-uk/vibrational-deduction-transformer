@@ -1,5 +1,5 @@
 """
-wae/metrics.py  --  Benchmark metrics for WiringAutoencoderV2 (issue #32)
+vdt/metrics.py  --  Benchmark metrics for WiringAutoencoderV2 (issue #32)
 
 All 7 active v2 benchmark metrics are implemented as pure functions.
 Metrics that were removed per merged PR #35 (kl_lap) are not included.
@@ -41,7 +41,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import torch
 from torch import Tensor
 
-from wae.spectral import spectral_basis_kl, tau_mode_kl
+from vdt.spectral import spectral_basis_kl, tau_mode_kl
 
 
 # ---------------------------------------------------------------------------

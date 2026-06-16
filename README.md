@@ -109,15 +109,15 @@ feed-forward / cross-attention value matrices.
 
 | Module | Role |
 |--------|------|
-| `wae/encoder.py` | `WiringEncoderV2` -- amortised posterior with lambda-fingerprint; `ModeWeightHead` outputs `(log_a, log_b)` for tau-mode prior |
-| `wae/wiring_decoder.py` | `SpectralLoadingDecoder` -- `z, U_q -> W = U_q diag(omega) S -> L(z)` |
-| `wae/diffusion_decoder.py` | `L(z), E -> x_hat` via tau-mode diffusion + MLP refinement |
-| `wae/model.py` | `WiringAutoencoderV2` -- three-term ELBO + `extract_spectral_artefact()` |
-| `wae/laplacian.py` | Differentiable Laplacian builder; `from_spectral_loading(W, L_base)` |
-| `wae/spectral.py` | `spectral_basis_kl`, `tau_mode_kl`, `laplacian_precision_kl`, `build_knn_laplacian` |
-| `wae/spectral_memory.py` | `SpectralAssociativeMemory` -- Hopfield memory pre-built from `A(I)`; delta-rule online updates |
-| `wae/stability.py` | Training diagnostics; `spectral_kl_health_check` (6-level hierarchy) |
-| `wae/dataset.py` | Dataset helpers (MNIST, CORA, PubMed, custom CSV) |
+| `vdt/encoder.py` | `WiringEncoderV2` -- amortised posterior with lambda-fingerprint; `ModeWeightHead` outputs `(log_a, log_b)` for tau-mode prior |
+| `vdt/wiring_decoder.py` | `SpectralLoadingDecoder` -- `z, U_q -> W = U_q diag(omega) S -> L(z)` |
+| `vdt/diffusion_decoder.py` | `L(z), E -> x_hat` via tau-mode diffusion + MLP refinement |
+| `vdt/model.py` | `WiringAutoencoderV2` -- three-term ELBO + `extract_spectral_artefact()` |
+| `vdt/laplacian.py` | Differentiable Laplacian builder; `from_spectral_loading(W, L_base)` |
+| `vdt/spectral.py` | `spectral_basis_kl`, `tau_mode_kl`, `laplacian_precision_kl`, `build_knn_laplacian` |
+| `vdt/spectral_memory.py` | `SpectralAssociativeMemory` -- Hopfield memory pre-built from `A(I)`; delta-rule online updates |
+| `vdt/stability.py` | Training diagnostics; `spectral_kl_health_check` (6-level hierarchy) |
+| `vdt/dataset.py` | Dataset helpers (MNIST, CORA, PubMed, custom CSV) |
 | `train.py` | Training loop with W&B / CSV logging |
 | `benchmark.py` | Evaluation suite -- 8 metrics + ELBO Bayes factor |
 | `configs/default.yaml` | Hyperparameters |
@@ -184,7 +184,7 @@ Outputs written to `results/spectral_demo/`:
 
 ## Connection to ArrowSpace
 
-`wae/laplacian.py` mirrors `ArrowSpaceBuilder.build()` logic from
+`vdt/laplacian.py` mirrors `ArrowSpaceBuilder.build()` logic from
 [pyarrowspace](https://github.com/tuned-org-uk/pyarrowspace) as a differentiable
 PyTorch layer so gradients flow through `L(z)`.
 

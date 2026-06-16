@@ -1,5 +1,5 @@
 """
-Unit tests for wae/laplacian.py and wae/density.py  (issue #16).
+Unit tests for vdt/laplacian.py and vdt/density.py  (issue #16).
 
 Covers all acceptance criteria:
 
@@ -23,8 +23,8 @@ import warnings
 import pytest
 import torch
 
-from wae.laplacian import DifferentiableLaplacian, MassMatrix
-from wae.density import SignedDensityMatrix
+from vdt.laplacian import DifferentiableLaplacian, MassMatrix
+from vdt.density import SignedDensityMatrix
 
 
 # ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@ VAE + ELBO             ->    recon+beta*KL+alpha*J_fr.  ->  three-term ELBO
   |                              |                           |
 Associative memory     ->    (absent)                   ->  SpectralAssociativeMemory
   |                              |                           |
-Diffusion / Flows      ->    (future) WAE-Diffusion     ->  unchanged
+Diffusion / Flows      ->    (future) VDT-Diffusion     ->  unchanged
 ```
 
 ---
@@ -72,7 +72,7 @@ Diffusion / Flows      ->    (future) WAE-Diffusion     ->  unchanged
 The prior Wiring AE objective:
 
 ```
-L_WAE = E_q[log p(x|z)]  -  beta*KL(q(z) || N(0,I))  -  alpha*J_freq(L(z))
+L_vdt = E_q[log p(x|z)]  -  beta*KL(q(z) || N(0,I))  -  alpha*J_freq(L(z))
 ```
 
 is replaced in the VDT by the Spectral-PPCA ELBO:
@@ -133,7 +133,7 @@ KL(Gamma(a,b) || Exp(r)) = log(b) - log(r) + lgamma(a)
 
 ## Module Reference
 
-### `wae/laplacian.py` — `DifferentiableLaplacian`
+### `vdt/laplacian.py` — `DifferentiableLaplacian`
 
 The new entry point `from_spectral_loading(W, L_base)` is added as a class method:
 
@@ -141,7 +141,7 @@ The new entry point `from_spectral_loading(W, L_base)` is added as a class metho
 - Synthesises edge weights as `w_ij = base_w_ij * sigmoid(||W_i - W_j||^2)`.
 - Fully differentiable through `W` back to the spectral decoder.
 
-### `wae/spectral.py` — updated
+### `vdt/spectral.py` — updated
 
 **`TauModeDiffusion`** — unchanged from base Wiring AE.
 
@@ -159,7 +159,7 @@ The new entry point `from_spectral_loading(W, L_base)` is added as a class metho
 - Fully closed-form, no MC sampling.
 - `eigvals_q` same frozen constant as above.
 
-### `wae/encoder.py` — `WiringEncoderV2`
+### `vdt/encoder.py` — `WiringEncoderV2`
 
 - **`kl_loss`**: standard isotropic `KL(q(z) || N(0,I))`. No Laplacian-precision
   term; no runtime graph construction.
@@ -169,7 +169,7 @@ The new entry point `from_spectral_loading(W, L_base)` is added as a class metho
   the fixed `L(I)` — it is not rebuilt from data at runtime.
 - Outputs `(z, mu, log_var, log_a, log_b)`.
 
-### `wae/wiring_decoder.py` — `SpectralLoadingDecoder` (default)
+### `vdt/wiring_decoder.py` — `SpectralLoadingDecoder` (default)
 
 - Maps `z (B, q)` and `U_q (d, q)` to `(W, omega, S)`.
 - `W = U_q @ diag(omega) @ S` — loading matrix in Laplacian eigenbasis.
@@ -180,11 +180,11 @@ The new entry point `from_spectral_loading(W, L_base)` is added as a class metho
 `WiringDecoder` is retained for ablation; `SpectralLoadingDecoder` is the default.
 Config flag: `decoder_type: spectral | mixture_of_experts`.
 
-### `wae/diffusion_decoder.py` — `DiffusionDecoder` (unchanged)
+### `vdt/diffusion_decoder.py` — `DiffusionDecoder` (unchanged)
 
 No changes. `TauModeDiffusion` is already the Spectral-PPCA decoder.
 
-### `wae/model.py` — `WiringAutoencoderV2`
+### `vdt/model.py` — `WiringAutoencoderV2`
 
 - Assembles `WiringEncoderV2`, `SpectralLoadingDecoder`, `DiffusionDecoder`.
 - `forward()` returns `(loss, recon, kl_z, kl_S, kl_tau, x_hat, L_z, z, mu, log_var)`.
@@ -195,14 +195,14 @@ No changes. `TauModeDiffusion` is already the Spectral-PPCA decoder.
 - `generate()` unchanged.
 - `from_config()` factory reads the YAML config.
 
-### `wae/spectral_memory.py` — `SpectralAssociativeMemory`
+### `vdt/spectral_memory.py` — `SpectralAssociativeMemory`
 
 - Wraps a pre-built Hopfield/linear associative memory initialised from the
   spectral artefact `A(I)`.
 - `forward(query)`: Hopfield retrieval via softmax-weighted spectral keys.
 - `delta_update(key, value)`: online delta-rule write without corrupting spectral
   key structure.
-- `from_wae(wae, U_q, eigvals_q, d_model)`: class method for post-training
+- `from_vdt(vdt, U_q, eigvals_q, d_model)`: class method for post-training
   construction from a trained `WiringAutoencoderV2`.
 
 ---

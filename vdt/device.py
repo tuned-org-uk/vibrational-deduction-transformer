@@ -5,7 +5,7 @@ Priority: MPS (Apple Silicon) → CUDA → CPU.
 
 When MPS is selected, automatically sets PYTORCH_ENABLE_MPS_FALLBACK=1
 so ops unimplemented on MPS (e.g. aten::_linalg_eigh) silently fall
-back to CPU without crashing.  Note that wae/spectral.py also offloads
+back to CPU without crashing.  Note that vdt/spectral.py also offloads
 all eigensolver calls to CPU explicitly, so in practice the fallback env
 var is belt-and-braces for any third-party code paths.
 """
@@ -47,7 +47,7 @@ def get_device(
         if force == "mps":
             _set_mps_fallback(verbose)
         if verbose:
-            print(f"[WAE] Device forced to: {d}")
+            print(f"[VDT] Device forced to: {d}")
         return d
 
     if torch.backends.mps.is_available():
@@ -58,11 +58,11 @@ def get_device(
         device = torch.device("cuda")
         if verbose:
             name = torch.cuda.get_device_name(0)
-            print(f"[WAE] CUDA selected: {name}")
+            print(f"[VDT] CUDA selected: {name}")
         return device
 
     if verbose:
-        print("[WAE] No GPU found, falling back to CPU.")
+        print("[VDT] No GPU found, falling back to CPU.")
     return torch.device("cpu")
 
 
@@ -72,7 +72,7 @@ def _set_mps_fallback(verbose: bool) -> None:
         os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
         if verbose:
             print(
-                "[WAE] MPS selected — set PYTORCH_ENABLE_MPS_FALLBACK=1.\n"
+                "[VDT] MPS selected — set PYTORCH_ENABLE_MPS_FALLBACK=1.\n"
                 "      All linalg.eigh calls are also offloaded to CPU "
-                "explicitly in wae/spectral.py."
+                "explicitly in vdt/spectral.py."
             )

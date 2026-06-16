@@ -1,5 +1,5 @@
 """
-wae/vib_autoencoder.py  --  Deterministic Vibrational Autoencoder (Option 1).
+vdt/vib_autoencoder.py  --  Deterministic Vibrational Autoencoder (Option 1).
 
 Two classes are provided:
 
@@ -30,7 +30,7 @@ Post-training, call extract_spectral_artefact() to produce the artefact
 dict (W_hat, omega_hat, S_memory) for downstream Option 6 use.
 
 Ref: docs/v2/03-branching.md -- Option 1
-Depends on: wae/vdt.py (#17), wae/wiring_decoder.py (#26), wae/spectral.py (#24)
+Depends on: vdt/vdt.py (#17), vdt/wiring_decoder.py (#26), vdt/spectral.py (#24)
 """
 from __future__ import annotations
 
@@ -201,7 +201,7 @@ class DeterministicSpectralAE(nn.Module):
     ----------------------
     Call extract_spectral_artefact(U_q, eigvals_q) after training to
     produce the (W_hat, omega_hat, S_memory) dict that Option 6 (#18)
-    consumes via SpectralAssociativeMemory.from_wae().
+    consumes via SpectralAssociativeMemory.from_vdt().
 
     Parameters
     ----------
@@ -349,7 +349,7 @@ class DeterministicSpectralAE(nn.Module):
             N = L_base.shape[0]
             if self._density is None:
                 self._density = __import__(
-                    "wae.density", fromlist=["SignedDensityMatrix"]
+                    "vdt.density", fromlist=["SignedDensityMatrix"]
                 ).SignedDensityMatrix(n=N).to(x.device)
             rho = self._density.rho
             density_loss = self._density.trace_penalty()

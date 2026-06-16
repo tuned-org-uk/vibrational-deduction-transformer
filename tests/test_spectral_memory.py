@@ -9,7 +9,7 @@ Acceptance criteria from issue #28:
   AC3  delta_update increases the memory's response to the written (key, value)
        pair without degrading responses to previously stored patterns
        (measure before/after cosine similarity on a toy 4-pattern store).
-  AC4  from_wae() classmethod constructs the object from a trained
+  AC4  from_vdt() classmethod constructs the object from a trained
        WiringAutoencoderV2 end-to-end.
   AC5  Module is importable and serialisable via torch.save / torch.load.
 """
@@ -19,7 +19,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from wae.spectral_memory import SpectralAssociativeMemory
+from vdt.spectral_memory import SpectralAssociativeMemory
 
 # ---------------------------------------------------------------------------
 # Shared constants
@@ -28,8 +28,8 @@ from wae.spectral_memory import SpectralAssociativeMemory
 D_MODEL = 64    # memory dimensionality for most tests
 Q       = 8     # number of stored spectral keys
 B       = 4     # batch size
-N       = 16    # graph nodes (for from_wae fixture)
-D       = 32    # input feature dim (for from_wae fixture)
+N       = 16    # graph nodes (for from_vdt fixture)
+D       = 32    # input feature dim (for from_vdt fixture)
 
 
 # ---------------------------------------------------------------------------
@@ -53,10 +53,10 @@ def _outer_product_memory(keys: torch.Tensor, values: torch.Tensor) -> torch.Ten
     return torch.einsum("kd,ke->de", values, keys)  # (d, d)
 
 
-def _make_wae_v2_and_spectral():
-    """Minimal WiringAutoencoderV2 with ring-graph Laplacian for from_wae tests."""
-    from wae.laplacian import DifferentiableLaplacian
-    from wae.model import WiringAutoencoderV2
+def _make_vdt_v2_and_spectral():
+    """Minimal WiringAutoencoderV2 with ring-graph Laplacian for from_vdt tests."""
+    from vdt.laplacian import DifferentiableLaplacian
+    from vdt.model import WiringAutoencoderV2
 
     W = torch.zeros(N, N)
     for i in range(N):
@@ -271,30 +271,30 @@ class TestDeltaUpdate:
 
 
 # ---------------------------------------------------------------------------
-# AC4  --  from_wae() end-to-end construction
+# AC4  --  from_vdt() end-to-end construction
 # ---------------------------------------------------------------------------
 
-class TestFromWae:
-    def test_from_wae_returns_spectral_associative_memory(self):
-        model, U_q, eigvals_q = _make_wae_v2_and_spectral()
+class TestFromvdt:
+    def test_from_vdt_returns_spectral_associative_memory(self):
+        model, U_q, eigvals_q = _make_vdt_v2_and_spectral()
         artefact = model.extract_spectral_artefact(U_q, eigvals_q)
         d_model  = artefact["S_memory"].shape[0]
-        mem = SpectralAssociativeMemory.from_wae(model, U_q, eigvals_q, d_model=d_model)
+        mem = SpectralAssociativeMemory.from_vdt(model, U_q, eigvals_q, d_model=d_model)
         assert isinstance(mem, SpectralAssociativeMemory)
 
-    def test_from_wae_S_memory_square(self):
-        model, U_q, eigvals_q = _make_wae_v2_and_spectral()
+    def test_from_vdt_S_memory_square(self):
+        model, U_q, eigvals_q = _make_vdt_v2_and_spectral()
         artefact = model.extract_spectral_artefact(U_q, eigvals_q)
         d_model  = artefact["S_memory"].shape[0]
-        mem = SpectralAssociativeMemory.from_wae(model, U_q, eigvals_q, d_model=d_model)
+        mem = SpectralAssociativeMemory.from_vdt(model, U_q, eigvals_q, d_model=d_model)
         S   = mem.S_memory
-        assert S.shape[0] == S.shape[1], "S_memory from from_wae must be square"
+        assert S.shape[0] == S.shape[1], "S_memory from from_vdt must be square"
 
-    def test_from_wae_forward_shape(self):
-        model, U_q, eigvals_q = _make_wae_v2_and_spectral()
+    def test_from_vdt_forward_shape(self):
+        model, U_q, eigvals_q = _make_vdt_v2_and_spectral()
         artefact = model.extract_spectral_artefact(U_q, eigvals_q)
         d_model  = artefact["S_memory"].shape[0]
-        mem    = SpectralAssociativeMemory.from_wae(model, U_q, eigvals_q, d_model=d_model)
+        mem    = SpectralAssociativeMemory.from_vdt(model, U_q, eigvals_q, d_model=d_model)
         query  = torch.randn(B, d_model)
         output = mem(query)
         assert output.shape == query.shape

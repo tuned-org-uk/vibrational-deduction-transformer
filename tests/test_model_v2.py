@@ -26,7 +26,7 @@ B, D, N, Q = 4, 32, 16, 8
 
 def _make_laplacian():
     """Build a tiny symmetric PSD ring-graph Laplacian (N, N) for tests."""
-    from wae.laplacian import DifferentiableLaplacian
+    from vdt.laplacian import DifferentiableLaplacian
     W = torch.zeros(N, N)
     for i in range(N):
         j = (i + 1) % N
@@ -51,7 +51,7 @@ def _make_spectral(L: torch.Tensor, q: int):
 
 
 def _make_model():
-    from wae.model import WiringAutoencoderV2
+    from vdt.model import WiringAutoencoderV2
     lap, L_ring = _make_laplacian()
     model = WiringAutoencoderV2(
         input_dim=D,
@@ -164,7 +164,7 @@ class TestExtractSpectralArtefact:
 
 class TestFromConfig:
     def test_dispatches_v2(self):
-        from wae.model import from_config, WiringAutoencoderV2
+        from vdt.model import from_config, WiringAutoencoderV2
         cfg = {
             "model": {
                 "version": 2,
@@ -187,7 +187,7 @@ class TestFromConfig:
         assert isinstance(model, WiringAutoencoderV2)
 
     def test_dispatches_v1(self):
-        from wae.model import from_config, WiringAutoencoder
+        from vdt.model import from_config, WiringAutoencoder
         cfg = {
             "model": {
                 "version": 1,
@@ -211,7 +211,7 @@ class TestFromConfig:
         assert isinstance(model, WiringAutoencoder)
 
     def test_version_absent_defaults_to_v1(self):
-        from wae.model import from_config, WiringAutoencoder
+        from vdt.model import from_config, WiringAutoencoder
         cfg = {
             "model": {
                 "latent_dim": 16,

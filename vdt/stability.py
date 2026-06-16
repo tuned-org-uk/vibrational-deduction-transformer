@@ -33,8 +33,8 @@ Integration points
 
 Depends on
 ----------
-  wae.laplacian  : DifferentiableLaplacian (MassMatrix, dt_max_cfl)
-  wae.spectral   : _safe_eigvalsh
+  vdt.laplacian  : DifferentiableLaplacian (MassMatrix, dt_max_cfl)
+  vdt.spectral   : _safe_eigvalsh
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ from typing import List, Optional
 
 import torch
 
-from wae.spectral import _safe_eigvalsh
+from vdt.spectral import _safe_eigvalsh
 
 
 # ---------------------------------------------------------------------------

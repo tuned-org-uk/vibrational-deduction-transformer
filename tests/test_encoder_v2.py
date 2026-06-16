@@ -1,5 +1,5 @@
 """
-Unit tests for wae/encoder.py -- WiringEncoderV2, ModeWeightHead.
+Unit tests for vdt/encoder.py -- WiringEncoderV2, ModeWeightHead.
 
 Acceptance criteria from issue #25
 -----------------------------------
@@ -19,7 +19,7 @@ import torch
 import torch.nn as nn
 from unittest.mock import patch
 
-from wae.encoder import WiringEncoderV2, WiringEncoder, ModeWeightHead, kl_isotropic
+from vdt.encoder import WiringEncoderV2, WiringEncoder, ModeWeightHead, kl_isotropic
 
 torch.manual_seed(7)
 

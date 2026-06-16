@@ -27,7 +27,7 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["wae*"] 
+include = ["vdt*"] 
 exclude = ["tests*", "docs*", "demos*", "configs*"]
 
 

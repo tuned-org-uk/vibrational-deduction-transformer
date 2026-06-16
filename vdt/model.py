@@ -1,5 +1,5 @@
 """
-Wiring Autoencoder  --  full model assembling all WAE modules.
+Wiring Autoencoder  --  full model assembling all VDT modules.
 
 This module provides two top-level model classes:
 
@@ -10,7 +10,7 @@ v1 architecture
 ---------------
 The full Wiring Autoencoder objective is::
 
-    L_WAE(th, phi; x, i) = E_{q_phi(z|x)}[ log p_th(x | z, i) ]
+    L_VDT(th, phi; x, i) = E_{q_phi(z|x)}[ log p_th(x | z, i) ]
                           - beta  * KL( q_phi(z|x) || N(0,I) )
                           - alpha * J_freq( L(z) )
 
@@ -21,7 +21,7 @@ v2 architecture (three-term ELBO, issue #27)
 Assembles WiringEncoderV2, SpectralLoadingDecoder, and DiffusionDecoder
 under the three-term objective (PR #35 -- Laplacian-precision KL removed)::
 
-    L_WAEv2 = E_q[log p(x|z,W)]
+    L_VDTv2 = E_q[log p(x|z,W)]
              - KL( q(z)  || N(0,I)          )   # kl_z  -- isotropic
              - KL( q(S)  || p(S|I)          )   # kl_S  -- spectral basis
              - KL( q(w)  || p(w | tau, L)   )   # kl_tau -- mode frequency
@@ -66,7 +66,7 @@ class WiringAutoencoder(nn.Module):
     Full Wiring Autoencoder (v1).
 
     Assembles WiringEncoder, WiringDecoder, and DiffusionDecoder into a
-    single trainable model and computes the two-term WAE-ELBO::
+    single trainable model and computes the two-term VDT-ELBO::
 
         L = E_q[log p(x|z)] - beta*KL(q(z)||N(0,I)) - alpha*J_freq(L(z))
 
@@ -289,7 +289,7 @@ class WiringAutoencoderV2(nn.Module):
     Assembles WiringEncoderV2, SpectralLoadingDecoder, and DiffusionDecoder
     under the three-term variational objective::
 
-        L_WAEv2 = E_q[log p(x|z,W)]
+        L_VDTv2 = E_q[log p(x|z,W)]
                  - KL( q(z)  || N(0,I)          )   # kl_z  -- isotropic
                  - KL( q(S)  || p(S|I)          )   # kl_S  -- spectral basis
                  - KL( q(w)  || p(w|tau,Lambda) )   # kl_tau -- mode frequency
@@ -595,7 +595,7 @@ def from_config(
     E: torch.Tensor,
 ) -> "WiringAutoencoder | WiringAutoencoderV2":
     """
-    Build the appropriate WAE model from a parsed YAML config dict.
+    Build the appropriate VDT model from a parsed YAML config dict.
 
     Dispatches on cfg['model']['version']:
       version: 1  (or absent)  ->  WiringAutoencoder     (v1)

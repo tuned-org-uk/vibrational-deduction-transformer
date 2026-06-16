@@ -12,9 +12,9 @@ import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from wae import WiringAutoencoder, get_device
-from wae.dataset import load_dataset, make_loaders
-from wae.spectral import _safe_eigh, lambda_fingerprint
+from vdt import WiringAutoencoder, get_device
+from vdt.dataset import load_dataset, make_loaders
+from vdt.spectral import _safe_eigh, lambda_fingerprint
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,7 +43,7 @@ def resolve_batch_size(cfg: dict, device: torch.device) -> int:
     tc = cfg["training"]
     if device.type == "mps" and "mps_batch_size" in tc:
         bs = tc["mps_batch_size"]
-        print(f"[WAE] MPS device detected — using mps_batch_size={bs} (override batch_size={tc['batch_size']})")
+        print(f"[VDT] MPS device detected — using mps_batch_size={bs} (override batch_size={tc['batch_size']})")
         return bs
     return tc["batch_size"]
 
@@ -143,7 +143,7 @@ def main() -> None:
 
     device = get_device(force=args.device, verbose=True)
     batch_size = resolve_batch_size(cfg, device)
-    print(f"[WAE] device={device}, dataset={cfg['dataset']['name']}, batch_size={batch_size}")
+    print(f"[VDT] device={device}, dataset={cfg['dataset']['name']}, batch_size={batch_size}")
 
     tc = cfg["training"]
     dc = cfg["dataset"]
@@ -153,13 +153,13 @@ def main() -> None:
     loaders = make_loaders(data, batch_size=batch_size)
     E = data["E"]
     meta = data["meta"]
-    print(f"[WAE] nodes={meta['n_nodes']}, feat_dim={meta['feat_dim']}, classes={meta['n_classes']}")
+    print(f"[VDT] nodes={meta['n_nodes']}, feat_dim={meta['feat_dim']}, classes={meta['n_classes']}")
 
     model = WiringAutoencoder.from_config(cfg, E).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"[WAE] trainable params: {n_params:,}")
+    print(f"[VDT] trainable params: {n_params:,}")
 
-    from wae.laplacian import DifferentiableLaplacian
+    from vdt.laplacian import DifferentiableLaplacian
     use_sparse = gc.get("sparse", device.type == "mps")
     base_lap = DifferentiableLaplacian.from_embeddings(
         E,
@@ -183,7 +183,7 @@ def main() -> None:
         )
     spectral_cache = (base_eigvals, base_eigvecs)
     freq_eigvals = base_eigvals
-    print(f"[WAE] cached base spectral quantities in {time.time() - t_spec:.1f}s")
+    print(f"[VDT] cached base spectral quantities in {time.time() - t_spec:.1f}s")
 
     optimizer = optim.AdamW(
         model.parameters(), lr=tc["lr"], weight_decay=tc.get("weight_decay", 1e-5)
@@ -269,8 +269,8 @@ def main() -> None:
                        save_dir / "best.pt")
 
     csv_f.close()
-    print(f"[WAE] Training complete. Best val loss: {best_val:.4f}")
-    print(f"[WAE] Log saved to {log_path}")
+    print(f"[VDT] Training complete. Best val loss: {best_val:.4f}")
+    print(f"[VDT] Log saved to {log_path}")
 
 
 if __name__ == "__main__":

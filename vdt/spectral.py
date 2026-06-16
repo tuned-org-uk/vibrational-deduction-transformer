@@ -2,7 +2,7 @@
 Spectral utilities for the Wiring Autoencoder.
 
 This module implements the three spectral primitives that sit at the heart
-of the WAE training loop:
+of the VDT training loop:
 
     TauModeDiffusion    differentiable truncated spectral diffusion decoder
     spectral_freq_cost  J_freq high-frequency energy penalty (training signal)

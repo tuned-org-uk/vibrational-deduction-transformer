@@ -1,5 +1,5 @@
 """
-Benchmark script — compare Wiring Autoencoder (WAE) against:
+Benchmark script — compare Wiring Autoencoder (VDT) against:
     1. Plain VAE (same architecture, no wiring / graph path)
     2. Linear Autoencoder (AE) — PCA-equivalent reconstruction baseline
 
@@ -7,7 +7,7 @@ Metrics reported (saved to CSV + printed as table):
     - Reconstruction MSE (lower is better)
     - Latent KL divergence (lower ≈ better posterior collapse diagnostic)
     - Downstream classification accuracy on frozen latent z (linear probe)
-    - Spectral entropy H(Λ) of the generated Laplacians (WAE only)
+    - Spectral entropy H(Λ) of the generated Laplacians (VDT only)
 
 Usage
 -----
@@ -29,11 +29,11 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
 import numpy as np
 
-from wae import WiringAutoencoder, get_device
-from wae.encoder import WiringEncoder
-from wae.dataset import load_dataset, make_loaders
-from wae.laplacian import DifferentiableLaplacian
-from wae.spectral import spectral_freq_cost
+from vdt import WiringAutoencoder, get_device
+from vdt.encoder import WiringEncoder
+from vdt.dataset import load_dataset, make_loaders
+from vdt.laplacian import DifferentiableLaplacian
+from vdt.spectral import spectral_freq_cost
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ class LinearAE(nn.Module):
 # ---------------------------------------------------------------------------
 # Training helpers
 # ---------------------------------------------------------------------------
-def train_model(model, loaders, E, base_L, device, epochs, lr, is_wae=False):
+def train_model(model, loaders, E, base_L, device, epochs, lr, is_vdt=False):
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
     model.to(device)
     for epoch in range(epochs):
@@ -100,7 +100,7 @@ def train_model(model, loaders, E, base_L, device, epochs, lr, is_wae=False):
             x        = batch["x"].to(device)
             node_idx = batch["node_idx"].to(device)
             optimizer.zero_grad()
-            if is_wae:
+            if is_vdt:
                 out = model(x, E, node_idx=node_idx, base_L=base_L)
             else:
                 out = model(x)
@@ -112,14 +112,14 @@ def train_model(model, loaders, E, base_L, device, epochs, lr, is_wae=False):
 
 @torch.no_grad()
 def extract_latents(
-    model, loader, E, base_L, device, is_wae=False
+    model, loader, E, base_L, device, is_vdt=False
 ) -> tuple[np.ndarray, np.ndarray]:
     model.eval()
     zs, ys = [], []
     for batch in loader:
         x        = batch["x"].to(device)
         node_idx = batch["node_idx"].to(device)
-        if is_wae:
+        if is_vdt:
             out = model(x, E, node_idx=node_idx, base_L=base_L)
         else:
             out = model(x)
@@ -130,7 +130,7 @@ def extract_latents(
 
 @torch.no_grad()
 def compute_test_metrics(
-    model, loader, E, base_L, device, is_wae=False
+    model, loader, E, base_L, device, is_vdt=False
 ) -> dict[str, float]:
     model.eval()
     totals = {"recon_loss": 0.0, "kl_loss": 0.0, "freq_loss": 0.0}
@@ -138,7 +138,7 @@ def compute_test_metrics(
     for batch in loader:
         x        = batch["x"].to(device)
         node_idx = batch["node_idx"].to(device)
-        if is_wae:
+        if is_vdt:
             out = model(x, E, node_idx=node_idx, base_L=base_L)
         else:
             out = model(x)
@@ -194,7 +194,7 @@ def main() -> None:
     D       = meta["feat_dim"]
     print(f"[Benchmark] N={meta['n_nodes']}, D={D}, classes={meta['n_classes']}")
 
-    # Base Laplacian for WAE and lambda-fingerprint
+    # Base Laplacian for VDT and lambda-fingerprint
     base_lap = DifferentiableLaplacian.from_embeddings(
         E, knn_k=cfg["graph"]["knn_k"], sigma=cfg["graph"]["sigma"]
     ).to(device)
@@ -207,26 +207,26 @@ def main() -> None:
     # 1. Wiring Autoencoder
     # -------------------------------------------------------------------
     print("\n[1/3] Training Wiring Autoencoder...")
-    wae = WiringAutoencoder.from_config(cfg, E).to(device)
-    wae = train_model(wae, loaders, E, base_L, device, args.epochs, args.lr, is_wae=True)
-    wae_metrics = compute_test_metrics(wae, loaders["test"], E, base_L, device, is_wae=True)
-    z_tr, y_tr = extract_latents(wae, loaders["train"], E, base_L, device, is_wae=True)
-    z_te, y_te = extract_latents(wae, loaders["test"],  E, base_L, device, is_wae=True)
-    wae_acc    = linear_probe_accuracy(z_tr, y_tr, z_te, y_te)
+    vdt = WiringAutoencoder.from_config(cfg, E).to(device)
+    vdt = train_model(vdt, loaders, E, base_L, device, args.epochs, args.lr, is_vdt=True)
+    vdt_metrics = compute_test_metrics(vdt, loaders["test"], E, base_L, device, is_vdt=True)
+    z_tr, y_tr = extract_latents(vdt, loaders["train"], E, base_L, device, is_vdt=True)
+    z_te, y_te = extract_latents(vdt, loaders["test"],  E, base_L, device, is_vdt=True)
+    vdt_acc    = linear_probe_accuracy(z_tr, y_tr, z_te, y_te)
     results.append({"model": "WiringAE",
-                    "recon_mse":     wae_metrics["recon_loss"],
-                    "kl":            wae_metrics["kl_loss"],
-                    "freq_cost":     wae_metrics["freq_loss"],
-                    "linear_probe":  wae_acc})
-    print(f"  WAE  → recon={wae_metrics['recon_loss']:.4f}  kl={wae_metrics['kl_loss']:.4f}  probe={wae_acc:.4f}")
+                    "recon_mse":     vdt_metrics["recon_loss"],
+                    "kl":            vdt_metrics["kl_loss"],
+                    "freq_cost":     vdt_metrics["freq_loss"],
+                    "linear_probe":  vdt_acc})
+    print(f"  VDT  → recon={vdt_metrics['recon_loss']:.4f}  kl={vdt_metrics['kl_loss']:.4f}  probe={vdt_acc:.4f}")
 
     # -------------------------------------------------------------------
     # 2. Baseline VAE
     # -------------------------------------------------------------------
     print("[2/3] Training Baseline VAE...")
     vae = BaselineVAE(D, args.latent, args.hidden)
-    vae = train_model(vae, loaders, E, None, device, args.epochs, args.lr, is_wae=False)
-    vae_metrics = compute_test_metrics(vae, loaders["test"], E, None, device, is_wae=False)
+    vae = train_model(vae, loaders, E, None, device, args.epochs, args.lr, is_vdt=False)
+    vae_metrics = compute_test_metrics(vae, loaders["test"], E, None, device, is_vdt=False)
     z_tr, y_tr = extract_latents(vae, loaders["train"], E, None, device)
     z_te, y_te = extract_latents(vae, loaders["test"],  E, None, device)
     vae_acc    = linear_probe_accuracy(z_tr, y_tr, z_te, y_te)
@@ -242,7 +242,7 @@ def main() -> None:
     # -------------------------------------------------------------------
     print("[3/3] Training Linear AE (PCA baseline)...")
     lin_ae = LinearAE(D, args.latent)
-    lin_ae = train_model(lin_ae, loaders, E, None, device, args.epochs, args.lr, is_wae=False)
+    lin_ae = train_model(lin_ae, loaders, E, None, device, args.epochs, args.lr, is_vdt=False)
     lin_metrics = compute_test_metrics(lin_ae, loaders["test"], E, None, device)
     z_tr, y_tr  = extract_latents(lin_ae, loaders["train"], E, None, device)
     z_te, y_te  = extract_latents(lin_ae, loaders["test"],  E, None, device)

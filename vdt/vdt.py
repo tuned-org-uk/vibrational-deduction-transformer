@@ -16,7 +16,7 @@ where:
   dt     -- scalar time step, CFL-clamped each forward pass
 
 The module accumulates per-step density matrices (rho_plus, rho_minus)
-from wae/density.py, making the signed spectral energy available
+from vdt/density.py, making the signed spectral energy available
 downstream for the variational Gamma KL term (#24).
 
 Reference
@@ -34,8 +34,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from wae.density import SignedDensityMatrix
-from wae.laplacian import DifferentiableLaplacian
+from vdt.density import SignedDensityMatrix
+from vdt.laplacian import DifferentiableLaplacian
 
 
 # ---------------------------------------------------------------------------

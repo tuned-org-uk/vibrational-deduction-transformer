@@ -36,9 +36,9 @@ Design notes
   so it runs in all CI environments.
 * When torch_geometric IS installed the real datasets are loaded from
   ~/.cache/torch_geometric_data/.
-* The WiringAutoencoderV2 model is imported from wae.model; the benchmark
+* The WiringAutoencoderV2 model is imported from vdt.model; the benchmark
   adapts its latent dim / tau_modes to each dataset's feature dimension.
-* All 7 metrics are called through wae.metrics public functions; nothing
+* All 7 metrics are called through vdt.metrics public functions; nothing
   reaches into model internals.
 
 Reference
@@ -69,7 +69,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from wae.metrics import (
+from vdt.metrics import (
     evaluate_v2,
     compare_indices,
     linear_probe_acc,

@@ -63,7 +63,7 @@ The data file must be a .pt dict with keys:
     L_f: (n_nodes, n_nodes)     float32 frozen index Laplacian
 
 Ref: docs/v2/03-branching.md -- Option 6 / Track A ablation
-Depends on: wae/classifier.py (#18), wae/spectral_memory.py (#28), wae/vib_autoencoder.py (#20)
+Depends on: vdt/classifier.py (#18), vdt/spectral_memory.py (#28), vdt/vib_autoencoder.py (#20)
 """
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from wae.classifier import VibrationalClassifier
+from vdt.classifier import VibrationalClassifier
 
 
 # ---------------------------------------------------------------------------
@@ -253,7 +253,7 @@ def load_artefact_from_checkpoint(
     -------
     dict with keys: W_hat, omega_hat, S_memory, eigvals_q
     """
-    from wae.vib_autoencoder import DeterministicSpectralAE
+    from vdt.vib_autoencoder import DeterministicSpectralAE
 
     state = torch.load(ckpt_path, map_location="cpu")
     N     = L_f.shape[0]

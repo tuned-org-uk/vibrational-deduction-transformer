@@ -12,8 +12,8 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 import pytest
-from wae.wiring_decoder import SpectralLoadingDecoder, WiringDecoder
-from wae.laplacian import DifferentiableLaplacian
+from vdt.wiring_decoder import SpectralLoadingDecoder, WiringDecoder
+from vdt.laplacian import DifferentiableLaplacian
 
 
 # ---------------------------------------------------------------------------

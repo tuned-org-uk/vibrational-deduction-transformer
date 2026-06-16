@@ -1,5 +1,5 @@
 """
-wae/classifier.py  --  Vibrational Classifier (Option 6, issue #18).
+vdt/classifier.py  --  Vibrational Classifier (Option 6, issue #18).
 
 Provides a depth-supervised vibrational classifier built on VDT recurrent
 steps.  At each recurrent depth t the hidden state Q_t (B, N, d_model) is
@@ -30,13 +30,13 @@ Spectral memory initialisation (v2 upgrade)
 --------------------------------------------
 After loading a pre-trained WiringAutoencoderV2 checkpoint:
 
-    memory = SpectralAssociativeMemory.from_wae(wae_v2, U_q, eigvals_q,
+    memory = SpectralAssociativeMemory.from_vdt(vdt_v2, U_q, eigvals_q,
                                                 d_model=hidden_dim)
     classifier.init_from_spectral_memory(memory, freeze=True)  # condition: spectral_memory
     classifier.init_from_spectral_memory(memory, freeze=False) # condition: spectral_memory_ft
 
 Ref: docs/v2/03-branching.md -- Option 6
-Depends on: wae/vdt.py (#17), wae/spectral_memory.py (#28)
+Depends on: vdt/vdt.py (#17), vdt/spectral_memory.py (#28)
 """
 from __future__ import annotations
 
@@ -231,7 +231,7 @@ class VibrationalClassifier(nn.Module):
         Parameters
         ----------
         memory : SpectralAssociativeMemory
-            Loaded from SpectralAssociativeMemory.from_wae(...).
+            Loaded from SpectralAssociativeMemory.from_vdt(...).
         freeze : bool
             True  -> spectral_memory condition (frozen key matrix).
             False -> spectral_memory_ft condition (fine-tuned key matrix).

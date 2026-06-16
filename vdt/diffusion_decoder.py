@@ -8,7 +8,7 @@ followed by an optional per-node MLP refinement.
 
 Architectural context
 ---------------------
-``DiffusionDecoder`` is the last block in the WAE data flow::
+``DiffusionDecoder`` is the last block in the VDT data flow::
 
     L(z)  (B, N, N)  +  E  (N, D)
       |  TauModeDiffusion  (heat kernel K_tau = U exp(-tΛ) U^T)
@@ -41,7 +41,7 @@ and the CFL bound on Δt is analysed in
 <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/04-stability.md#3-numerical-stability-of-the-wave-update>`_.
 
 See also `docs/00-architecture.md § DiffusionDecoder
-<https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#waediffusion_decoderpy--diffusiondecoder>`_
+<https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#vdtdiffusion_decoderpy--diffusiondecoder>`_
 for the full module description.
 """
 from __future__ import annotations
@@ -173,9 +173,9 @@ class DiffusionDecoder(nn.Module):
 
             -log p(x | z) = ||x - x_hat||² / (2σ²) + D log σ
 
-        This is the ``E_q[log p(x|z)]`` term in the WAE-ELBO::
+        This is the ``E_q[log p(x|z)]`` term in the VDT-ELBO::
 
-            L_WAE = E_q[log p(x|z)] - β KL - α J_freq
+            L_vdt = E_q[log p(x|z)] - β KL - α J_freq
 
         See `docs/00-architecture.md § ELBO Derivation
         <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#elbo-derivation>`_.

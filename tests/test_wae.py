@@ -7,12 +7,12 @@ from __future__ import annotations
 import torch
 import pytest
 
-from wae.laplacian import DifferentiableLaplacian
-from wae.spectral import TauModeDiffusion, spectral_freq_cost, lambda_fingerprint
-from wae.encoder import WiringEncoder
-from wae.wiring_decoder import WiringDecoder
-from wae.diffusion_decoder import DiffusionDecoder
-from wae.model import WiringAutoencoder
+from vdt.laplacian import DifferentiableLaplacian
+from vdt.spectral import TauModeDiffusion, spectral_freq_cost, lambda_fingerprint
+from vdt.encoder import WiringEncoder
+from vdt.wiring_decoder import WiringDecoder
+from vdt.diffusion_decoder import DiffusionDecoder
+from vdt.model import WiringAutoencoder
 
 
 # ---------------------------------------------------------------------------
@@ -28,7 +28,7 @@ def small_graph():
 
 
 @pytest.fixture
-def wae_model(small_graph):
+def vdt_model(small_graph):
     lap, E, N, D = small_graph
     model = WiringAutoencoder(
         input_dim=D, latent_dim=8, hidden_dim=32,
@@ -166,8 +166,8 @@ class TestDiffusionDecoder:
 # WiringAutoencoder end-to-end
 # ---------------------------------------------------------------------------
 class TestWiringAutoencoder:
-    def test_forward_shapes(self, wae_model, small_graph):
-        model, E = wae_model
+    def test_forward_shapes(self, vdt_model, small_graph):
+        model, E = vdt_model
         lap, _, N, D = small_graph
         B = 6
         x        = torch.randn(B, D)
@@ -177,8 +177,8 @@ class TestWiringAutoencoder:
         assert out["z"].shape       == (B, 8)
         assert out["L"].shape       == (B, N, N)
 
-    def test_loss_keys(self, wae_model, small_graph):
-        model, E = wae_model
+    def test_loss_keys(self, vdt_model, small_graph):
+        model, E = vdt_model
         lap, _, N, D = small_graph
         x = torch.randn(4, D)
         node_idx = torch.randint(0, N, (4,))
@@ -186,8 +186,8 @@ class TestWiringAutoencoder:
         for key in ("loss", "recon_loss", "kl_loss", "freq_loss"):
             assert key in out, f"Missing key: {key}"
 
-    def test_backward(self, wae_model, small_graph):
-        model, E = wae_model
+    def test_backward(self, vdt_model, small_graph):
+        model, E = vdt_model
         lap, _, N, D = small_graph
         x = torch.randn(4, D)
         node_idx = torch.randint(0, N, (4,))
@@ -199,13 +199,13 @@ class TestWiringAutoencoder:
     # ------------------------------------------------------------------
     # generate() — the core of issue #3
     # ------------------------------------------------------------------
-    def test_generate_per_node_default(self, wae_model, small_graph):
+    def test_generate_per_node_default(self, vdt_model, small_graph):
         """
         Default generate() call: mode='per_node', no node_idx supplied.
         x_hat must be (n_samples, D) — same shape as reconstruction path.
         node_idx key must be present and have shape (n_samples,).
         """
-        model, E = wae_model
+        model, E = vdt_model
         _, _, N, D = small_graph
         n = 5
         gen = model.generate(E, n_samples=n)
@@ -214,12 +214,12 @@ class TestWiringAutoencoder:
         assert gen["node_idx"].shape == (n,),      f"node_idx shape wrong: {gen['node_idx'].shape}"
         assert gen["x_hat"].shape    == (n, D),    f"x_hat shape wrong: {gen['x_hat'].shape}"
 
-    def test_generate_per_node_explicit_idx(self, wae_model, small_graph):
+    def test_generate_per_node_explicit_idx(self, vdt_model, small_graph):
         """
         generate() with explicit node_idx in per_node mode.
         Output x_hat must match the supplied node indices' geometry.
         """
-        model, E = wae_model
+        model, E = vdt_model
         _, _, N, D = small_graph
         n = 4
         node_idx = torch.arange(n)   # nodes 0,1,2,3
@@ -227,38 +227,38 @@ class TestWiringAutoencoder:
         assert gen["x_hat"].shape == (n, D)
         assert torch.equal(gen["node_idx"], node_idx)
 
-    def test_generate_full_graph(self, wae_model, small_graph):
+    def test_generate_full_graph(self, vdt_model, small_graph):
         """
         generate() in full_graph mode.
         x_hat must be (n_samples, N, D).
         node_idx must be None.
         """
-        model, E = wae_model
+        model, E = vdt_model
         _, _, N, D = small_graph
         n = 3
         gen = model.generate(E, n_samples=n, mode="full_graph")
         assert gen["x_hat"].shape == (n, N, D), f"Expected ({n},{N},{D}), got {tuple(gen['x_hat'].shape)}"
         assert gen["node_idx"] is None
 
-    def test_generate_invalid_mode(self, wae_model, small_graph):
+    def test_generate_invalid_mode(self, vdt_model, small_graph):
         """Passing an unknown mode must raise ValueError."""
-        model, E = wae_model
+        model, E = vdt_model
         with pytest.raises(ValueError, match="mode must be"):
             model.generate(E, n_samples=2, mode="bad_mode")
 
-    def test_generate_node_idx_shape_mismatch(self, wae_model, small_graph):
+    def test_generate_node_idx_shape_mismatch(self, vdt_model, small_graph):
         """Wrong node_idx length must raise ValueError."""
-        model, E = wae_model
+        model, E = vdt_model
         with pytest.raises(ValueError, match="node_idx must have shape"):
             model.generate(E, n_samples=4, node_idx=torch.arange(3))
 
-    def test_generate_sanity_encode_decode_round_trip(self, wae_model, small_graph):
+    def test_generate_sanity_encode_decode_round_trip(self, vdt_model, small_graph):
         """
         Encode a real node, then generate from that z in per_node mode.
         The generated embedding for the same node_idx should be finite
         and have the correct dtype.
         """
-        model, E = wae_model
+        model, E = vdt_model
         _, _, N, D = small_graph
         model.eval()
         # pick a real node

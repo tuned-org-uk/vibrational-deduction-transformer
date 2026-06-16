@@ -1,6 +1,6 @@
 """
-Unit tests for wae/vdt.py (VibrationalStateBlock, VDT) and the
-WiringEncoderV2 / ModeWeightHead additions to wae/encoder.py  (issue #17).
+Unit tests for vdt/vdt.py (VibrationalStateBlock, VDT) and the
+WiringEncoderV2 / ModeWeightHead additions to vdt/encoder.py  (issue #17).
 
 Acceptance criteria
 -------------------
@@ -21,9 +21,9 @@ import pytest
 import torch
 import torch.nn as nn
 
-from wae.vdt import VDT, VibrationalStateBlock
-from wae.encoder import ModeWeightHead, WiringEncoder, WiringEncoderV2
-from wae.laplacian import DifferentiableLaplacian
+from vdt.vdt import VDT, VibrationalStateBlock
+from vdt.encoder import ModeWeightHead, WiringEncoder, WiringEncoderV2
+from vdt.laplacian import DifferentiableLaplacian
 
 
 # ---------------------------------------------------------------------------

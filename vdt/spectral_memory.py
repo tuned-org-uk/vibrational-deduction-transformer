@@ -1,5 +1,5 @@
 """
-wae/spectral_memory.py  --  SpectralAssociativeMemory
+vdt/spectral_memory.py  --  SpectralAssociativeMemory
 
 This module wraps the post-training spectral artefact A(I) produced by
 WiringAutoencoderV2.extract_spectral_artefact() into a pre-built
@@ -8,7 +8,7 @@ transformer's feed-forward or cross-attention value matrices.
 
 Two-phase architecture
 ----------------------
-PHASE 1 -- OFFLINE (WAE v2 training)
+PHASE 1 -- OFFLINE (VDT v2 training)
     ArrowSpace index I  ->  L(I), U_q, Lambda_q
     WiringAutoencoderV2.train()  ->  ELBO maximisation
     extract_spectral_artefact()  ->  A(I)  = {S_memory, omega_hat, W_hat}
@@ -51,7 +51,7 @@ from typing import Dict
 
 class SpectralAssociativeMemory(nn.Module):
     """
-    Pre-built Hopfield associative memory seeded from the WAE v2 spectral
+    Pre-built Hopfield associative memory seeded from the VDT v2 spectral
     artefact A(I).
 
     The memory matrix S_memory is stored as a non-learnable buffer of shape
@@ -165,13 +165,13 @@ class SpectralAssociativeMemory(nn.Module):
             self.S_memory += torch.outer(value, key)
 
     # ------------------------------------------------------------------
-    # from_wae -- post-training factory classmethod
+    # from_vdt -- post-training factory classmethod
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_wae(
+    def from_vdt(
         cls,
-        wae_v2: "WiringAutoencoderV2",  # noqa: F821 -- forward reference
+        vdt_v2: "WiringAutoencoderV2",  # noqa: F821 -- forward reference
         U_q: Tensor,
         eigvals_q: Tensor,
         d_model: int,
@@ -184,8 +184,8 @@ class SpectralAssociativeMemory(nn.Module):
 
         Parameters
         ----------
-        wae_v2 : WiringAutoencoderV2
-            A trained WAE v2 instance.
+        vdt_v2 : WiringAutoencoderV2
+            A trained VDT v2 instance.
         U_q : Tensor
             Leading q eigenvectors of the frozen index Laplacian L(I).
             Shape (N, q).
@@ -207,7 +207,7 @@ class SpectralAssociativeMemory(nn.Module):
         ValueError
             If the returned S_memory side does not match d_model.
         """
-        artefact: Dict[str, Tensor] = wae_v2.extract_spectral_artefact(U_q, eigvals_q)
+        artefact: Dict[str, Tensor] = vdt_v2.extract_spectral_artefact(U_q, eigvals_q)
         if "S_memory" not in artefact:
             raise KeyError(
                 "extract_spectral_artefact() did not return 'S_memory'. "

@@ -266,7 +266,7 @@ provides a principled comparison between index constructions. This closes the lo
 | $$W = U_{1:q} S$$ (Laplacian basis) | Keys exactly orthonormal, max. retrieval SNR[^21] | Requires eigendecomposition of $$L(\mathcal{I})$$ offline |
 | Laplacian-precision latent prior | Latent codes smooth over sample graph; interpretable manifold[^10][^11] | KL requires Laplacian eigenvalues; adds $$O(\mathrm{nnz}(L))$$ per step |
 | $$\tau$$-mode Gamma prior on $$\omega$$ | Learns spectral band-limiting; auto-selects effective $$q$$[^7] | Requires implicit reparametrisation or LogNormal relaxation |
-| ELBO as index score | Index selection is Bayesian, principled[^17][^3] | ELBO is a lower bound; may need importance-weighted correction (IWAE) |
+| ELBO as index score | Index selection is Bayesian, principled[^17][^3] | ELBO is a lower bound; may need importance-weighted correction (IVDT) |
 | Pre-built $$S_\mathcal{I}$$ as transformer memory | Spectral prior memory replaces random FFN init; grounded in data geometry[^19][^29] | Memory frozen unless delta-rule updates are added[^25] |
 
 ---

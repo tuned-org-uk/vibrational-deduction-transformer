@@ -117,7 +117,7 @@ def vis_training(log_df: pd.DataFrame, figs: Path) -> None:
 
     save_json({
         "type": "line",
-        "title": "WAE Training Curves — Spring Network Demo",
+        "title": "VDT Training Curves — Spring Network Demo",
         "x": log_df["epoch"].tolist(),
         "x_label": "Epoch",
         "series": series
@@ -173,7 +173,7 @@ def vis_entropy_control(ctrl_df: pd.DataFrame, figs: Path) -> None:
 # ---------------------------------------------------------------------------
 def write_pluot_manifest(figs: Path) -> None:
     manifest = {
-        "title": "WAE Spectral Generation Demo",
+        "title": "VDT Spectral Generation Demo",
         "description": "Interactive pluot views for the spring-network spectral demo.",
         "views": [
             {"id": "training",        "file": "interactive_training.json",        "type": "line"},

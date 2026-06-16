@@ -1,5 +1,5 @@
 """
-tests/test_stability.py  --  acceptance tests for wae/stability.py (#19).
+tests/test_stability.py  --  acceptance tests for vdt/stability.py (#19).
 
 AC1  stability_diagnostics: all expected keys present; CFL_ok=True on well-formed input
 AC2  stability_diagnostics: PSD-violating rho_plus -> rho_psd_ok=False
@@ -16,7 +16,7 @@ import math
 import warnings
 import torch
 import pytest
-from wae.stability import (
+from vdt.stability import (
     stability_diagnostics,
     log_preconditioner_stability,
     pre_training_checks,

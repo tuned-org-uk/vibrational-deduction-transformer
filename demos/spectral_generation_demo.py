@@ -2,7 +2,7 @@
 Molecular / Spectral Graph-Generation Demo  (resolves issue #13)
 =================================================================
 
-Demonstrates the WAE as a **generative spectral prior** for graph topology
+Demonstrates the VDT as a **generative spectral prior** for graph topology
 and vibrational-mode modelling, using a synthetic spring-network dataset.
 
 Conceptual grounding
@@ -12,7 +12,7 @@ the eigenvalue problem  K*u = omega^2 * M * u, where K is the stiffness
 matrix and M the mass matrix.  For uniform masses, K is proportional to the
 graph Laplacian L, and omega^2 are its eigenvalues -- the vibrational modes.
 
-In the WAE framework:
+In the VDT framework:
   * Low-entropy state (ordered oscillation)  <->  few non-zero eigenvalues
     (smooth, low-frequency wiring).
   * High-entropy state (thermal rest)        <->  flat eigenvalue spectrum
@@ -68,10 +68,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
-from wae.metrics import spectral_entropy as v2_spectral_entropy
-from wae.metrics import memory_snr as v2_memory_snr
-from wae.metrics import active_modes as v2_active_modes
-from wae.metrics import compute_kl_S, compute_kl_tau
+from vdt.metrics import spectral_entropy as v2_spectral_entropy
+from vdt.metrics import memory_snr as v2_memory_snr
+from vdt.metrics import active_modes as v2_active_modes
+from vdt.metrics import compute_kl_S, compute_kl_tau
 
 # ---------------------------------------------------------------------------
 # Reproducibility
@@ -247,7 +247,7 @@ def freq_cost(L: Tensor, tau_modes: int) -> Tensor:
 
 class Encoder(nn.Module):
     """
-    Amortised encoder for the SpectralWAE three-term ELBO.
+    Amortised encoder for the SpectralVDT three-term ELBO.
 
     Outputs the standard VAE parameters (mu, log_var, z) plus the
     spectral-loading posterior (S_mean, log_var_S) and mode-weight
@@ -368,7 +368,7 @@ class DiffusionDecoder(nn.Module):
         return self.mlp(feat), K
 
 
-class SpectralWAE(nn.Module):
+class SpectralVDT(nn.Module):
     """
     Spectral Wiring Autoencoder with three-term ELBO (issue #13).
 
@@ -518,7 +518,7 @@ class SpectralWAE(nn.Module):
 # ===========================================================================
 
 def train(
-    model: SpectralWAE, loader: DataLoader,
+    model: SpectralVDT, loader: DataLoader,
     optimizer: torch.optim.Optimizer, device: str
 ) -> Dict[str, float]:
     """One training epoch; returns mean loss components."""
@@ -540,7 +540,7 @@ def train(
 
 @torch.no_grad()
 def evaluate(
-    model: SpectralWAE, loader: DataLoader, device: str
+    model: SpectralVDT, loader: DataLoader, device: str
 ) -> Dict[str, float]:
     """One evaluation pass; returns mean loss components."""
     model.eval()
@@ -570,7 +570,7 @@ def spectral_distance(L_a: Tensor, L_b: Tensor) -> Tensor:
 # ===========================================================================
 
 def generate_at_target_entropy(
-    model: SpectralWAE, E: Tensor, target_H: float,
+    model: SpectralVDT, E: Tensor, target_H: float,
     n_candidates: int = 500, tol: float = 0.05
 ) -> dict:
     """
@@ -578,7 +578,7 @@ def generate_at_target_entropy(
 
     Parameters
     ----------
-    model       : SpectralWAE in eval mode
+    model       : SpectralVDT in eval mode
     E           : (N, D) embedding table
     target_H    : float  target spectral entropy
     n_candidates : int  number of prior samples to draw
@@ -610,7 +610,7 @@ def generate_at_target_entropy(
 def save_figures(
     out_dir: Path, train_log: List[dict], gen_results: dict,
     entropy_results: List[dict], dataset: dict,
-    model: SpectralWAE, device: str,
+    model: SpectralVDT, device: str,
 ) -> None:
     """
     Save all demo figures.
@@ -626,7 +626,7 @@ def save_figures(
     gen_results    : dict from the generation phase
     entropy_results : list from entropy-targeting experiment
     dataset        : original dataset dict
-    model          : trained SpectralWAE
+    model          : trained SpectralVDT
     device         : device string
     """
     figs = out_dir / "figures"
@@ -662,7 +662,7 @@ def save_figures(
     ax.hist(H_data, bins=30, alpha=0.6, color="#01696f", label="Dataset Laplacians")
     ax.hist(H_vals, bins=30, alpha=0.6, color="#964219", label="Generated Laplacians")
     ax.set_xlabel("Spectral Entropy H(Lambda)", fontsize=11)
-    ax.set_title("Spectral Entropy: Dataset vs WAE Generated", fontsize=12)
+    ax.set_title("Spectral Entropy: Dataset vs VDT Generated", fontsize=12)
     ax.legend(); ax.grid(alpha=0.3)
     plt.tight_layout()
     plt.savefig(figs / "entropy_distribution.png", dpi=150, bbox_inches="tight")
@@ -692,7 +692,7 @@ def save_figures(
         fig, ax = plt.subplots(figsize=(7, 6))
         sc = ax.scatter(Z2[:, 0], Z2[:, 1], c=H, cmap="viridis", s=15, alpha=0.7)
         plt.colorbar(sc, ax=ax, label="Spectral Entropy")
-        ax.set_title("WAE Latent Space coloured by Spectral Entropy", fontsize=12)
+        ax.set_title("VDT Latent Space coloured by Spectral Entropy", fontsize=12)
         ax.set_xlabel("PC1"); ax.set_ylabel("PC2")
         ax.grid(alpha=0.2)
         plt.tight_layout()
@@ -848,7 +848,7 @@ def export_csvs(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Spectral Graph-Generation Demo for WAE (issue #13)"
+        description="Spectral Graph-Generation Demo for VDT (issue #13)"
     )
     parser.add_argument("--n-graphs",   type=int,   default=400)
     parser.add_argument("--n-nodes",    type=int,   default=16)
@@ -894,8 +894,8 @@ def main() -> None:
     train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True)
     val_loader   = DataLoader(val_ds,   batch_size=args.batch_size)
 
-    print("[demo] Building SpectralWAE (three-term ELBO)...")
-    model = SpectralWAE(
+    print("[demo] Building SpectralVDT (three-term ELBO)...")
+    model = SpectralVDT(
         feat_dim=D, latent_dim=args.latent_dim, n_nodes=N,
         tau_modes=args.tau_modes, L_base=L_base,
         beta=args.beta, alpha=args.alpha,
@@ -980,7 +980,7 @@ def main() -> None:
     save_figures(out_dir, train_log, gen_results, entropy_results,
                  dataset, model, device)
 
-    # v2 metrics summary via wae.metrics
+    # v2 metrics summary via vdt.metrics
     omega_bar  = model.mode_weights(n_samples=256, device=device)
     n_active   = v2_active_modes(omega_bar, delta=0.01)
     W_keys     = model.W_proj.T.detach().cpu()  # (tau_modes, latent_dim)

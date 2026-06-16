@@ -59,7 +59,7 @@ Moriondo.
 \newblock Vibrational discrete transformer ({VDT}).
 \newblock Technical report, tuned-org-uk, 2026{\natexlab{b}}.
 \newblock
-  \url{https://github.com/tuned-org-uk/vibrational-deduction-transfomer/blob/main/wae/vdt.py}.
+  \url{https://github.com/tuned-org-uk/vibrational-deduction-transfomer/blob/main/vdt/vdt.py}.
 
 \bibitem[Ramsauer et~al.(2021)Ramsauer, Sch{\"a}fl, Lehner, Seidl, Widrich,
   Adler, Gruber, Holzleitner, Pavlovi{\'c}, Sandve,

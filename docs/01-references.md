@@ -1,6 +1,6 @@
 # References
 
-This document collects the foundational references behind the Wiring Autoencoder (WAE).
+This document collects the foundational references behind the Wiring Autoencoder (VDT).
 References are grouped by conceptual pillar.
 
 ---
@@ -21,7 +21,7 @@ directly grounded in the ArrowSpace / Graph Wiring framework.
 
 ## 2. Rayleigh's Theory of Sound — Vibrational Framing
 
-The WAE's core intuition treats graph wiring as a **vibrational system**:
+The VDT's core intuition treats graph wiring as a **vibrational system**:
 the oscillating state of a string (low-entropy, low-frequency, standing wave) corresponds to
 a smooth learned Laplacian; the rest/collapsed state (high-entropy) corresponds to wave-function
 collapse or Brownian high-temperature disorder.
@@ -33,7 +33,7 @@ collapse or Brownian high-temperature disorder.
 - **Relevant chapter**: §88–§101 (Vol. I) — transverse vibrations of strings,
   normal modes, and the Rayleigh quotient `R(v) = vᵀLv / vᵀv`.
   The Rayleigh quotient is the energy functional minimised by graph spectral embeddings;
-  the WAE's `J_freq` is a discrete analogue of Rayleigh's frequency penalty.
+  the VDT's `J_freq` is a discrete analogue of Rayleigh's frequency penalty.
 
 - **Rayleigh quotient in graph Laplacians**:
   Chung, F.R.K. (1997). *Spectral Graph Theory*. AMS, CBMS Monographs.
@@ -44,7 +44,7 @@ collapse or Brownian high-temperature disorder.
 
 ## 3. Quantum Probabilities Without Complex Numbers — Aaronson
 
-The WAE sign-amplitude design (positive + negative amplitudes via the sign of graph edge
+The VDT sign-amplitude design (positive + negative amplitudes via the sign of graph edge
 weights, without complex Hilbert space) is motivated by:
 
 - **Aaronson, S.** (2013). *Quantum Computing Since Democritus*, Chapter 9:
@@ -55,7 +55,7 @@ weights, without complex Hilbert space) is motivated by:
   Key result used: if negative probability amplitudes are allowed, the full interference
   structure of quantum mechanics is recovered without complex numbers, provided
   the update rule is a unitary (or in our case, heat-kernel) transformation.
-  The WAE's `TauModeDiffusion` implements `K_τ = U exp(−tΛ) Uᵀ` as a real-valued
+  The VDT's `TauModeDiffusion` implements `K_τ = U exp(−tΛ) Uᵀ` as a real-valued
   analogue of a unitary quantum channel.
 
 - **Renou, M.-O., et al.** (2021). Quantum theory based on real numbers can be
@@ -93,7 +93,7 @@ weights, without complex Hilbert space) is motivated by:
 
 ## 5. VAE / PPCA Lineage
 
-The WAE inherits the probabilistic latent-variable structure from:
+The VDT inherits the probabilistic latent-variable structure from:
 
 - **Kingma, D.P. & Welling, M.** (2013). Auto-Encoding Variational Bayes.
   *arXiv:1312.6114*. https://arxiv.org/abs/1312.6114
@@ -107,11 +107,11 @@ The WAE inherits the probabilistic latent-variable structure from:
 - **Higgins, I., et al.** (2017). β-VAE: Learning Basic Visual Concepts with a
   Constrained Variational Framework. *ICLR 2017*.
   https://openreview.net/forum?id=Sy2fchgIl
-  (Motivation for the `β·KL` term in the WAE objective.)
+  (Motivation for the `β·KL` term in the VDT objective.)
 
 - **Rezende, D.J. & Viola, F.** (2018). Taming VAEs. *arXiv:1810.00597*.
   https://arxiv.org/abs/1810.00597
-  (Guidance on `β` annealing and avoiding posterior collapse, relevant to WAE training.)
+  (Guidance on `β` annealing and avoiding posterior collapse, relevant to VDT training.)
 
 ---
 
@@ -150,5 +150,5 @@ The entropy framing (low-entropy oscillating state vs. high-entropy rest/collaps
 ## See Also
 
 - `docs/architecture.md` — full data-flow diagram and module derivations
-- `wae/spectral.py` — `spectral_freq_cost`, `TauModeDiffusion`, `lambda_fingerprint`
-- `wae/laplacian.py` — `DifferentiableLaplacian` (ArrowSpace layer)
+- `vdt/spectral.py` — `spectral_freq_cost`, `TauModeDiffusion`, `lambda_fingerprint`
+- `vdt/laplacian.py` — `DifferentiableLaplacian` (ArrowSpace layer)
