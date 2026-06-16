@@ -16,6 +16,10 @@ API
     # v2 class-method factory (used by SpectralLoadingDecoder, issue #26)
     L_batch = DifferentiableLaplacian.from_spectral_loading(W, L_base)
 
+    # Retrieve the dense (N, N) base Laplacian for passing to
+    # SpectralLoadingDecoder.forward() or for spectral analysis:
+    L_base = lap.base_laplacian   # cached property, (N, N)
+
 Memory comparison on Cora (N=2708, E=40620, B=16, float32):
     dense  :  B x N^2       x 4B  =  16 x 7,333,264 x 4  ~  470 MB  (OOM on MPS)
     sparse :  B x E (COO)   x 4B  =  16 x    40,620 x 4  ~    2.6 MB
@@ -125,6 +129,14 @@ class DifferentiableLaplacian(nn.Module):
         (B, N, N) dense adjacency -- use sparse COO instead.
     eps : float
         Numerical stability epsilon for degree normalisation.
+
+    Attributes
+    ----------
+    base_laplacian : torch.Tensor  shape (N, N)
+        Dense normalised symmetric Laplacian built from edge_index and
+        base_weights (no edge delta applied).  Computed lazily on first
+        access and cached as a plain tensor.  Use this to supply L_base
+        to SpectralLoadingDecoder.forward() and from_spectral_loading().
     """
 
     def __init__(
@@ -144,6 +156,53 @@ class DifferentiableLaplacian(nn.Module):
         self.register_buffer("edge_index", edge_index)    # (2, E)
         self.register_buffer("base_weights", base_weights)  # (E,)
         self._lambda_max: Optional[float] = None
+        self._base_laplacian: Optional[torch.Tensor] = None
+
+    # ------------------------------------------------------------------
+    # base_laplacian property
+    # ------------------------------------------------------------------
+    @property
+    def base_laplacian(self) -> torch.Tensor:
+        """
+        Dense normalised symmetric Laplacian (N, N) built from the frozen
+        edge_index and base_weights (no per-edge delta applied).
+
+        Computed lazily on first access and cached in _base_laplacian.
+        Call _invalidate_spectral_cache() to force recomputation after
+        any manual update to base_weights.
+
+        This is the tensor to pass as L_base to
+        SpectralLoadingDecoder.forward() and
+        DifferentiableLaplacian.from_spectral_loading().
+
+        Returns
+        -------
+        torch.Tensor  shape (N, N), dtype float32
+        """
+        if self._base_laplacian is not None:
+            return self._base_laplacian
+
+        N = self.n_nodes
+        src, dst = self.edge_index[0], self.edge_index[1]
+        w = self.base_weights
+        device, dtype = w.device, w.dtype
+
+        A = torch.zeros(N, N, device=device, dtype=dtype)
+        A[src, dst] += w
+        A[dst, src] += w
+
+        if self.normalised:
+            deg = A.sum(dim=-1).clamp(min=self.eps)
+            d_inv_sqrt = deg.pow(-0.5)
+            normed = d_inv_sqrt.unsqueeze(-1) * A * d_inv_sqrt.unsqueeze(-2)
+            I = torch.eye(N, device=device, dtype=dtype)
+            L = I - normed
+        else:
+            deg = A.sum(dim=-1)
+            L = torch.diag(deg) - A
+
+        self._base_laplacian = L
+        return L
 
     # ------------------------------------------------------------------
     # v2 class-method factory -- used by SpectralLoadingDecoder (#26)
@@ -172,6 +231,7 @@ class DifferentiableLaplacian(nn.Module):
             Spectral loading matrix from the decoder.  d must equal N.
         L_base : Tensor  shape (N, N)
             Frozen base Laplacian encoding the graph topology.
+            Obtain via DifferentiableLaplacian.base_laplacian.
 
         Returns
         -------
@@ -229,9 +289,9 @@ class DifferentiableLaplacian(nn.Module):
         """
         Largest eigenvalue of the base Laplacian.
 
-        Computed on demand using torch.linalg.eigvalsh on the dense base
-        Laplacian (no edge_delta applied).  Result is cached; call
-        _invalidate_spectral_cache() after any edge-weight update.
+        Delegates to base_laplacian so the dense matrix is built only
+        once and shared with SpectralLoadingDecoder.  Result is cached;
+        call _invalidate_spectral_cache() after any edge-weight update.
 
         Returns
         -------
@@ -241,27 +301,15 @@ class DifferentiableLaplacian(nn.Module):
         if self._lambda_max is not None:
             return self._lambda_max
 
-        N = self.n_nodes
-        src, dst = self.edge_index[0], self.edge_index[1]
-        w = self.base_weights
-
-        A = torch.zeros(N, N, device=w.device, dtype=w.dtype)
-        A[src, dst] += w
-        A[dst, src] += w
-        deg = A.sum(dim=-1).clamp(min=self.eps)
-        d_inv_sqrt = deg.pow(-0.5)
-        normed = d_inv_sqrt.unsqueeze(-1) * A * d_inv_sqrt.unsqueeze(-2)
-        I = torch.eye(N, device=w.device, dtype=w.dtype)
-        L_base = I - normed  # (N, N)
-
         with torch.no_grad():
-            eigs = torch.linalg.eigvalsh(L_base)  # ascending order, real
+            eigs = torch.linalg.eigvalsh(self.base_laplacian)  # ascending, real
         self._lambda_max = float(eigs[-1].clamp(min=0.0))
         return self._lambda_max
 
     def _invalidate_spectral_cache(self) -> None:
-        """Invalidate cached lambda_max; it is recomputed on next access."""
+        """Invalidate cached lambda_max and base_laplacian; both are recomputed on next access."""
         self._lambda_max = None
+        self._base_laplacian = None
 
     def dt_max_cfl(self, safety: float = 1.0) -> float:
         """
@@ -324,17 +372,7 @@ class DifferentiableLaplacian(nn.Module):
         B, N = z.shape
         device, dtype = z.device, z.dtype
 
-        # Build L from base weights (no edge delta)
-        src, dst = self.edge_index[0], self.edge_index[1]
-        w = self.base_weights.to(dtype=dtype)
-        A = torch.zeros(N, N, device=device, dtype=dtype)
-        A[src, dst] += w
-        A[dst, src] += w
-        deg = A.sum(dim=-1).clamp(min=self.eps)
-        d_inv_sqrt = deg.pow(-0.5)
-        normed = d_inv_sqrt.unsqueeze(-1) * A * d_inv_sqrt.unsqueeze(-2)
-        I = torch.eye(N, device=device, dtype=dtype)
-        L_f = I - normed  # (N, N)
+        L_f = self.base_laplacian.to(device=device, dtype=dtype)  # (N, N)
 
         # Mass matrix diagonal
         if mass is not None:
