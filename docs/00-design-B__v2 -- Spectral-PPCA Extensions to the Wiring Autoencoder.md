@@ -145,10 +145,10 @@ def tau_mode_kl(log_a: torch.Tensor, log_b: torch.Tensor,
     return kl.sum(-1).mean()
 ```
 
-#### `vdt/model.py` — `WiringAutoencoderV2`
+#### `vdt/model.py` — `WiringAutoencoder`
 
 ```python
-class WiringAutoencoderV2(nn.Module):
+class WiringAutoencoder(nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.encoder = WiringEncoder(cfg)          # Lap-precision KL
@@ -220,7 +220,7 @@ class SpectralAssociativeMemory(nn.Module):
             self.S.data += (residual.T @ key) / key.size(0)
 
     @classmethod
-    def from_vdt(cls, vdt_v2: WiringAutoencoderV2,
+    def from_vdt(cls, vdt_v2: WiringAutoencoder,
                  loader, U_q, eigvals_q, d_model, **kw):
         artefact = vdt_v2.extract_spectral_artefact(loader, U_q, eigvals_q)
         return cls(artefact, d_model, **kw)
@@ -235,7 +235,7 @@ class SpectralAssociativeMemory(nn.Module):
 │  ArrowSpace index I  ──►  L(I), U_q, Λ_q            │
 │      │                          │                    │
 │      ▼                          ▼                    │
-│  WiringAutoencoderV2.train()                         │
+│  WiringAutoencoder.train()                         │
 │      ELBO = recon - KL_Lap(z) - KL_S - KL_tau       │
 │                                                      │
 │  ──► spectral artefact A(I):                         │

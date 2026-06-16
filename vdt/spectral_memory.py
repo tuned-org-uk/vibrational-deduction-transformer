@@ -2,7 +2,7 @@
 vdt/spectral_memory.py  --  SpectralAssociativeMemory
 
 This module wraps the post-training spectral artefact A(I) produced by
-WiringAutoencoderV2.extract_spectral_artefact() into a pre-built
+WiringAutoencoder.extract_spectral_artefact() into a pre-built
 Hopfield / linear associative memory matrix that can seed a downstream
 transformer's feed-forward or cross-attention value matrices.
 
@@ -10,7 +10,7 @@ Two-phase architecture
 ----------------------
 PHASE 1 -- OFFLINE (VDT v2 training)
     ArrowSpace index I  ->  L(I), U_q, Lambda_q
-    WiringAutoencoderV2.train()  ->  ELBO maximisation
+    WiringAutoencoder.train()  ->  ELBO maximisation
     extract_spectral_artefact()  ->  A(I)  = {S_memory, omega_hat, W_hat}
     SpectralAssociativeMemory(A(I))  ->  S_I
 
@@ -171,20 +171,20 @@ class SpectralAssociativeMemory(nn.Module):
     @classmethod
     def from_vdt(
         cls,
-        vdt_v2: "WiringAutoencoderV2",  # noqa: F821 -- forward reference
+        vdt_v2: "WiringAutoencoder",  # noqa: F821 -- forward reference
         U_q: Tensor,
         eigvals_q: Tensor,
         d_model: int,
     ) -> "SpectralAssociativeMemory":
         """
-        Post-training construction from a trained WiringAutoencoderV2.
+        Post-training construction from a trained WiringAutoencoder.
 
         Calls extract_spectral_artefact() on the trained model and wraps
         the resulting S_memory into a SpectralAssociativeMemory module.
 
         Parameters
         ----------
-        vdt_v2 : WiringAutoencoderV2
+        vdt_v2 : WiringAutoencoder
             A trained VDT v2 instance.
         U_q : Tensor
             Leading q eigenvectors of the frozen index Laplacian L(I).
@@ -211,7 +211,7 @@ class SpectralAssociativeMemory(nn.Module):
         if "S_memory" not in artefact:
             raise KeyError(
                 "extract_spectral_artefact() did not return 'S_memory'. "
-                "Check WiringAutoencoderV2 implementation."
+                "Check WiringAutoencoder implementation."
             )
         S_memory = artefact["S_memory"].detach()
         return cls(S_memory=S_memory, d_model=d_model)

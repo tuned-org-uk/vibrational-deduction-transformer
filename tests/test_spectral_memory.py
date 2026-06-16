@@ -10,7 +10,7 @@ Acceptance criteria from issue #28:
        pair without degrading responses to previously stored patterns
        (measure before/after cosine similarity on a toy 4-pattern store).
   AC4  from_vdt() classmethod constructs the object from a trained
-       WiringAutoencoderV2 end-to-end.
+       WiringAutoencoder end-to-end.
   AC5  Module is importable and serialisable via torch.save / torch.load.
 """
 from __future__ import annotations
@@ -54,9 +54,9 @@ def _outer_product_memory(keys: torch.Tensor, values: torch.Tensor) -> torch.Ten
 
 
 def _make_vdt_v2_and_spectral():
-    """Minimal WiringAutoencoderV2 with ring-graph Laplacian for from_vdt tests."""
+    """Minimal WiringAutoencoder with ring-graph Laplacian for from_vdt tests."""
     from vdt.laplacian import DifferentiableLaplacian
-    from vdt.model import WiringAutoencoderV2
+    from vdt.model import WiringAutoencoder
 
     W = torch.zeros(N, N)
     for i in range(N):
@@ -71,7 +71,7 @@ def _make_vdt_v2_and_spectral():
         base_weights=torch.ones(src.shape[0]),
         n_nodes=N,
     )
-    model = WiringAutoencoderV2(
+    model = WiringAutoencoder(
         input_dim=D, latent_dim=16, hidden_dim=64,
         q=Q, tau_modes=Q, lam_s=0.01, tau=0.5, laplacian=lap,
     )

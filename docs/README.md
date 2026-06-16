@@ -156,7 +156,7 @@ Replaces `WiringDecoder` as the current default. Maps `z (B, q)` to a loading ma
 `DifferentiableLaplacian.from_spectral_loading(W, L_base)`, fully differentiable
 back to `z`.
 
-### `WiringAutoencoderV2` (`model.py`)
+### `WiringAutoencoder` (`model.py`)
 Top-level assembly of encoder, spectral decoder, and diffusion decoder. Its `forward()`
 returns a 9-key dict: `{loss, recon, kl_z, kl_S, kl_tau, x_hat, z, mu, log_var}`.
 After training, `extract_spectral_artefact()` packages the mean loading matrix `W_hat`,
@@ -180,7 +180,7 @@ per frequency band. Supports online delta-rule updates.
 The system separates offline spectral learning from online inference:
 
 - **Phase 1 (Offline):** One-time eigendecomposition of `L(I)` -> train
-  `WiringAutoencoderV2` via ELBO -> extract artefact `A(I)` -> build `S_I`.
+  `WiringAutoencoder` via ELBO -> extract artefact `A(I)` -> build `S_I`.
   Frozen eigenpairs `(U_q, Lq)` are constants at runtime; no Laplacian is built
   during training.
 - **Phase 2 (Online):** Transformer FFN / cross-attention initialised from `S_I`.
@@ -216,7 +216,7 @@ organised into five phases:
 |---|---|---|
 | **0 -- Foundations** | #16, #17, #19, #24 | `laplacian.py`, `vdt.py`, `stability.py`, two KL functions in `spectral.py` |
 | **1 -- Encoder/Decoder** | #25, #26 | `WiringEncoder` (isotropic KL + `ModeWeightHead`), `SpectralLoadingDecoder` |
-| **2 -- Model assembly** | #27 | `WiringAutoencoderV2`, three-term ELBO, `extract_spectral_artefact()` |
+| **2 -- Model assembly** | #27 | `WiringAutoencoder`, three-term ELBO, `extract_spectral_artefact()` |
 | **3 -- Memory & Metrics** | #28, #32 | `SpectralAssociativeMemory`, 7-metric evaluation suite |
 | **4 -- App Tracks** | #18/#29, #20/#30, #21/#31, #33 | Options 6, 1, 4, 3 respectively |
 | **5 -- Benchmarks/Demo** | #9, #13 | Multi-seed results on Cora/PubMed, updated generation demo |

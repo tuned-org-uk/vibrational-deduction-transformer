@@ -72,7 +72,7 @@ Stage 2: denoiser \(\epsilon_\theta(z_\tau, \tau)\) over modal latent space.
 
 ### VDT Extension
 
-- **Stage 1 prerequisite** is the three-term `WiringAutoencoderV2`
+- **Stage 1 prerequisite** is the three-term `WiringAutoencoder`
   (reconstruction + spectral-basis KL + tau-mode KL; no sample Laplacian).
   The modal latent \(z\) is shaped by the spectral loading prior and tau-mode prior.
 - **Spectral noise schedule** uses the modal prior covariance directly:
@@ -126,7 +126,7 @@ VDT as learned PDE solver; predicts future states of graph-structured systems.
 ### VDT Extension
 
 - **Prior memory**: the spectral artefact \(S_{\mathcal{I}}\) from a pre-trained
-  `WiringAutoencoderV2` can serve as a **boundary condition library** for the PDE
+  `WiringAutoencoder` can serve as a **boundary condition library** for the PDE
   predictor. At each step, the forcing term \(B_t\) is retrieved from \(S_{\mathcal{I}}\)
   via Hopfield retrieval on the current state \(Q_t\).
 - The CFL condition and all stability diagnostics from `04-stability.md` are unchanged.

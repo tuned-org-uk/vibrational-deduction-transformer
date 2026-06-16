@@ -375,7 +375,7 @@ def spectral_kl_health_check(
     q: int,
 ) -> dict:
     """
-    v2 ELBO health check -- run after each WiringAutoencoderV2.forward().
+    v2 ELBO health check -- run after each WiringAutoencoder.forward().
 
     Checks all three KL components for sign, finiteness, and explosion.
     Detects mode collapse (< 10% modes active) and mode explosion (all

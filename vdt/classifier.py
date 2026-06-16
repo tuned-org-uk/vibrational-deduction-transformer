@@ -28,7 +28,7 @@ matrix at step t (from SignedDensityMatrix).
 
 Spectral memory initialisation (v2 upgrade)
 --------------------------------------------
-After loading a pre-trained WiringAutoencoderV2 checkpoint:
+After loading a pre-trained WiringAutoencoder checkpoint:
 
     memory = SpectralAssociativeMemory.from_vdt(vdt_v2, U_q, eigvals_q,
                                                 d_model=hidden_dim)

@@ -25,7 +25,7 @@ The spectral artefact can be supplied in two ways:
      DeterministicSpectralAE.extract_spectral_artefact() and saved to
      checkpoints/option1_artefact.pt by option1_train.py.
 
-  2. --ckpt_path <path>      : a WiringAutoencoderV2 checkpoint (.pt) that
+  2. --ckpt_path <path>      : a WiringAutoencoder checkpoint (.pt) that
      contains a full model state_dict.  The script rebuilds the model and
      calls model.extract_spectral_artefact() to produce the artefact.
      Requires --ckpt_dim (latent_dim used when saving the checkpoint).
@@ -239,7 +239,7 @@ def load_artefact_from_checkpoint(
     device: torch.device,
 ) -> dict:
     """
-    Rebuild a DeterministicSpectralAE from a WiringAutoencoderV2
+    Rebuild a DeterministicSpectralAE from a WiringAutoencoder
     checkpoint and call extract_spectral_artefact().
 
     Parameters
@@ -461,7 +461,7 @@ def main() -> None:
     )
     artefact_group.add_argument(
         "--ckpt_path", default=None,
-        help="WiringAutoencoderV2 checkpoint (.pt).  Rebuilt and "
+        help="WiringAutoencoder checkpoint (.pt).  Rebuilt and "
              "extract_spectral_artefact() called internally.  Requires --ckpt_dim."
     )
     parser.add_argument(

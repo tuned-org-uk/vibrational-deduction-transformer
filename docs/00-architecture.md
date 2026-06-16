@@ -184,7 +184,7 @@ Config flag: `decoder_type: spectral | mixture_of_experts`.
 
 No changes. `TauModeDiffusion` is already the Spectral-PPCA decoder.
 
-### `vdt/model.py` — `WiringAutoencoderV2`
+### `vdt/model.py` — `WiringAutoencoder`
 
 - Assembles `WiringEncoder`, `SpectralLoadingDecoder`, `DiffusionDecoder`.
 - `forward()` returns `(loss, recon, kl_z, kl_S, kl_tau, x_hat, L_z, z, mu, log_var)`.
@@ -203,7 +203,7 @@ No changes. `TauModeDiffusion` is already the Spectral-PPCA decoder.
 - `delta_update(key, value)`: online delta-rule write without corrupting spectral
   key structure.
 - `from_vdt(vdt, U_q, eigvals_q, d_model)`: class method for post-training
-  construction from a trained `WiringAutoencoderV2`.
+  construction from a trained `WiringAutoencoder`.
 
 ---
 
@@ -245,7 +245,7 @@ Key properties of `S_I`:
 ```
 PHASE 1 -- OFFLINE (VDT training)
   ArrowSpace index I  ->  L(I), U_q, Lq        [one-time eigendecomposition]
-  WiringAutoencoderV2.train()  ->  ELBO max.    [no runtime Laplacian ops]
+  WiringAutoencoder.train()  ->  ELBO max.    [no runtime Laplacian ops]
   extract_spectral_artefact()  ->  A(I)
   SpectralAssociativeMemory(A(I))  ->  S_I
   Optional: ELBO Bayes factor over competing indices I1, I2, ...

@@ -1,5 +1,5 @@
 """
-tests/test_model_v2.py  --  Integration tests for WiringAutoencoderV2.
+tests/test_model_v2.py  --  Integration tests for WiringAutoencoder.
 
 Acceptance criteria from issue #27:
 
@@ -51,9 +51,9 @@ def _make_spectral(L: torch.Tensor, q: int):
 
 
 def _make_model():
-    from vdt.model import WiringAutoencoderV2
+    from vdt.model import WiringAutoencoder
     lap, L_ring = _make_laplacian()
-    model = WiringAutoencoderV2(
+    model = WiringAutoencoder(
         input_dim=D,
         latent_dim=16,
         hidden_dim=64,
@@ -164,7 +164,7 @@ class TestExtractSpectralArtefact:
 
 class TestFromConfig:
     def test_dispatches_v2(self):
-        from vdt.model import from_config, WiringAutoencoderV2
+        from vdt.model import from_config, WiringAutoencoder
         cfg = {
             "model": {
                 "version": 2,
@@ -184,7 +184,7 @@ class TestFromConfig:
         }
         E = torch.randn(N, D)
         model = from_config(cfg, E)
-        assert isinstance(model, WiringAutoencoderV2)
+        assert isinstance(model, WiringAutoencoder)
 
     def test_dispatches_v1(self):
         from vdt.model import from_config, WiringAutoencoder
@@ -248,7 +248,7 @@ class TestFromConfig:
 
 class TestTrainingConvergence:
     """
-    Integration test for WiringAutoencoderV2 on synthetic data.
+    Integration test for WiringAutoencoder on synthetic data.
 
     Synthetic fixture:  B=4, D=32, N=16, q=8  (ring-graph Laplacian).
     Optimiser:          Adam, lr=1e-3.

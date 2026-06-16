@@ -2,7 +2,7 @@
 benchmarks/cora_pubmed_benchmark.py -- resolves issue #9
 ==========================================================
 
-Multi-seed benchmark of WiringAutoencoderV2 on the Cora and PubMed citation
+Multi-seed benchmark of WiringAutoencoder on the Cora and PubMed citation
 graph datasets, reporting all 7 active v2 metrics and an ELBO Bayes-factor
 leaderboard comparing the two datasets as competing ArrowSpace indices.
 
@@ -36,7 +36,7 @@ Design notes
   so it runs in all CI environments.
 * When torch_geometric IS installed the real datasets are loaded from
   ~/.cache/torch_geometric_data/.
-* The WiringAutoencoderV2 model is imported from vdt.model; the benchmark
+* The WiringAutoencoder model is imported from vdt.model; the benchmark
   adapts its latent dim / tau_modes to each dataset's feature dimension.
 * All 7 metrics are called through vdt.metrics public functions; nothing
   reaches into model internals.
@@ -203,7 +203,7 @@ def load_dataset(
 
 
 # ---------------------------------------------------------------------------
-# Minimal WiringAutoencoderV2-compatible model for self-contained benchmarking
+# Minimal WiringAutoencoder-compatible model for self-contained benchmarking
 # ---------------------------------------------------------------------------
 
 class _Encoder(nn.Module):
@@ -261,7 +261,7 @@ class _Decoder(nn.Module):
 
 class BenchmarkModel(nn.Module):
     """
-    Thin WiringAutoencoderV2-compatible model used exclusively for benchmarking.
+    Thin WiringAutoencoder-compatible model used exclusively for benchmarking.
 
     Implements the three-term ELBO:
         L = -recon + beta * (kl_S + kl_tau)

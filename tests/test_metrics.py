@@ -53,9 +53,9 @@ def _make_eigvals(q: int, uniform: bool = False) -> torch.Tensor:
 
 
 def _make_vdt_v2_and_spectral():
-    """Construct a minimal WiringAutoencoderV2 with ring-graph Laplacian."""
+    """Construct a minimal WiringAutoencoder with ring-graph Laplacian."""
     from vdt.laplacian import DifferentiableLaplacian
-    from vdt.model import WiringAutoencoderV2
+    from vdt.model import WiringAutoencoder
 
     W = torch.zeros(N, N)
     for i in range(N):
@@ -70,7 +70,7 @@ def _make_vdt_v2_and_spectral():
         base_weights=torch.ones(src.shape[0]),
         n_nodes=N,
     )
-    model = WiringAutoencoderV2(
+    model = WiringAutoencoder(
         input_dim=D, latent_dim=16, hidden_dim=64,
         q=Q, tau_modes=Q, lam_s=0.01, tau=0.5, laplacian=lap,
     )

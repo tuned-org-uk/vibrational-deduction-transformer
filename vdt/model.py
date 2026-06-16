@@ -3,7 +3,7 @@ Wiring Autoencoder  --  v2 only.
 
 This module provides the single top-level model class::
 
-    WiringAutoencoderV2   v2, three-term ELBO (recon + kl_z + kl_S + kl_tau).
+    WiringAutoencoder   v2, three-term ELBO (recon + kl_z + kl_S + kl_tau).
 
 v2 architecture (three-term ELBO, issue #27)
 --------------------------------------------
@@ -30,7 +30,7 @@ v1 (WiringAutoencoder) has been removed.  Only version 2 is supported.
 
 Config dispatch
 ---------------
-    model.version: 2  -> WiringAutoencoderV2   (v2)
+    model.version: 2  -> WiringAutoencoder   (v2)
 
 Ref: docs/v2/00-architecture.md
 Ref: docs/v2/05-Code.md
@@ -49,19 +49,15 @@ from .laplacian import DifferentiableLaplacian
 # v2-specific imports  (SpectralLoadingDecoder + KL helpers)
 # ---------------------------------------------------------------------------
 
-try:
-    from .wiring_decoder import SpectralLoadingDecoder
-    from .spectral import spectral_basis_kl, tau_mode_kl
-    _V2_IMPORTS_OK = True
-except ImportError:
-    _V2_IMPORTS_OK = False
+from .wiring_decoder import SpectralLoadingDecoder
+from .spectral import spectral_basis_kl, tau_mode_kl
 
 
 # ---------------------------------------------------------------------------
-# WiringAutoencoderV2  (v2 -- three-term ELBO, issue #27)
+# WiringAutoencoder  (v2 -- three-term ELBO, issue #27)
 # ---------------------------------------------------------------------------
 
-class WiringAutoencoderV2(nn.Module):
+class WiringAutoencoder(nn.Module):
     """
     Wiring Autoencoder v2 -- three-term ELBO with spectral mode priors.
 
@@ -144,7 +140,7 @@ class WiringAutoencoderV2(nn.Module):
     ) -> None:
         if not _V2_IMPORTS_OK:
             raise ImportError(
-                "WiringAutoencoderV2 requires SpectralLoadingDecoder and "
+                "WiringAutoencoder requires SpectralLoadingDecoder and "
                 "spectral KL helpers.  Ensure phase-1 modules are present."
             )
         super().__init__()
@@ -413,9 +409,9 @@ class WiringAutoencoderV2(nn.Module):
 def from_config(
     cfg: dict[str, Any],
     E: torch.Tensor,
-) -> "WiringAutoencoderV2":
+) -> "WiringAutoencoder":
     """
-    Build WiringAutoencoderV2 from a parsed YAML config dict.
+    Build WiringAutoencoder from a parsed YAML config dict.
 
     Only version 2 is supported.  Passing any other version raises
     ValueError.
@@ -447,7 +443,7 @@ def from_config(
 
     Returns
     -------
-    WiringAutoencoderV2
+    WiringAutoencoder
     """
     mc = cfg["model"]
     version = int(mc.get("version", 2))
@@ -466,7 +462,7 @@ def from_config(
         normalised=gc.get("normalised", True),
         sparse=gc.get("sparse", False),
     )
-    return WiringAutoencoderV2(
+    return WiringAutoencoder(
         input_dim=E.shape[1],
         latent_dim=mc["latent_dim"],
         hidden_dim=mc.get("hidden_dim", 256),

@@ -1,5 +1,5 @@
 """
-vdt/metrics.py  --  Benchmark metrics for WiringAutoencoderV2 (issue #32)
+vdt/metrics.py  --  Benchmark metrics for WiringAutoencoder (issue #32)
 
 All 7 active v2 benchmark metrics are implemented as pure functions.
 Metrics that were removed per merged PR #35 (kl_lap) are not included.
@@ -25,7 +25,7 @@ Design notes
 * All metrics are pure functions (no state, no nn.Module) to allow use
   outside the training loop and in offline evaluation scripts.
 * evaluate_v2 and compare_indices depend only on the 9-key forward() dict
-  from WiringAutoencoderV2, so they never touch model internals.
+  from WiringAutoencoder, so they never touch model internals.
 * linear_probe_acc requires only mu.detach() -- no model gradients.
 * spectral_entropy delegates the eigensystem to DifferentiableLaplacian.
 
@@ -347,7 +347,7 @@ def spectral_entropy(
 # ---------------------------------------------------------------------------
 
 def evaluate_v2(
-    model: "WiringAutoencoderV2",  # noqa: F821
+    model: "WiringAutoencoder",  # noqa: F821
     dataloader,
     U_q: Tensor,
     eigvals_q: Tensor,
@@ -378,7 +378,7 @@ def evaluate_v2(
 
     Parameters
     ----------
-    model : WiringAutoencoderV2
+    model : WiringAutoencoder
         Model in eval mode.
     dataloader : Iterable yielding (x, node_idx) pairs.
         x: (B, D) feature tensor.  node_idx: (B,) long tensor.
@@ -456,7 +456,7 @@ def evaluate_v2(
 # ---------------------------------------------------------------------------
 
 def compare_indices(
-    model: "WiringAutoencoderV2",  # noqa: F821
+    model: "WiringAutoencoder",  # noqa: F821
     dataloader,
     index_list: Sequence[Tuple[str, Tensor, Tensor]],
     device: Optional[torch.device] = None,
@@ -470,7 +470,7 @@ def compare_indices(
 
     Parameters
     ----------
-    model : WiringAutoencoderV2
+    model : WiringAutoencoder
         Model in eval mode.  The same model weights are used for all indices;
         only U_q and eigvals_q change between evaluations.
     dataloader : Iterable yielding (x, node_idx) pairs.

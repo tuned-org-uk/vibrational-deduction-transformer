@@ -424,7 +424,7 @@ def main() -> None:
 
     # --- Extract spectral artefact for Option 6 -------------------------
     # Saved to checkpoints/option1_artefact.pt (consumed by option6_ablation.py
-    # via --artefact_path or loaded from a WiringAutoencoderV2 checkpoint).
+    # via --artefact_path or loaded from a WiringAutoencoder checkpoint).
     print("\nExtracting spectral artefact...")
     model.load_state_dict(
         torch.load(ckpt_dir / "option1_best.pt", map_location=device)
