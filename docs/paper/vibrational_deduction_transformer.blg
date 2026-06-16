@@ -1,0 +1,46 @@
+This is BibTeX, Version 0.99e (TeX Live 2026)
+Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
+The top-level auxiliary file: vibrational_deduction_transformer.aux
+The style file: abbrvnat.bst
+Database file #1: references.bib
+You've used 14 entries,
+            2773 wiz_defined-function locations,
+            660 strings with 6916 characters,
+and the built_in function-call counts, 5966 in all, are:
+= -- 492
+> -- 391
+< -- 9
++ -- 135
+- -- 120
+* -- 452
+:= -- 959
+add.period$ -- 45
+call.type$ -- 14
+change.case$ -- 83
+chr.to.int$ -- 13
+cite$ -- 28
+duplicate$ -- 287
+empty$ -- 488
+format.name$ -- 140
+if$ -- 1226
+int.to.chr$ -- 2
+int.to.str$ -- 1
+missing$ -- 12
+newline$ -- 81
+num.names$ -- 56
+pop$ -- 177
+preamble$ -- 1
+purify$ -- 67
+quote$ -- 0
+skip$ -- 206
+stack$ -- 0
+substring$ -- 78
+swap$ -- 20
+text.length$ -- 1
+text.prefix$ -- 0
+top$ -- 0
+type$ -- 149
+warning$ -- 0
+while$ -- 46
+width$ -- 0
+write$ -- 187
