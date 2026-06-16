@@ -3,44 +3,46 @@ Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: vibrational_deduction_transformer.aux
 The style file: abbrvnat.bst
 Database file #1: references.bib
-You've used 14 entries,
+Warning--I didn't find a database entry for "wae_v1"
+You've used 13 entries,
             2773 wiz_defined-function locations,
-            660 strings with 6916 characters,
-and the built_in function-call counts, 5966 in all, are:
-= -- 492
-> -- 391
-< -- 9
-+ -- 135
-- -- 120
-* -- 452
-:= -- 959
-add.period$ -- 45
-call.type$ -- 14
-change.case$ -- 83
-chr.to.int$ -- 13
-cite$ -- 28
-duplicate$ -- 287
-empty$ -- 488
-format.name$ -- 140
-if$ -- 1226
+            657 strings with 6838 characters,
+and the built_in function-call counts, 5681 in all, are:
+= -- 463
+> -- 381
+< -- 8
++ -- 131
+- -- 117
+* -- 438
+:= -- 907
+add.period$ -- 41
+call.type$ -- 13
+change.case$ -- 78
+chr.to.int$ -- 12
+cite$ -- 26
+duplicate$ -- 272
+empty$ -- 465
+format.name$ -- 136
+if$ -- 1169
 int.to.chr$ -- 2
 int.to.str$ -- 1
 missing$ -- 12
-newline$ -- 81
-num.names$ -- 56
-pop$ -- 177
+newline$ -- 75
+num.names$ -- 52
+pop$ -- 172
 preamble$ -- 1
-purify$ -- 67
+purify$ -- 64
 quote$ -- 0
-skip$ -- 206
+skip$ -- 195
 stack$ -- 0
-substring$ -- 78
+substring$ -- 76
 swap$ -- 20
 text.length$ -- 1
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 149
+type$ -- 138
 warning$ -- 0
-while$ -- 46
+while$ -- 43
 width$ -- 0
-write$ -- 187
+write$ -- 172
+(There was 1 warning)
