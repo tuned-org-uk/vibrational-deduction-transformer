@@ -1,5 +1,5 @@
 """
-tests/test_model_v2.py  --  Integration tests for WiringAutoencoder.
+tests/test_model.py  --  Integration tests for WiringAutoencoder.
 
 Acceptance criteria from issue #27:
 
@@ -163,7 +163,7 @@ class TestExtractSpectralArtefact:
 # ---------------------------------------------------------------------------
 
 class TestFromConfig:
-    def test_dispatches_v2(self):
+    def test_dispatches(self):
         from vdt.model import from_config, WiringAutoencoder
         cfg = {
             "model": {

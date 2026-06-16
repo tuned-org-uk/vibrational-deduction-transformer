@@ -171,7 +171,7 @@ class SpectralAssociativeMemory(nn.Module):
     @classmethod
     def from_vdt(
         cls,
-        vdt_v2: "WiringAutoencoder",  # noqa: F821 -- forward reference
+        vdt: "WiringAutoencoder",  # noqa: F821 -- forward reference
         U_q: Tensor,
         eigvals_q: Tensor,
         d_model: int,
@@ -184,7 +184,7 @@ class SpectralAssociativeMemory(nn.Module):
 
         Parameters
         ----------
-        vdt_v2 : WiringAutoencoder
+        vdt : WiringAutoencoder
             A trained VDT v2 instance.
         U_q : Tensor
             Leading q eigenvectors of the frozen index Laplacian L(I).
@@ -207,7 +207,7 @@ class SpectralAssociativeMemory(nn.Module):
         ValueError
             If the returned S_memory side does not match d_model.
         """
-        artefact: Dict[str, Tensor] = vdt_v2.extract_spectral_artefact(U_q, eigvals_q)
+        artefact: Dict[str, Tensor] = vdt.extract_spectral_artefact(U_q, eigvals_q)
         if "S_memory" not in artefact:
             raise KeyError(
                 "extract_spectral_artefact() did not return 'S_memory'. "

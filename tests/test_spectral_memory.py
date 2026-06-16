@@ -53,7 +53,7 @@ def _outer_product_memory(keys: torch.Tensor, values: torch.Tensor) -> torch.Ten
     return torch.einsum("kd,ke->de", values, keys)  # (d, d)
 
 
-def _make_vdt_v2_and_spectral():
+def _make_vdt_and_spectral():
     """Minimal WiringAutoencoder with ring-graph Laplacian for from_vdt tests."""
     from vdt.laplacian import DifferentiableLaplacian
     from vdt.model import WiringAutoencoder
@@ -276,14 +276,14 @@ class TestDeltaUpdate:
 
 class TestFromvdt:
     def test_from_vdt_returns_spectral_associative_memory(self):
-        model, U_q, eigvals_q = _make_vdt_v2_and_spectral()
+        model, U_q, eigvals_q = _make_vdt_and_spectral()
         artefact = model.extract_spectral_artefact(U_q, eigvals_q)
         d_model  = artefact["S_memory"].shape[0]
         mem = SpectralAssociativeMemory.from_vdt(model, U_q, eigvals_q, d_model=d_model)
         assert isinstance(mem, SpectralAssociativeMemory)
 
     def test_from_vdt_S_memory_square(self):
-        model, U_q, eigvals_q = _make_vdt_v2_and_spectral()
+        model, U_q, eigvals_q = _make_vdt_and_spectral()
         artefact = model.extract_spectral_artefact(U_q, eigvals_q)
         d_model  = artefact["S_memory"].shape[0]
         mem = SpectralAssociativeMemory.from_vdt(model, U_q, eigvals_q, d_model=d_model)
@@ -291,7 +291,7 @@ class TestFromvdt:
         assert S.shape[0] == S.shape[1], "S_memory from from_vdt must be square"
 
     def test_from_vdt_forward_shape(self):
-        model, U_q, eigvals_q = _make_vdt_v2_and_spectral()
+        model, U_q, eigvals_q = _make_vdt_and_spectral()
         artefact = model.extract_spectral_artefact(U_q, eigvals_q)
         d_model  = artefact["S_memory"].shape[0]
         mem    = SpectralAssociativeMemory.from_vdt(model, U_q, eigvals_q, d_model=d_model)

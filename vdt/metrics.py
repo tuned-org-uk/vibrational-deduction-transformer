@@ -17,14 +17,14 @@ Metric summary
 
 High-level entry points
 -----------------------
-  evaluate_v2       --  Run all metrics on a DataLoader and return a dict.
+  evaluate       --  Run all metrics on a DataLoader and return a dict.
   compare_indices   --  ELBO Bayes-factor leaderboard over competing indices.
 
 Design notes
 ------------
 * All metrics are pure functions (no state, no nn.Module) to allow use
   outside the training loop and in offline evaluation scripts.
-* evaluate_v2 and compare_indices depend only on the 9-key forward() dict
+* evaluate and compare_indices depend only on the 9-key forward() dict
   from WiringAutoencoder, so they never touch model internals.
 * linear_probe_acc requires only mu.detach() -- no model gradients.
 * spectral_entropy delegates the eigensystem to DifferentiableLaplacian.
@@ -58,7 +58,7 @@ def compute_kl_S(
     KL( q(S) || p(S | I) ) for the spectral loading matrix posterior.
 
     Delegates to spectral.spectral_basis_kl; exposed here as a named
-    metric function so evaluate_v2 can call it uniformly.
+    metric function so evaluate can call it uniformly.
 
     Parameters
     ----------
@@ -92,7 +92,7 @@ def compute_kl_tau(
     KL( q(omega) || Exp(tau * lambda_k) ) for the mode-weight posterior.
 
     Delegates to spectral.tau_mode_kl; exposed here as a named metric
-    function so evaluate_v2 can call it uniformly.
+    function so evaluate can call it uniformly.
 
     Parameters
     ----------
@@ -343,10 +343,10 @@ def spectral_entropy(
 
 
 # ---------------------------------------------------------------------------
-# evaluate_v2  --  run all 7 metrics on a DataLoader
+# evaluate  --  run all 7 metrics on a DataLoader
 # ---------------------------------------------------------------------------
 
-def evaluate_v2(
+def evaluate(
     model: "WiringAutoencoder",  # noqa: F821
     dataloader,
     U_q: Tensor,
@@ -479,7 +479,7 @@ def compare_indices(
         U_q       : Tensor (N, q) -- leading eigenvectors.
         eigvals_q : Tensor (q,) -- corresponding eigenvalues.
     device : torch.device or None
-        Forwarded to evaluate_v2.
+        Forwarded to evaluate.
 
     Returns
     -------
@@ -493,7 +493,7 @@ def compare_indices(
     """
     results = []
     for name, U_q, eigvals_q in index_list:
-        metrics = evaluate_v2(
+        metrics = evaluate(
             model=model,
             dataloader=dataloader,
             U_q=U_q,

@@ -82,7 +82,7 @@ def vdt_model():
 
 
 @pytest.fixture
-def enc_v2():
+def enc():
     return WiringEncoder(
         input_dim=INP, latent_dim=Q,
         n_nodes=N, feat_dim=D,
@@ -218,38 +218,38 @@ class TestVDT:
 class TestWiringEncoder:
     """AC4: 5-tuple output, correct shapes, kl_loss non-negative."""
 
-    def test_forward_returns_5_tuple(self, enc_v2, L_f, eigvecs, lap):
+    def test_forward_returns_5_tuple(self, enc, L_f, eigvecs, lap):
         x = torch.randn(B, INP)
-        out = enc_v2(x, L_f, eigvecs, lap)
+        out = enc(x, L_f, eigvecs, lap)
         assert len(out) == 5
 
-    def test_output_shapes(self, enc_v2, L_f, eigvecs, lap):
+    def test_output_shapes(self, enc, L_f, eigvecs, lap):
         x = torch.randn(B, INP)
-        z, mu, log_var, log_a, log_b = enc_v2(x, L_f, eigvecs, lap)
+        z, mu, log_var, log_a, log_b = enc(x, L_f, eigvecs, lap)
         for name, t in [("z", z), ("mu", mu), ("log_var", log_var),
                         ("log_a", log_a), ("log_b", log_b)]:
             assert t.shape == (B, Q), (
                 f"{name} shape {t.shape} != ({B}, {Q})"
             )
 
-    def test_kl_loss_nonnegative(self, enc_v2, L_f, eigvecs, lap):
+    def test_kl_loss_nonnegative(self, enc, L_f, eigvecs, lap):
         x = torch.randn(B, INP)
-        _, mu, log_var, _, _ = enc_v2(x, L_f, eigvecs, lap)
-        kl = enc_v2.kl_loss(mu, log_var)
+        _, mu, log_var, _, _ = enc(x, L_f, eigvecs, lap)
+        kl = enc.kl_loss(mu, log_var)
         assert float(kl) >= 0.0
 
-    def test_kl_loss_scalar(self, enc_v2, L_f, eigvecs, lap):
+    def test_kl_loss_scalar(self, enc, L_f, eigvecs, lap):
         x = torch.randn(B, INP)
-        _, mu, log_var, _, _ = enc_v2(x, L_f, eigvecs, lap)
-        assert enc_v2.kl_loss(mu, log_var).ndim == 0
+        _, mu, log_var, _, _ = enc(x, L_f, eigvecs, lap)
+        assert enc.kl_loss(mu, log_var).ndim == 0
 
-    def test_gradient_flows_to_input(self, enc_v2, L_f, eigvecs, lap):
+    def test_gradient_flows_to_input(self, enc, L_f, eigvecs, lap):
         x = torch.randn(B, INP, requires_grad=True)
-        z, _, _, _, _ = enc_v2(x, L_f, eigvecs, lap)
+        z, _, _, _, _ = enc(x, L_f, eigvecs, lap)
         z.sum().backward()
         assert x.grad is not None
 
-    def test_L_f_unbatched_broadcast(self, enc_v2, eigvecs, lap):
+    def test_L_f_unbatched_broadcast(self, enc, eigvecs, lap):
         """2-D L_f is automatically broadcast to batch dimension."""
         edge_index, bw = _make_ring(N)
         L_f_2d = DifferentiableLaplacian(
@@ -257,7 +257,7 @@ class TestWiringEncoder:
             base_weights=bw, normalised=True,
         )(torch.zeros(edge_index.shape[1])).detach()  # (N, N)
         x = torch.randn(B, INP)
-        out = enc_v2(x, L_f_2d, eigvecs, lap)
+        out = enc(x, L_f_2d, eigvecs, lap)
         assert len(out) == 5
 
 

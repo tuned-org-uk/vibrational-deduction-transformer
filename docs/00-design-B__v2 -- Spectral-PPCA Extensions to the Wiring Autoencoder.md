@@ -220,9 +220,9 @@ class SpectralAssociativeMemory(nn.Module):
             self.S.data += (residual.T @ key) / key.size(0)
 
     @classmethod
-    def from_vdt(cls, vdt_v2: WiringAutoencoder,
+    def from_vdt(cls, vdt: WiringAutoencoder,
                  loader, U_q, eigvals_q, d_model, **kw):
-        artefact = vdt_v2.extract_spectral_artefact(loader, U_q, eigvals_q)
+        artefact = vdt.extract_spectral_artefact(loader, U_q, eigvals_q)
         return cls(artefact, d_model, **kw)
 ```
 

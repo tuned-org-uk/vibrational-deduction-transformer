@@ -70,7 +70,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from vdt.metrics import (
-    evaluate_v2,
+    evaluate,
     compare_indices,
     linear_probe_acc,
     elbo_bayes_factor,
@@ -266,7 +266,7 @@ class BenchmarkModel(nn.Module):
     Implements the three-term ELBO:
         L = -recon + beta * (kl_S + kl_tau)
 
-    and the extract_spectral_artefact() interface required by evaluate_v2.
+    and the extract_spectral_artefact() interface required by evaluate.
 
     Parameters
     ----------
@@ -434,7 +434,7 @@ def train_one_seed(
 
     # --- Evaluate all 7 v2 metrics ---
     eval_loader = _make_dataloader(x, batch_size=batch_size, shuffle=False)
-    base_metrics = evaluate_v2(
+    base_metrics = evaluate(
         model=model,
         dataloader=eval_loader,
         U_q=U_q,
@@ -523,7 +523,7 @@ def bayes_factor_comparison(
                 continue
             m.eval()
             ev_loader = _make_dataloader(x, batch_size=batch_size, shuffle=False)
-            res = evaluate_v2(m, ev_loader, U_q, eigvals_q)
+            res = evaluate(m, ev_loader, U_q, eigvals_q)
             elbo_seed.append(res["mean_elbo"])
 
         if elbo_seed:

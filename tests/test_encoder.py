@@ -167,7 +167,7 @@ class TestKlIsotropicNonNegative:
         kl = kl_isotropic(mu, log_var)
         assert kl.item() == pytest.approx(0.0, abs=1e-5)
 
-    def test_only_kl_path_in_v2(self):
+    def test_only_kl_path_in(self):
         """WiringEncoder.kl_loss must call kl_isotropic (checked by value)."""
         enc     = _make_encoder(use_isotropic_kl=True)
         mu      = torch.zeros(B, Q)
