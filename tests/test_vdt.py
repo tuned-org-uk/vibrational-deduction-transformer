@@ -8,8 +8,9 @@ AC1  VDT.forward() returns (Q_K, Q_states, (rho_plus_list, rho_minus_list)).
 AC2  dt is never above dt_max_cfl in any forward pass.
 AC3  gamma > 0 always (softplus constraint enforced).
 AC4  WiringEncoder.forward() returns (z, mu, log_var, log_a, log_b)
-     with all shapes (B, latent_dim).
-AC5  Old WiringEncoder-based training loop still works (no regression).
+     with all shapes (B, latent_dim) for z/mu/log_var and (B, q) for log_a/log_b.
+AC5  WiringEncoder regression: full API, correct shapes, grad flow,
+     lambda-feature path.
 AC6  Unit tests: shape checks, CFL clamp, Q_states length K.
 
 Run with:
@@ -22,7 +23,7 @@ import torch
 import torch.nn as nn
 
 from vdt.vdt import VDT, VibrationalStateBlock
-from vdt.encoder import ModeWeightHead, WiringEncoder, WiringEncoder
+from vdt.encoder import ModeWeightHead, WiringEncoder
 from vdt.laplacian import DifferentiableLaplacian
 
 
@@ -33,7 +34,7 @@ from vdt.laplacian import DifferentiableLaplacian
 N   = 8    # nodes
 D   = 4    # feat_dim
 B   = 3    # batch
-Q   = 8    # latent_dim
+Q   = 8    # latent_dim  (also used as q for simplicity)
 INP = 16   # raw input dim
 
 
@@ -42,7 +43,7 @@ def _make_ring(n: int):
     fwd_dst = list(range(1, n)) + [0]
     src = fwd_src + fwd_dst
     dst = fwd_dst + fwd_src
-    edge_index  = torch.tensor([src, dst], dtype=torch.long)
+    edge_index   = torch.tensor([src, dst], dtype=torch.long)
     base_weights = torch.ones(len(src))
     return edge_index, base_weights
 
@@ -85,6 +86,7 @@ def vdt_model():
 def enc():
     return WiringEncoder(
         input_dim=INP, latent_dim=Q,
+        q=Q,
         n_nodes=N, feat_dim=D,
         n_layers=2, m_modes=2,
         n_heads=2, use_lambda_features=False,
@@ -112,7 +114,7 @@ class TestVibrationalStateBlock:
 
     def test_cfl_clamp_dt_le_dt_max(self, vdt_block, lap):
         """AC2: dt must be <= dt_max_cfl after clamping."""
-        dt   = vdt_block._cfl_dt(lap).item()
+        dt    = vdt_block._cfl_dt(lap).item()
         dtmax = lap.dt_max_cfl()
         assert dt <= dtmax + 1e-6, (
             f"CFL violated: dt={dt:.4f} > dt_max={dtmax:.4f}"
@@ -178,8 +180,8 @@ class TestVDT:
         """rho_plus_list and rho_minus_list each have length K."""
         X0 = torch.randn(B, N, D)
         _, _, (rp_list, rm_list) = vdt_model(X0, L_f, eigvecs, lap)
-        assert len(rp_list)  == vdt_model.n_layers
-        assert len(rm_list)  == vdt_model.n_layers
+        assert len(rp_list) == vdt_model.n_layers
+        assert len(rm_list) == vdt_model.n_layers
 
     def test_Q_K_shape_batched(self, vdt_model, L_f, eigvecs, lap):
         X0 = torch.randn(B, N, D)
@@ -226,8 +228,11 @@ class TestWiringEncoder:
     def test_output_shapes(self, enc, L_f, eigvecs, lap):
         x = torch.randn(B, INP)
         z, mu, log_var, log_a, log_b = enc(x, L_f, eigvecs, lap)
-        for name, t in [("z", z), ("mu", mu), ("log_var", log_var),
-                        ("log_a", log_a), ("log_b", log_b)]:
+        for name, t in [("z", z), ("mu", mu), ("log_var", log_var)]:
+            assert t.shape == (B, Q), (
+                f"{name} shape {t.shape} != ({B}, {Q})"
+            )
+        for name, t in [("log_a", log_a), ("log_b", log_b)]:
             assert t.shape == (B, Q), (
                 f"{name} shape {t.shape} != ({B}, {Q})"
             )
@@ -262,51 +267,80 @@ class TestWiringEncoder:
 
 
 # ---------------------------------------------------------------------------
-# AC5  WiringEncoder regression
+# AC5  WiringEncoder regression  (current full API)
 # ---------------------------------------------------------------------------
 
 class TestWiringEncoderRegression:
-    """AC5: WiringEncoder unchanged API and behaviour."""
+    """
+    AC5: WiringEncoder regression against the current API.
+
+    The old v1 API (hidden_dim kwarg, 3-tuple return) has been removed.
+    These tests verify that the current full-API encoder:
+      - returns the expected 5-tuple
+      - produces correct shapes for all five outputs
+      - kl_loss is non-negative and scalar
+      - gradients flow from z back to x
+      - use_lambda_features=True path works (fingerprint derived from lap)
+    """
 
     @pytest.fixture
-    def enc_v1(self):
-        return WiringEncoder(
+    def enc_v1(self, lap, L_f, eigvecs):  # noqa: F811
+        """Minimal WiringEncoder with current API."""
+        enc = WiringEncoder(
             input_dim=INP, latent_dim=Q,
-            hidden_dim=32, use_lambda_features=False,
+            q=Q,
+            n_nodes=N, feat_dim=D,
+            n_layers=2, m_modes=2,
+            n_heads=2, use_lambda_features=False,
         )
+        # Bind the fixtures so helper methods can use them.
+        enc._test_lap    = lap
+        enc._test_L_f    = L_f
+        enc._test_eigvecs = eigvecs
+        return enc
 
-    def test_forward_returns_3_tuple(self, enc_v1):
-        x = torch.randn(B, INP)
-        out = enc_v1(x)
-        assert len(out) == 3
+    def test_forward_returns_5_tuple(self, enc_v1):
+        x   = torch.randn(B, INP)
+        out = enc_v1(x, enc_v1._test_L_f, enc_v1._test_eigvecs, enc_v1._test_lap)
+        assert len(out) == 5, f"Expected 5-tuple, got {len(out)}-tuple"
 
     def test_output_shapes(self, enc_v1):
         x = torch.randn(B, INP)
-        z, mu, log_var = enc_v1(x)
-        for name, t in [("z", z), ("mu", mu), ("log_var", log_var)]:
-            assert t.shape == (B, Q), f"{name} shape mismatch"
+        z, mu, log_var, log_a, log_b = enc_v1(
+            x, enc_v1._test_L_f, enc_v1._test_eigvecs, enc_v1._test_lap
+        )
+        for name, t in [("z", z), ("mu", mu), ("log_var", log_var),
+                        ("log_a", log_a), ("log_b", log_b)]:
+            assert t.shape == (B, Q), f"{name} shape mismatch: {t.shape}"
 
     def test_kl_loss_nonneg(self, enc_v1):
         x = torch.randn(B, INP)
-        _, mu, lv = enc_v1(x)
-        assert float(WiringEncoder.kl_loss(mu, lv)) >= 0.0
+        _, mu, lv, _, _ = enc_v1(
+            x, enc_v1._test_L_f, enc_v1._test_eigvecs, enc_v1._test_lap
+        )
+        assert float(enc_v1.kl_loss(mu, lv)) >= 0.0
 
     def test_gradient_flows(self, enc_v1):
         x = torch.randn(B, INP, requires_grad=True)
-        z, _, _ = enc_v1(x)
+        z, _, _, _, _ = enc_v1(
+            x, enc_v1._test_L_f, enc_v1._test_eigvecs, enc_v1._test_lap
+        )
         z.sum().backward()
         assert x.grad is not None
 
-    def test_lambda_fp_concatenation(self, enc_v1):
-        enc_v1.use_lambda_features = True
-        x  = torch.randn(B, INP)
-        fp = torch.randn(B, enc_v1.n_lambda_bins)
-        # Rebuild with lambda features to get correct in_dim
+    def test_lambda_fp_concatenation(self, lap, L_f, eigvecs):
+        """use_lambda_features=True: fingerprint derived from lap internally."""
         enc_lf = WiringEncoder(
             input_dim=INP, latent_dim=Q,
-            hidden_dim=32, use_lambda_features=True,
+            q=Q,
+            n_nodes=N, feat_dim=D,
+            n_layers=2, m_modes=2,
+            n_heads=2, use_lambda_features=True,
         )
-        z, mu, lv = enc_lf(x, lambda_fp=fp)
+        x   = torch.randn(B, INP)
+        out = enc_lf(x, L_f, eigvecs, lap)
+        assert len(out) == 5
+        z = out[0]
         assert z.shape == (B, Q)
 
 
