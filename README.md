@@ -5,8 +5,7 @@ learned graph wiring (Laplacian) constrained to the eigenbasis of an ArrowSpace 
 Post-training, the model emits a **spectral artefact** that initialises a transformer
 with pre-built associative memory.
 
-This architecture is related to NVIB (Nonparametric Variational Information Bottleneck). It applies pre-built semantic
- spectral filters and inline memory to VAE to save learning steps by identifying the object of learning via spectral methods.
+This architecture is related to NVIB (Nonparametric Variational Information Bottleneck). It applies pre-built semantic spectral filters and inline memory to VAE to save learning steps by identifying the object of learning via spectral methods.
 
 The architecture follows the progression in *The Little Book of Generative AI Foundations*
 (Chen, 2026) and is grounded in the VDT paper (Moriondo, 2026):
