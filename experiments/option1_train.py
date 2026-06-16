@@ -4,12 +4,19 @@ experiments/option1_train.py  --  Option 1 deterministic AE trainer (#20, #30).
 Trains DeterministicSpectralAE on a node-embedding dataset and saves:
 
     checkpoints/option1_best.pt          -- model state dict at best val loss
+    checkpoints/option1_artefact.pt      -- spectral artefact for Option 6
     results/option1_metrics.csv          -- per-epoch train/val loss breakdown
-    results/option1_artefact.pt          -- spectral artefact for Option 6
 
 The artefact file is produced by DeterministicSpectralAE.extract_spectral_artefact()
 and contains W_hat, omega_hat, S_memory, eigvals_q.  Pass it to
 option6_ablation.py via --artefact_path.
+
+Regression guarantee (#20 AC)
+------------------------------
+With spectral_penalty='hard', final val reconstruction MSE must be within 2%
+of a reference v1 VibrationalAutoencoder trained on the same data.  If
+--v1_ref_mse is supplied the script asserts this after training; if it is
+omitted the check is skipped with a warning.
 
 CLI
 ---
@@ -21,7 +28,8 @@ CLI
         --batch_size 64         \\
         --lr 3e-4               \\
         --latent_dim 16         \\
-        --spectral_penalty hard
+        --spectral_penalty hard \\
+        [--v1_ref_mse 0.0123]
 
 The data file must be a .pt dict with keys:
     x    : (N_total, D)   float32 node embeddings
@@ -40,6 +48,7 @@ from __future__ import annotations
 import argparse
 import csv
 import math
+import warnings
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -101,14 +110,15 @@ def train_option1(
     device: torch.device,
     E: torch.Tensor,
     val_frac: float = 0.2,
-) -> None:
+) -> float:
     """
     Full Option 1 training loop.
 
     Saves the best checkpoint to ckpt_path and logs per-epoch metrics
     to metrics_path as a CSV with columns::
 
-        epoch, train_loss, train_recon, train_spectral, val_loss, val_recon
+        epoch, train_loss, train_recon, train_spectral, val_loss, val_recon,
+        H_lambda, active_modes
 
     Parameters
     ----------
@@ -124,6 +134,12 @@ def train_option1(
     device : torch.device
     E : Tensor  (N, D)  full embedding table
     val_frac : float  unused here (split already done by caller)
+
+    Returns
+    -------
+    best_val_recon : float
+        Best (lowest) validation reconstruction MSE achieved during training.
+        Used by the post-training 2% regression guard.
     """
     optimiser = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimiser, T_max=n_epochs)
@@ -134,6 +150,7 @@ def train_option1(
     eig_q_dev   = eigvals_q.to(device) if eigvals_q is not None else None
 
     best_val    = math.inf
+    best_val_recon = math.inf
     ckpt_path.parent.mkdir(parents=True, exist_ok=True)
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -193,6 +210,7 @@ def train_option1(
 
             tr_loss = t_loss / n_train
             vl_loss = v_loss / n_val
+            vl_recon = v_recon / n_val
 
             writer.writerow([
                 epoch,
@@ -200,7 +218,7 @@ def train_option1(
                 t_recon / n_train,
                 t_spectral / n_train,
                 vl_loss,
-                v_recon / n_val,
+                vl_recon,
                 h_lambda_mean / n_val,
                 active_mean / n_val,
             ])
@@ -216,10 +234,61 @@ def train_option1(
             # Checkpoint on improvement
             if vl_loss < best_val:
                 best_val = vl_loss
+                best_val_recon = vl_recon
                 torch.save(model.state_dict(), ckpt_path)
 
     print(f"Training complete. Best val_loss={best_val:.4f}")
     print(f"Checkpoint -> {ckpt_path}")
+    return best_val_recon
+
+
+# ---------------------------------------------------------------------------
+# Regression guard  (#20 AC: spectral_penalty='hard' must recover v1 within 2%)
+# ---------------------------------------------------------------------------
+
+def check_v1_regression(
+    v2_recon: float,
+    v1_ref_mse: float,
+    tol: float = 0.02,
+) -> None:
+    """
+    Assert that v2 (spectral_penalty='hard') reconstruction MSE is within
+    ``tol`` (default 2%) of the v1 reference MSE.
+
+    The relative gap is computed as::
+
+        rel_gap = (v2_recon - v1_ref_mse) / v1_ref_mse
+
+    A positive gap means v2 is worse than v1.  The check passes if
+    rel_gap <= tol.
+
+    Parameters
+    ----------
+    v2_recon : float
+        Best validation reconstruction MSE from the v2 training run.
+    v1_ref_mse : float
+        Reference MSE from a v1 VibrationalAutoencoder trained on the
+        same data (supplied by the caller via --v1_ref_mse).
+    tol : float
+        Allowed relative degradation.  Default 0.02 (2%).
+
+    Raises
+    ------
+    AssertionError
+        If rel_gap > tol.
+    """
+    rel_gap = (v2_recon - v1_ref_mse) / (v1_ref_mse + 1e-12)
+    print(
+        f"\n[regression check]  v2_recon={v2_recon:.6f}  "
+        f"v1_ref={v1_ref_mse:.6f}  rel_gap={rel_gap:+.4f}  tol={tol:.4f}"
+    )
+    assert rel_gap <= tol, (
+        f"Option 1 regression guard FAILED: v2 MSE {v2_recon:.6f} exceeds "
+        f"v1 reference {v1_ref_mse:.6f} by {rel_gap*100:.2f}% "
+        f"(allowed: {tol*100:.1f}%).  "
+        f"Check spectral_penalty='hard', alpha, and eigenbasis quality."
+    )
+    print(f"[regression check]  PASSED (rel_gap {rel_gap*100:.2f}% <= {tol*100:.1f}%)")
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +321,12 @@ def main() -> None:
                         default="hard")
     parser.add_argument("--val_frac",   type=float, default=0.2)
     parser.add_argument("--device",     default="cpu")
+    parser.add_argument(
+        "--v1_ref_mse", type=float, default=None,
+        help="Reference reconstruction MSE from a v1 VibrationalAutoencoder "
+             "trained on the same data.  When provided, asserts that v2 "
+             "spectral_penalty='hard' stays within 2%% of this value (#20 AC)."
+    )
     args = parser.parse_args()
 
     device  = torch.device(args.device)
@@ -313,7 +388,7 @@ def main() -> None:
     print(f"DeterministicSpectralAE  params={n_params:,}")
 
     # --- Train -----------------------------------------------------------
-    train_option1(
+    best_val_recon = train_option1(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
@@ -328,7 +403,28 @@ def main() -> None:
         E=E,
     )
 
-    # --- Extract spectral artefact for Option 6 --------------------------
+    # --- 2% regression guard (spectral_penalty='hard', #20 AC) ----------
+    if args.v1_ref_mse is not None:
+        if args.spectral_penalty == "hard":
+            check_v1_regression(best_val_recon, args.v1_ref_mse, tol=0.02)
+        else:
+            warnings.warn(
+                "Regression guard is only defined for spectral_penalty='hard'. "
+                "Skipping check for spectral_penalty='soft'.",
+                UserWarning,
+                stacklevel=1,
+            )
+    else:
+        warnings.warn(
+            "No --v1_ref_mse supplied; skipping 2%% MSE regression guard (#20 AC). "
+            "Pass --v1_ref_mse <float> to enforce the acceptance criterion.",
+            UserWarning,
+            stacklevel=1,
+        )
+
+    # --- Extract spectral artefact for Option 6 -------------------------
+    # Saved to checkpoints/option1_artefact.pt (consumed by option6_ablation.py
+    # via --artefact_path or loaded from a WiringAutoencoderV2 checkpoint).
     print("\nExtracting spectral artefact...")
     model.load_state_dict(
         torch.load(ckpt_dir / "option1_best.pt", map_location=device)
@@ -338,7 +434,7 @@ def main() -> None:
         L_base=L_f.to(device),
         eigvals_q=eigvals_q.to(device),
     )
-    artefact_path = out_dir / "option1_artefact.pt"
+    artefact_path = ckpt_dir / "option1_artefact.pt"
     torch.save(artefact, artefact_path)
     print(f"Artefact -> {artefact_path}")
     print(
