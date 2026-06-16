@@ -1,6 +1,20 @@
 """
 vdt/vib_autoencoder.py  --  Deterministic Vibrational Autoencoder (Option 1).
 
+LEGACY / ABLATION BASELINE
+---------------------------
+This module is NOT the canonical model.  The canonical variational model is
+WiringAutoencoder in vdt/model.py.
+
+This file is retained exclusively as an ablation baseline for:
+  - Option 1 (#20, #30): deterministic AE regression check vs WiringAutoencoder.
+  - Option 6 (#18, #29): classifier ablation that consumes the spectral
+    artefact (W_hat, omega_hat, S_memory) produced by extract_spectral_artefact().
+
+Do not import these classes in new production code.  Use WiringAutoencoder
+from vdt/model.py instead.
+---------------------------
+
 Two classes are provided:
 
   VibrationalAutoencoder    v1, deterministic AE with J_freq hard penalty.
