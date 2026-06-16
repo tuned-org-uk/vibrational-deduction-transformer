@@ -1,55 +1,50 @@
-# 04 — Stability of WAE v2
+# 04 — Stability of the Vibrational Deduction Transformer
 
-> **Context.** This document extends the v1 stability analysis for the WAE v2
-> Spectral-PPCA architecture. All v1 stability conditions (CFL, damping, density
-> matrix PSD, preconditioned GD convergence) apply unchanged. One new stability
-> consideration arises from the v2 upgrade: mode weight collapse in the τ-mode
-> variational prior.
+> **Context.** This document covers the stability analysis for the VDT
+> Spectral-PPCA architecture. All base stability conditions (CFL, damping,
+> density matrix PSD, preconditioned GD convergence) apply unchanged and are
+> extended with two VDT-specific diagnostics: mode weight collapse and spectral
+> eigenvalue floor.
 
-For the full v1 stability hierarchy (CFL condition, per-mode damping, energy
-monotonicity, signed density matrix PSD, preconditioned GD convergence), refer
-to the corresponding sections of the v1 `04-stability.md`. This document records
-only the v2 additions.
-
-> **Design note.** In v2, the ArrowSpace index `I` enters the ELBO solely through
-> the pre-computed eigenpair `(U_{1:q}, Λ_{1:q})` of `L(I)`. These are frozen
+> **Design note.** The ArrowSpace index `I` enters the ELBO solely through the
+> pre-computed eigenpair `(U_{1:q}, Lambda_{1:q})` of `L(I)`. These are frozen
 > constants at training time — no Laplacian is evaluated or inverted at runtime.
 > This eliminates the sample-Laplacian feedback loop present in earlier drafts
 > and reduces the stability hierarchy from 7 levels to 6.
 
 ---
 
-## Notation Quick-Reference (v2 additions)
+## Notation Quick-Reference
 
 | Symbol | Meaning |
 |---|---|
-| \(\omega_k\) | Mode weight for Laplacian mode \(k\); \(\omega_k > 0\) |
-| \(a_k, b_k\) | Gamma shape and rate parametrising \(q(\omega_k) = \mathrm{Gamma}(a_k, b_k)\) |
-| \(\tau\) | Temperature in τ-mode prior \(p(\omega_k) = \mathrm{Exp}(\tau\lambda_k)\) |
-| \(q_{\min}\) | Minimum number of active modes: \(|\{k : \mathbb{E}[\omega_k] > \delta\}| \ge q_{\min}\) |
-| \(\Lambda_{1:q}\) | Frozen eigenvalues from pre-computed eigendecomposition of \(L(\mathcal{I})\) |
+| `omega_k` | Mode weight for Laplacian mode `k`; `omega_k > 0` |
+| `a_k, b_k` | Gamma shape and rate parametrising `q(omega_k) = Gamma(a_k, b_k)` |
+| `tau` | Temperature in tau-mode prior `p(omega_k) = Exp(tau*lambda_k)` |
+| `q_min` | Minimum number of active modes: `|{k : E[omega_k] > delta}| >= q_min` |
+| `Lambda_{1:q}` | Frozen eigenvalues from pre-computed eigendecomposition of `L(I)` |
 
-All other symbols follow the v1 notation table in `04-stability.md`.
+All other symbols follow the notation established in the VDT paper (Moriondo, 2026).
 
 ---
 
-## 1. v1 Stability Hierarchy (Retained)
+## 1. Base Stability Hierarchy (Retained)
 
-All five levels of the v1 stability hierarchy apply unchanged:
+All five base stability levels apply unchanged:
 
 ```
-Level 1 — Graph geometry: λ_max(L_f), CFL condition
-Level 2 — Wave update per mode: γ_k > 0, underdamped/overdamped classification
-Level 3 — Recurrent VDT dynamics: E_t monotone, H_spectral stable
-Level 4 — Density matrix: ϱ±_t PSD, ‖ϱ_t‖_F bounded
-Level 5 — Optimiser: κ(P_{σ,M}) ≪ κ(L_f), η < 2/L_{σ,M}, linear convergence
+Level 1 -- Graph geometry: lambda_max(L_f), CFL condition
+Level 2 -- Wave update per mode: gamma_k > 0, underdamped/overdamped classification
+Level 3 -- Recurrent VDT dynamics: E_t monotone, H_spectral stable
+Level 4 -- Density matrix: rho+_t PSD, ||rho_t||_F bounded
+Level 5 -- Optimiser: kappa(P_{sigma,M}) << kappa(L_f), eta < 2/L_{sigma,M}, linear convergence
 ```
 
 Fix lower-level instabilities before diagnosing higher-level ones.
 
 ---
 
-## 2. v2 Addition: Mode Weight Collapse
+## 2. Mode Weight Collapse
 
 ### 2.1 The collapse risk
 
@@ -83,14 +78,14 @@ loss = elbo + nu * mode_floor_penalty
 
 | Metric | Normal range | Warning |
 |---|---|---|
-| `N_active` (active mode count) | \(\ge q_{\min}\) throughout | Drops below \(q_{\min}\) |
-| `min_k E[ωk]` for low-freq modes | \(> \delta = 0.01\) | Near zero → low-freq collapse |
-| `τ-mode KL` | Stable decrease | Sudden spike → τ too large for data |
-| `‖Ŵ‖_F` (artefact loading norm) | Stable | Near zero → W degenerate |
+| `N_active` (active mode count) | `>= q_min` throughout | Drops below `q_min` |
+| `min_k E[omega_k]` for low-freq modes | `> delta = 0.01` | Near zero: low-freq collapse |
+| `tau-mode KL` | Stable decrease | Sudden spike: tau too large for data |
+| `||W_hat||_F` (artefact loading norm) | Stable | Near zero: W degenerate |
 
 ---
 
-## 3. v2 Addition: Spectral Eigenvalue Floor
+## 3. Spectral Eigenvalue Floor
 
 The spectral-basis KL has precision proportional to \(\Lambda_{1:q}\). If
 \(\lambda_1 \approx 0\) (Fiedler vector near zero for a nearly disconnected graph),
@@ -107,52 +102,52 @@ the KL gradient. Both `spectral_basis_kl` and `tau_mode_kl` should apply this fl
 
 ---
 
-## 4. Updated Full Stability Checklist
+## 4. Full Stability Checklist
 
 ### Pre-training
 
-- [ ] v1 checks: `λ_max(Lf)`, `κ(Lf)`, graph connectivity, mass matrix range.
-- [ ] Set `Δt_init ≤ √(2/λ_max(Lf))`.
-- [ ] Verify frozen `Λ_{1:q}` from eigendecomposition of `L(I)` is non-degenerate.
-- [ ] Set `a_min ≥ 0.1` in `ModeWeightHead` config.
-- [ ] Set `q_min ≥ max(2, q // 4)` in config.
+- [ ] Base checks: `lambda_max(Lf)`, `kappa(Lf)`, graph connectivity, mass matrix range.
+- [ ] Set `dt_init <= sqrt(2/lambda_max(Lf))`.
+- [ ] Verify frozen `Lambda_{1:q}` from eigendecomposition of `L(I)` is non-degenerate.
+- [ ] Set `a_min >= 0.1` in `ModeWeightHead` config.
+- [ ] Set `q_min >= max(2, q // 4)` in config.
 - [ ] Apply eigenvalue floor `clamp(min=1e-3)` in all KL computations.
 
 ### During training (per-epoch diagnostics)
 
 | Metric | Normal range | Warning |
 |---|---|---|
-| All v1 metrics | See v1 `04-stability.md` | See v1 |
+| All base metrics | See base stability hierarchy | See base |
 | `KL_S` (spectral basis) | Decreasing | Spike or oscillation |
-| `τ-mode KL` | Stable decrease | Sudden spike |
-| `N_active` | ≥ `q_min` | Drops below `q_min` |
+| `tau-mode KL` | Stable decrease | Sudden spike |
+| `N_active` | >= `q_min` | Drops below `q_min` |
 
 ### Post-training
 
-- [ ] v1 checks: `E_t` vs depth, `occ_{t,k}` settling, `H_spectral` not collapsing.
-- [ ] Plot `E[ωk]` vs mode index `k`: should show low-freq concentration with
+- [ ] Base checks: `E_t` vs depth, `occ_{t,k}` settling, `H_spectral` not collapsing.
+- [ ] Plot `E[omega_k]` vs mode index `k`: should show low-freq concentration with
   some high-freq activity (not all zero, not all equal).
-- [ ] Compute `‖Ŵ‖_F` and `‖S_memory‖_F`: both should be non-degenerate.
-- [ ] Test associative memory retrieval: for each spectral key `ŵk`, verify
-  `argmax softmax(S_I⊤ ŵk)` returns the correct value `d_θ(ŵk)`.
+- [ ] Compute `||W_hat||_F` and `||S_memory||_F`: both should be non-degenerate.
+- [ ] Test associative memory retrieval: for each spectral key `w_hat_k`, verify
+  `argmax softmax(S_I^T w_hat_k)` returns the correct value `d_theta(w_hat_k)`.
 - [ ] Compute ELBO Bayes factor if comparing ArrowSpace index candidates.
 
 ---
 
-## 5. Stability Hierarchy (v2 extended)
+## 5. Stability Hierarchy (Full)
 
 ```
-Level 1 — Graph geometry
-  └─ λ_max(Lf) finite; CFL condition
-       └─ Level 2 — Wave update per mode
-            └─ γk > 0; underdamped/overdamped classification
-                 └─ Level 3 — Recurrent VDT dynamics
-                      └─ E_t monotone; H_spectral stable
-                           └─ Level 4 — Density matrix
-                                └─ ϱ±_t PSD; ‖ϱ_t‖_F bounded
-                                     └─ Level 5 — Optimiser
-                                          └─ κ(P_{σ,M}) ≪ κ(Lf); linear convergence
-                                               └─ Level 6 (v2) — Mode weights
-                                                    └─ N_active ≥ q_min
-                                                         └─ ‖Ŵ‖_F non-degenerate
+Level 1 -- Graph geometry
+  +-- lambda_max(Lf) finite; CFL condition
+       +-- Level 2 -- Wave update per mode
+            +-- gamma_k > 0; underdamped/overdamped classification
+                 +-- Level 3 -- Recurrent VDT dynamics
+                      +-- E_t monotone; H_spectral stable
+                           +-- Level 4 -- Density matrix
+                                +-- rho+_t PSD; ||rho_t||_F bounded
+                                     +-- Level 5 -- Optimiser
+                                          +-- kappa(P_{sigma,M}) << kappa(Lf); linear convergence
+                                               +-- Level 6 -- Mode weights
+                                                    +-- N_active >= q_min
+                                                         +-- ||W_hat||_F non-degenerate
 ```
