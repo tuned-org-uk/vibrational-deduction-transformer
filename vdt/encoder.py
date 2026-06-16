@@ -19,10 +19,10 @@ Typical usage (v2)
         x, L_f=L_f, eigvecs=U, lap=lap
     )
 
-Typical usage (v1 legacy)
---------------------------
-    encoder = WiringEncoder(input_dim=512, latent_dim=64)
-    z, mu, log_var = encoder(x, lambda_fp=fp)
+    The lambda-fingerprint is computed internally from 'lap' when
+    use_lambda_features=True.  It is always derived from the fixed base
+    graph topology (the frozen L(I)) -- never rebuilt from data at runtime.
+    See docs/00-architecture.md, issue #34 Phase 1 guidance.
 """
 from __future__ import annotations
 
@@ -33,6 +33,7 @@ import torch.nn as nn
 
 from vdt.vdt import VDT
 from vdt.laplacian import DifferentiableLaplacian
+from vdt.spectral import lambda_fingerprint
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +122,18 @@ class WiringEncoder(nn.Module):
       - (mu, log_var) from a linear head on the modal projection z,
       - (log_a, log_b) from ModeWeightHead for the variational Gamma KL.
 
+    Lambda-fingerprint injection
+    ----------------------------
+    When use_lambda_features=True the lambda-fingerprint is computed
+    INTERNALLY from the 'lap' DifferentiableLaplacian passed to forward().
+    The fingerprint is derived from the fixed base graph topology (the
+    frozen L(I)) and is NOT rebuilt from data at runtime.  This matches
+    the architectural contract in docs/00-architecture.md and issue #34.
+
+    input_proj is built for (input_dim + n_lambda_bins) when
+    use_lambda_features=True, or for input_dim alone otherwise, so the
+    projection dimension is always consistent with what forward() feeds in.
+
     Parameters
     ----------
     input_dim : int
@@ -138,12 +151,13 @@ class WiringEncoder(nn.Module):
     n_heads : int
         Attention heads in each VibrationalStateBlock.
     use_lambda_features : bool
-        If True, the lambda-fingerprint is concatenated to x before projection.
+        If True, the lambda-fingerprint (computed from lap at forward time)
+        is concatenated to x before the input projection.
     n_lambda_bins : int
         Histogram bins in the lambda-fingerprint.
     use_isotropic_kl : bool
         If True, kl_loss() uses the isotropic Gaussian KL (v1 fallback).
-        If False, the caller should use the Gamma KL from #24.
+        If False, the caller should use the Gamma KL from issue #24.
     dropout : float
         Dropout in VDT blocks and projection head.
     """
@@ -169,6 +183,9 @@ class WiringEncoder(nn.Module):
         self.n_nodes             = n_nodes
         self.feat_dim            = feat_dim
 
+        # input_proj width matches what forward() actually feeds in:
+        #   D + n_lambda_bins  when use_lambda_features=True  (fingerprint always computed from lap)
+        #   D                  when use_lambda_features=False
         in_dim = input_dim + (n_lambda_bins if use_lambda_features else 0)
 
         # Project raw input to node-feature matrix initialisation.
@@ -204,7 +221,6 @@ class WiringEncoder(nn.Module):
         L_f: torch.Tensor,                       # (B, N, N) or (N, N)
         eigvecs: torch.Tensor,                   # (N, *)
         lap: DifferentiableLaplacian,
-        lambda_fp: Optional[torch.Tensor] = None,  # (B, n_lambda_bins)
     ) -> Tuple[
         torch.Tensor,  # z       (B, latent_dim)
         torch.Tensor,  # mu      (B, latent_dim)
@@ -216,20 +232,31 @@ class WiringEncoder(nn.Module):
         Parameters
         ----------
         x        : raw input embeddings  (B, D)
-        L_f      : feature-space Laplacian  (B, N, N)
+        L_f      : feature-space Laplacian  (B, N, N) or (N, N)
         eigvecs  : graph eigenvectors       (N, K_eig)
-        lap      : DifferentiableLaplacian for CFL clamping
-        lambda_fp: optional lambda-fingerprint  (B, n_lambda_bins)
+        lap      : DifferentiableLaplacian for CFL clamping and
+                   lambda-fingerprint computation when use_lambda_features=True.
+                   The fingerprint is derived from the fixed base graph
+                   topology (lap.base_laplacian) -- not rebuilt from data.
 
         Returns
         -------
         z, mu, log_var, log_a, log_b  -- all (B, latent_dim)
         """
-        # -- lambda-fingerprint concatenation (unchanged from v1) ---------
-        if self.use_lambda_features and lambda_fp is not None:
-            x = torch.cat([x, lambda_fp], dim=-1)   # (B, D + n_bins)
-
         B = x.shape[0]
+
+        # -- lambda-fingerprint injection  --------------------------------
+        # Compute the fingerprint from the fixed base Laplacian (L(I)) so
+        # the encoder always receives a (B, D + n_bins) input when
+        # use_lambda_features=True, consistent with how input_proj was built.
+        if self.use_lambda_features:
+            fp = lambda_fingerprint(
+                lap.base_laplacian,
+                tau_modes=self.n_lambda_bins,
+                n_bins=self.n_lambda_bins,
+            )  # (1, n_lambda_bins)
+            fp = fp.expand(B, -1)                    # (B, n_lambda_bins)
+            x = torch.cat([x, fp], dim=-1)           # (B, D + n_bins)
 
         # -- Project to (B, N, d) -----------------------------------------
         X0 = self.input_proj(x)                     # (B, N*d)
@@ -262,6 +289,7 @@ class WiringEncoder(nn.Module):
     ) -> torch.Tensor:
         """
         Isotropic Gaussian KL fallback (used when use_isotropic_kl=True).
-        The full Gamma KL from #24 should be used when use_isotropic_kl=False.
+        The full Gamma KL from issue #24 should be used when
+        use_isotropic_kl=False.
         """
         return kl_isotropic(mu, log_var, reduction)
