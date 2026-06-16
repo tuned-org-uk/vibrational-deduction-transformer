@@ -51,6 +51,12 @@ from vdt.spectral import _safe_eigvalsh
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+#: Eigenvalues below this threshold are treated as numerically zero.
+#: Used by pre_training_checks to count connected components for both
+#: combinatorial and normalised symmetric Laplacians.
+_ZERO_EIG_TOL: float = 1e-3
+
+
 def _min_eigval(M: torch.Tensor) -> float:
     """
     Smallest eigenvalue of a symmetric matrix M (N, N), on CPU.
@@ -281,6 +287,22 @@ def pre_training_checks(
     with a pathological Laplacian.  All other failures are collected as
     warning strings and returned to the caller.
 
+    Connectivity detection
+    ----------------------
+    The check counts eigenvalues below _ZERO_EIG_TOL (1e-3).  Any Laplacian
+    with more than one near-zero eigenvalue has more than one connected
+    component.  This criterion works for both:
+
+    - Combinatorial Laplacian (L = D - A): zero eigenvalue multiplicity
+      equals the number of connected components by the spectral theorem.
+    - Normalised symmetric Laplacian (L = I - D^{-1/2} A D^{-1/2}): same
+      zero-multiplicity property holds; the non-zero eigenvalues shift but
+      each component still contributes exactly one zero.
+
+    The old Fiedler-threshold check (ev[1] < 1e-5) only worked for the
+    combinatorial case; for two balanced cliques in the normalised Laplacian
+    the Fiedler value is ~0.67 and was never detected.
+
     Parameters
     ----------
     L_f : Tensor  shape (N, N) or (B, N, N)
@@ -302,23 +324,29 @@ def pre_training_checks(
     Raises
     ------
     RuntimeError
-        If the graph Laplacian is disconnected (Fiedler value ~ 0).
+        If the graph Laplacian is disconnected (zero-eigenvalue multiplicity > 1).
     """
     warnings_out: List[str] = []
 
     L_single = L_f[0] if L_f.dim() == 3 else L_f
-    ev = _safe_eigvalsh(L_single).float().clamp(min=0.0)  # (N,)
+    ev = _safe_eigvalsh(L_single).float()  # (N,)  NOT clamped -- need real zeros
     N = int(ev.shape[0])
 
-    # Level 1 -- graph connectivity (Fiedler value lambda_1 > 0)
-    # The trivial eigenvalue is lambda_0 = 0; lambda_1 is the Fiedler value.
+    # Level 1 -- graph connectivity
+    # Count eigenvalues below _ZERO_EIG_TOL.  A connected graph has exactly
+    # one zero eigenvalue (the constant eigenvector); a disconnected graph
+    # has >= 2.  This works for both combinatorial and normalised Laplacians.
+    n_zero = int((ev < _ZERO_EIG_TOL).sum().item())
     fiedler = float(ev[1].item()) if N > 1 else float(ev[0].item())
-    if fiedler < 1e-5:
+    if n_zero > 1:
         raise RuntimeError(
             f"pre_training_checks: graph is disconnected "
-            f"(Fiedler value={fiedler:.2e} < 1e-5).  "
+            f"(zero-eigenvalue multiplicity={n_zero}, "
+            f"Fiedler value={fiedler:.4f}).  "
             "Check kNN construction -- all nodes must be reachable."
         )
+
+    ev = ev.clamp(min=0.0)  # safe to clamp now that connectivity is confirmed
 
     # Level 2 -- CFL constraint
     lam_max = float(ev[-1].item())
