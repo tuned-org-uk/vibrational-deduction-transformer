@@ -4,11 +4,11 @@ Wiring Decoder  --  z  ->  edge weight adjustments  ->  Laplacian L(z).
 Two decoder classes are provided:
 
   WiringDecoder          v1, mixture-of-experts over edge templates (unchanged).
-  SpectralLoadingDecoder v2, eigenbasis factorisation W = U_q diag(omega) S.
+  SpectralLoadingDecoder , eigenbasis factorisation W = U_q diag(omega) S.
 
 For the v1 architecture see the class docstring of WiringDecoder below.
 
-v2 architecture (SpectralLoadingDecoder)
+ architecture (SpectralLoadingDecoder)
 -----------------------------------------
 Maps z (B, q) to a loading matrix W (B, d, q) in the Laplacian eigenbasis,
 then synthesises L(z) (B, N, N) via
@@ -25,10 +25,10 @@ through L(z) -> W -> S_net and omega_net -> z.
 
 Config dispatch
 ---------------
-    decoder_type: spectral           -> SpectralLoadingDecoder  (v2 default)
+    decoder_type: spectral           -> SpectralLoadingDecoder  ( default)
     decoder_type: mixture_of_experts -> WiringDecoder           (v1 fallback)
 
-Ref: docs/v2/00-architecture.md
+Ref: docs//00-architecture.md
 """
 from __future__ import annotations
 import torch
@@ -132,12 +132,12 @@ class WiringDecoder(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# SpectralLoadingDecoder  (v2)
+# SpectralLoadingDecoder  ()
 # ---------------------------------------------------------------------------
 
 class SpectralLoadingDecoder(nn.Module):
     """
-    v2 decoder: maps z (B, q) to a spectral loading matrix W (B, d, q)
+     decoder: maps z (B, q) to a spectral loading matrix W (B, d, q)
     and then to a differentiable Laplacian L(z) (B, N, N).
 
     The loading matrix is factorised in the Laplacian eigenbasis::
@@ -154,10 +154,18 @@ class SpectralLoadingDecoder(nn.Module):
     L(z) is built by DifferentiableLaplacian.from_spectral_loading, which
     computes per-batch edge weights as:
 
-        w_ij = base_w_ij * sigmoid( -||W_i - W_j||^2 )
+        w_ij = base_aff_ij * sigmoid( -||W_i - W_j||^2 )
 
-    and assembles the normalised symmetric Laplacian.  The full path
+    where base_aff_ij = (-(L_base - I))_ij (the positive affinity recovered
+    from the normalised symmetric Laplacian).  The full path
     z -> S, omega -> W -> L(z) is differentiable.
+
+    Near-identity initialisation
+    ----------------------------
+    _init_weights sets S_net.bias = eye(q).flatten() and S_net.weight = 0,
+    so S_net(z=0) = eye(q) and the decoder starts from a well-conditioned
+    spectral loading matrix.  omega_net is initialised with near-zero weights
+    and zero bias, giving omega ~ exp(0) = 1 at init.
 
     Relation to the three-term ELBO (#24)
     --------------------------------------
@@ -193,19 +201,15 @@ class SpectralLoadingDecoder(nn.Module):
         """
         Initialise weights so the decoder starts close to identity.
 
-        S_net weight initialised to flatten(eye(q)), bias to zero, so
-        the initial S_b is close to the identity matrix for all b.
-        omega_net initialised to near-zero weights and zero bias so
+        S_net weight is zeroed and bias is set to eye(q).flatten(), so
+        S_net(z=0) = eye(q) for all batch elements at initialisation.
+        omega_net is initialised with near-zero weights and zero bias so
         initial omega_k = exp(~0) ~ 1 for all modes.
         """
         with torch.no_grad():
-            eye_flat = torch.eye(self.q).view(1, self.q * self.q)
-            # S_net.weight shape: (q*q, q)  --  each output row ~ one eye entry
+            # S_net: weight=0, bias=eye(q).flatten() so S_net(0) = eye_flat
             nn.init.zeros_(self.S_net.weight)
-            # Set the diagonal slice: output i*q+i gets input-i weight 1
-            for i in range(self.q):
-                self.S_net.weight[i * self.q + i, i] = 1.0
-            nn.init.zeros_(self.S_net.bias)
+            self.S_net.bias.copy_(torch.eye(self.q).view(self.q * self.q))
 
             nn.init.normal_(self.omega_net.weight, mean=0.0, std=0.01)
             nn.init.zeros_(self.omega_net.bias)

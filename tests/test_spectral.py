@@ -1,5 +1,5 @@
 """
-Unit tests for vdt/spectral.py -- v2 additions: spectral_basis_kl, tau_mode_kl.
+Unit tests for vdt/spectral.py --  additions: spectral_basis_kl, tau_mode_kl.
 
 Acceptance criteria from issue #24
 -----------------------------------

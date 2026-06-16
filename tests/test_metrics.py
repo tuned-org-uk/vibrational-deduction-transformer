@@ -5,7 +5,7 @@ Acceptance criteria from issue #32:
 
   AC-metrics-1   All 7 active metrics computed correctly on a toy dataset;
                  analytical values used where possible.
-  AC-metrics-2   evaluate_v2 returns a dict with all expected metric keys.
+  AC-metrics-2   evaluate returns a dict with all expected metric keys.
   AC-metrics-3   compare_indices returns a sorted leaderboard.
   AC-metrics-4   linear_probe_acc requires only mu.detach() (no gradients).
   AC-metrics-5   spectral_entropy is 0 when all mass on one mode;
@@ -25,7 +25,7 @@ from vdt.metrics import (
     memory_snr,
     elbo_bayes_factor,
     spectral_entropy,
-    evaluate_v2,
+    evaluate,
     compare_indices,
 )
 
@@ -52,7 +52,7 @@ def _make_eigvals(q: int, uniform: bool = False) -> torch.Tensor:
     return torch.linspace(0.1, 2.0, q)
 
 
-def _make_vdt_v2_and_spectral():
+def _make_vdt_and_spectral():
     """Construct a minimal WiringAutoencoder with ring-graph Laplacian."""
     from vdt.laplacian import DifferentiableLaplacian
     from vdt.model import WiringAutoencoder
@@ -316,18 +316,18 @@ class TestLinearProbeAcc:
 
 
 # ---------------------------------------------------------------------------
-# evaluate_v2  --  AC-metrics-2: returns all expected keys
+# evaluate  --  AC-metrics-2: returns all expected keys
 # ---------------------------------------------------------------------------
 
-class TestEvaluateV2:
+class TestEvaluate:
     def test_returns_all_expected_keys(self):
         """
-        evaluate_v2 must return a dict with at least these keys:
+        evaluate must return a dict with at least these keys:
         kl_S, kl_tau, active_modes, memory_snr, mean_elbo, spectral_entropy.
         """
-        model, U_q, eigvals_q = _make_vdt_v2_and_spectral()
+        model, U_q, eigvals_q = _make_vdt_and_spectral()
         dl = _TinyDataLoader(n_batches=2)
-        result = evaluate_v2(model, dl, U_q, eigvals_q)
+        result = evaluate(model, dl, U_q, eigvals_q)
         expected_keys = {
             "kl_S", "kl_tau", "active_modes",
             "memory_snr", "mean_elbo", "spectral_entropy",
@@ -335,9 +335,9 @@ class TestEvaluateV2:
         assert expected_keys.issubset(result.keys())
 
     def test_all_values_finite(self):
-        model, U_q, eigvals_q = _make_vdt_v2_and_spectral()
+        model, U_q, eigvals_q = _make_vdt_and_spectral()
         dl = _TinyDataLoader(n_batches=2)
-        result = evaluate_v2(model, dl, U_q, eigvals_q)
+        result = evaluate(model, dl, U_q, eigvals_q)
         for k, v in result.items():
             assert math.isfinite(v), f"metric '{k}' = {v} is not finite"
 
@@ -348,7 +348,7 @@ class TestEvaluateV2:
 
 class TestCompareIndices:
     def test_leaderboard_length_matches_index_count(self):
-        model, U_q, eigvals_q = _make_vdt_v2_and_spectral()
+        model, U_q, eigvals_q = _make_vdt_and_spectral()
         dl    = _TinyDataLoader(n_batches=1)
         index_list = [
             ("idx_A", U_q, eigvals_q),
@@ -358,7 +358,7 @@ class TestCompareIndices:
         assert len(board) == 2
 
     def test_rank_1_has_bayes_factor_one(self):
-        model, U_q, eigvals_q = _make_vdt_v2_and_spectral()
+        model, U_q, eigvals_q = _make_vdt_and_spectral()
         dl   = _TinyDataLoader(n_batches=1)
         index_list = [
             ("idx_A", U_q, eigvals_q),
@@ -369,7 +369,7 @@ class TestCompareIndices:
         assert board[0]["bayes_factor"] == pytest.approx(1.0, rel=1e-6)
 
     def test_leaderboard_sorted_by_elbo(self):
-        model, U_q, eigvals_q = _make_vdt_v2_and_spectral()
+        model, U_q, eigvals_q = _make_vdt_and_spectral()
         dl   = _TinyDataLoader(n_batches=1)
         index_list = [
             ("idx_A", U_q, eigvals_q),

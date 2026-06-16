@@ -230,7 +230,7 @@ during training.
 
 ## Benchmark Metrics
 
-Seven active metrics are tracked by `evaluate_v2()`:
+Seven active metrics are tracked by `evaluate()`:
 
 - `kl_S` — spectral basis KL
 - `kl_tau` — tau-mode frequency KL

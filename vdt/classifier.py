@@ -26,16 +26,16 @@ Training objective (averaged over K depths)::
 where L_f is the frozen index Laplacian and rho_t is the signed density
 matrix at step t (from SignedDensityMatrix).
 
-Spectral memory initialisation (v2 upgrade)
+Spectral memory initialisation ( upgrade)
 --------------------------------------------
 After loading a pre-trained WiringAutoencoder checkpoint:
 
-    memory = SpectralAssociativeMemory.from_vdt(vdt_v2, U_q, eigvals_q,
+    memory = SpectralAssociativeMemory.from_vdt(vdt, U_q, eigvals_q,
                                                 d_model=hidden_dim)
     classifier.init_from_spectral_memory(memory, freeze=True)  # condition: spectral_memory
     classifier.init_from_spectral_memory(memory, freeze=False) # condition: spectral_memory_ft
 
-Ref: docs/v2/03-branching.md -- Option 6
+Ref: docs//03-branching.md -- Option 6
 Depends on: vdt/vdt.py (#17), vdt/spectral_memory.py (#28)
 """
 from __future__ import annotations

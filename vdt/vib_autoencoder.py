@@ -1,21 +1,35 @@
 """
 vdt/vib_autoencoder.py  --  Deterministic Vibrational Autoencoder (Option 1).
 
+LEGACY / ABLATION BASELINE
+---------------------------
+This module is NOT the canonical model.  The canonical variational model is
+WiringAutoencoder in vdt/model.py.
+
+This file is retained exclusively as an ablation baseline for:
+  - Option 1 (#20, #30): deterministic AE regression check vs WiringAutoencoder.
+  - Option 6 (#18, #29): classifier ablation that consumes the spectral
+    artefact (W_hat, omega_hat, S_memory) produced by extract_spectral_artefact().
+
+Do not import these classes in new production code.  Use WiringAutoencoder
+from vdt/model.py instead.
+---------------------------
+
 Two classes are provided:
 
   VibrationalAutoencoder    v1, deterministic AE with J_freq hard penalty.
-  DeterministicSpectralAE   v2, SpectralLoadingDecoder in deterministic mode
+  DeterministicSpectralAE   , SpectralLoadingDecoder in deterministic mode
                                 with spectral_penalty: hard | soft.
 
 v1 objective::
 
     L = ||X0 - X_hat_0||_F^2 + alpha * J_freq(L(z)) + beta * R_M(z)
 
-v2 objective (spectral_penalty: hard)::
+ objective (spectral_penalty: hard)::
 
     L = ||X0 - X_hat_0||_F^2 + alpha * spectral_freq_cost(L_z) + beta * R_M(z)
 
-v2 objective (spectral_penalty: soft)::
+ objective (spectral_penalty: soft)::
 
     L = ||X0 - X_hat_0||_F^2 + alpha * tau_mode_kl(log_a, log_b, eigvals, tau)
                               + beta * R_M(z)
@@ -29,7 +43,7 @@ gradient path is::
 Post-training, call extract_spectral_artefact() to produce the artefact
 dict (W_hat, omega_hat, S_memory) for downstream Option 6 use.
 
-Ref: docs/v2/03-branching.md -- Option 1
+Ref: docs//03-branching.md -- Option 1
 Depends on: vdt/vdt.py (#17), vdt/wiring_decoder.py (#26), vdt/spectral.py (#24)
 """
 from __future__ import annotations
@@ -58,7 +72,7 @@ class VibrationalAutoencoder(nn.Module):
     frequency cost (J_freq) and an optional mass-matrix regulariser R_M.
 
     This class is the v1 reference implementation.  It must not be
-    modified when v2 changes are introduced; its tests must continue to
+    modified when  changes are introduced; its tests must continue to
     pass after DeterministicSpectralAE is added.
 
     Objective::
@@ -172,12 +186,12 @@ class VibrationalAutoencoder(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# DeterministicSpectralAE  (v2 -- Option 1, issue #20)
+# DeterministicSpectralAE  ( -- Option 1, issue #20)
 # ---------------------------------------------------------------------------
 
 class DeterministicSpectralAE(nn.Module):
     """
-    v2 deterministic autoencoder using SpectralLoadingDecoder (Option 1,
+     deterministic autoencoder using SpectralLoadingDecoder (Option 1,
     issue #20).
 
     Replaces the v1 WiringDecoder with SpectralLoadingDecoder in
@@ -240,7 +254,7 @@ class DeterministicSpectralAE(nn.Module):
     ) -> None:
         super().__init__()
         self.latent_dim          = latent_dim
-        self.q                   = latent_dim   # alias -- q = latent_dim for v2
+        self.q                   = latent_dim   # alias -- q = latent_dim for 
         self.tau_modes           = tau_modes
         self.alpha               = alpha
         self.beta                = beta
@@ -255,7 +269,7 @@ class DeterministicSpectralAE(nn.Module):
             nn.Linear(hidden_dim, latent_dim),
         )
 
-        # v2 spectral decoder -- deterministic mode (omega fixed to 1 at
+        #  spectral decoder -- deterministic mode (omega fixed to 1 at
         # inference; here omega_net weights are trained but post-hoc clamped)
         # SpectralLoadingDecoder takes (q, d); d = input_dim in this context
         self.spectral_decoder = SpectralLoadingDecoder(

@@ -8,7 +8,7 @@ of the VDT training loop:
     spectral_freq_cost  J_freq high-frequency energy penalty (training signal)
     lambda_fingerprint  ArrowSpace-style lambda-distribution summary (encoder enrichment)
 
-v2 additions (issue #24 / three-term ELBO):
+ additions (issue #24 / three-term ELBO):
 
     spectral_basis_kl   KL between Gaussian basis posterior q(S) and
                         eigenvalue-weighted prior p(S|I)
@@ -165,10 +165,19 @@ class TauModeDiffusion(nn.Module):
 
         U, Lambda = eig_k(L)                    -- (N, k), (k,)
         K_tau  = U * diag(exp(-t*Lambda)) * U^T  -- (N, N) heat kernel
-        x_hat_i = K_tau[i, :] * E               -- (D,) diffused embedding
+        x_hat_i = K_tau[i, :] @ E               -- (D,) diffused embedding
 
     Learnable log_t controls the diffusion time and is trained jointly
     with the rest of the model.
+
+    Shape contract
+    --------------
+    E always has shape (N, D) -- a shared node-embedding table, not batched.
+    In the node_idx branch the kernel row k_row has shape (B, N), so the
+    matmul must be written as  k_row.unsqueeze(1) @ E_batched  where
+    E_batched = E.unsqueeze(0).expand(B, -1, -1), yielding (B, 1, D)
+    before squeezing to (B, D).  The no-index branch applies the full
+    K @ E_batched giving (B, N, D).  Both branches broadcast E identically.
 
     Parameters
     ----------
@@ -213,9 +222,13 @@ class TauModeDiffusion(nn.Module):
         L : torch.Tensor
             Shape (B, N, N) or (N, N).
         E : torch.Tensor
-            Embedding table.  Shape (N, D).
+            Embedding table.  Shape (N, D).  Shared across the batch;
+            broadcast to (B, N, D) internally.
         node_idx : torch.Tensor or None
             Long tensor (B,) selecting one node per batch element.
+            When provided, returns the single diffused row for that node,
+            shape (B, D).  When None, returns the full diffused table
+            shape (B, N, D).
         eig_cache : tuple(eigvals, eigvecs) or None
             Pre-computed spectral decomposition of the base Laplacian.
 
@@ -240,20 +253,31 @@ class TauModeDiffusion(nn.Module):
         else:
             eigvals, eigvecs = _safe_eigh(L)
 
-        eigvals = eigvals[:, :k]
-        eigvecs = eigvecs[:, :, :k]
-        heat = torch.exp(-self.t * eigvals.clamp(min=0.0))
+        eigvals = eigvals[:, :k]           # (B, k)
+        eigvecs = eigvecs[:, :, :k]        # (B, N, k)
+        heat    = torch.exp(-self.t * eigvals.clamp(min=0.0))  # (B, k)
+
+        # E is (N, D) -- broadcast once to (B, N, D) for both branches.
+        E_b = E.unsqueeze(0).expand(B, -1, -1)  # (B, N, D)
 
         if node_idx is not None:
-            idx = node_idx.view(B, 1, 1).expand(B, 1, k)
-            u_query = eigvecs.gather(1, idx).squeeze(1)
-            k_row = (u_query * heat).unsqueeze(1) * eigvecs
-            k_row = k_row.sum(-1)
-            x_hat = k_row @ E
+            # Select the eigenvector row for the queried node per batch element.
+            # idx: (B, 1, k) -- gather along the node axis.
+            idx     = node_idx.view(B, 1, 1).expand(B, 1, k)
+            u_query = eigvecs.gather(1, idx).squeeze(1)    # (B, k)
+
+            # Kernel row for the queried node: sum_j u_j(i)*heat_j * u_j
+            # k_row: (B, N)
+            k_row = (u_query * heat).unsqueeze(1) * eigvecs  # (B, 1, k) * (B, N, k)
+            k_row = k_row.sum(-1)                             # (B, N)
+
+            # Matmul: (B, 1, N) @ (B, N, D) -> (B, 1, D) -> (B, D)
+            x_hat = k_row.unsqueeze(1).bmm(E_b).squeeze(1)  # (B, D)
         else:
-            U_h = eigvecs * heat.unsqueeze(1)
-            K = U_h @ eigvecs.transpose(-1, -2)
-            x_hat = K @ E.unsqueeze(0).expand(B, -1, -1)
+            # Full heat-kernel matrix: (B, N, N)
+            U_h   = eigvecs * heat.unsqueeze(1)              # (B, N, k)
+            K     = U_h @ eigvecs.transpose(-1, -2)          # (B, N, N)
+            x_hat = K.bmm(E_b)                               # (B, N, D)
 
         if not batched:
             x_hat = x_hat.squeeze(0)
@@ -372,7 +396,7 @@ def lambda_fingerprint(
 
 
 # ---------------------------------------------------------------------------
-# spectral_basis_kl  --  v2 three-term ELBO, basis term  (issue #24)
+# spectral_basis_kl  --   three-term ELBO, basis term  (issue #24)
 # ---------------------------------------------------------------------------
 
 def spectral_basis_kl(
@@ -434,7 +458,7 @@ def spectral_basis_kl(
 
 
 # ---------------------------------------------------------------------------
-# tau_mode_kl  --  v2 three-term ELBO, mode-weight term  (issue #24)
+# tau_mode_kl  --   three-term ELBO, mode-weight term  (issue #24)
 # ---------------------------------------------------------------------------
 
 def tau_mode_kl(
@@ -448,17 +472,27 @@ def tau_mode_kl(
     mode prior.
 
     For each mode k, the posterior is:
-        q(omega_k) = Gamma( a_k, b_k )
+        q(omega_k) = Gamma( a_k, b_k )   (rate parameterisation)
     and the prior is:
         p(omega_k | tau, lambda_k) = Exponential( tau * lambda_k )
                                    = Gamma(1, tau * lambda_k)
 
-    Closed-form KL (Gamma || Exponential)::
+    Closed-form derivation::
 
-        KL( Gamma(a, b) || Exp(r) )
-          = log(b) - log(r) + lgamma(a) + (1-a)*digamma(a) + a*b/r
+        KL( Gamma(a,b) || Exp(r) )
+          = E_q[log q(omega) - log p(omega)]
+          = -H[Gamma(a,b)] - log(r) + r * E_q[omega]
 
-    where r = tau * lambda_k.
+        where, for Gamma with rate parameterisation:
+          E_q[omega]    = a / b
+          H[Gamma(a,b)] = a - log(b) + lgamma(a) + (1-a)*digamma(a)
+
+        Substituting::
+
+          KL = -(a - log(b) + lgamma(a) + (1-a)*digamma(a)) - log(r) + r*(a/b)
+             = log(b) - log(r) - lgamma(a) - (1-a)*digamma(a) - a + a*r/b
+
+        Note the sign on lgamma and the final term a*r/b (NOT a*b/r).
 
     Parameters
     ----------
@@ -484,12 +518,16 @@ def tau_mode_kl(
     r = (tau * eigvals_q.clamp(min=1e-6)).unsqueeze(0)  # (1, q)
 
     # Closed-form KL( Gamma(a,b) || Exp(r) = Gamma(1, r) )
+    # Derivation:  KL = -H[Gamma(a,b)] - log(r) + r*(a/b)
+    #   H[Gamma(a,b)] = a - log(b) + lgamma(a) + (1-a)*digamma(a)
+    # => KL = log(b) - log(r) - lgamma(a) - (1-a)*digamma(a) - a + a*r/b
     kl = (
         log_b                              # log b
         - r.log()                          # - log r
-        + torch.lgamma(a)                  # lgamma(a)
-        + (1.0 - a) * torch.digamma(a)     # (1 - a) * psi(a)
-        + a * b / r                        # a * b / r
+        - torch.lgamma(a)                  # - lgamma(a)
+        - (1.0 - a) * torch.digamma(a)     # - (1-a)*digamma(a)
+        - a                                # - a
+        + a * r / b                        # + a*r/b   (was a*b/r -- wrong)
     )  # (B, q)
 
     # Sum over q modes, mean over batch.

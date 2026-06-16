@@ -3,15 +3,15 @@ Amortised encoder  q_phi(z | x).
 
 Two encoder classes are provided:
 
-  WiringEncoder -- v2 VDT encoder using VibrationalStateBlock recurrence
+  WiringEncoder --  VDT encoder using VibrationalStateBlock recurrence
                      and variational Gamma parameters (ModeWeightHead).
 
 Both share the same reparameterise / kl_loss utilities.
 
-Typical usage (v2)
+Typical usage
 ------------------
     encoder = WiringEncoder(
-        input_dim=512, latent_dim=64,
+        input_dim=512, latent_dim=64, q=16,
         n_nodes=128, feat_dim=32,
         n_layers=4, m_modes=16,
     )
@@ -19,10 +19,15 @@ Typical usage (v2)
         x, L_f=L_f, eigvecs=U, lap=lap
     )
 
-Typical usage (v1 legacy)
---------------------------
-    encoder = WiringEncoder(input_dim=512, latent_dim=64)
-    z, mu, log_var = encoder(x, lambda_fp=fp)
+    latent_dim controls the VAE reparameterisation space (z, mu, log_var).
+    q controls the number of spectral modes produced by ModeWeightHead
+    (log_a, log_b).  They are independent; WiringAutoencoder bridges them
+    with a z_to_q linear projection.
+
+    The lambda-fingerprint is computed internally from 'lap' when
+    use_lambda_features=True.  It is always derived from the fixed base
+    graph topology (the frozen L(I)) -- never rebuilt from data at runtime.
+    See docs/00-architecture.md, issue #34 Phase 1 guidance.
 """
 from __future__ import annotations
 
@@ -33,6 +38,7 @@ import torch.nn as nn
 
 from vdt.vdt import VDT
 from vdt.laplacian import DifferentiableLaplacian
+from vdt.spectral import lambda_fingerprint
 
 
 # ---------------------------------------------------------------------------
@@ -66,23 +72,30 @@ def kl_isotropic(
 
 
 # ---------------------------------------------------------------------------
-# ModeWeightHead  (v2 only)
+# ModeWeightHead  ( only)
 # ---------------------------------------------------------------------------
 
 class ModeWeightHead(nn.Module):
     """
-    Produce variational Gamma parameters (log_a, log_b) per latent mode.
+    Produce variational Gamma parameters (log_a, log_b) per spectral mode.
 
     A Gamma distribution Gamma(a, b) is parameterised through its
     log-shape log_a and log-rate log_b.  The Gamma KL replaces the
     isotropic Gaussian KL when use_isotropic_kl=False in WiringEncoder.
+
+    This head operates on the spectral mode count q, which is independent
+    of the VAE latent dimension latent_dim.  WiringEncoder receives q as a
+    separate constructor argument and passes it here so that log_a and
+    log_b always have shape (B, q), matching the contract of tau_mode_kl
+    in spectral.py.
 
     Parameters
     ----------
     hidden_dim : int
         Input dimension (VDT pooled output width).
     q : int
-        Number of latent modes (= latent_dim).  Output is 2*q.
+        Number of spectral latent modes.  Output is 2*q.
+        Must equal eigvals_q.shape[0] at training time.
     """
 
     def __init__(self, hidden_dim: int, q: int) -> None:
@@ -109,24 +122,47 @@ class ModeWeightHead(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# WiringEncoder  (v2 VDT encoder)
+# WiringEncoder  ( VDT encoder)
 # ---------------------------------------------------------------------------
 
 class WiringEncoder(nn.Module):
     """
-    v2 encoder: VDT recurrence + ModeWeightHead.
+     encoder: VDT recurrence + ModeWeightHead.
 
     The encoder projects input x to an (N, d) node-feature matrix,
     runs K VDT blocks, and reads out:
-      - (mu, log_var) from a linear head on the modal projection z,
-      - (log_a, log_b) from ModeWeightHead for the variational Gamma KL.
+      - (mu, log_var) from linear heads on the modal projection z_modal,
+        shape (B, latent_dim).
+      - (log_a, log_b) from ModeWeightHead, shape (B, q).
+
+    latent_dim vs q
+    ---------------
+    ``latent_dim`` is the dimension of the reparameterised VAE latent z
+    (and hence mu, log_var).  ``q`` is the number of spectral modes
+    produced by ModeWeightHead for the tau_mode_kl prior.  They are
+    independent.  WiringAutoencoder bridges them with a z_to_q projection.
+
+    Lambda-fingerprint injection
+    ----------------------------
+    When use_lambda_features=True the lambda-fingerprint is computed
+    INTERNALLY from the 'lap' DifferentiableLaplacian passed to forward().
+    The fingerprint is derived from the fixed base graph topology (the
+    frozen L(I)) and is NOT rebuilt from data at runtime.  This matches
+    the architectural contract in docs/00-architecture.md and issue #34.
+
+    input_proj is built for (input_dim + n_lambda_bins) when
+    use_lambda_features=True, or for input_dim alone otherwise, so the
+    projection dimension is always consistent with what forward() feeds in.
 
     Parameters
     ----------
     input_dim : int
         Raw input embedding dimension D.
     latent_dim : int
-        Latent code dimension q.
+        VAE latent code dimension.  Controls shape of z, mu, log_var.
+    q : int
+        Number of spectral modes.  Controls shape of log_a, log_b from
+        ModeWeightHead.  Must equal eigvals_q.shape[0] at training time.
     n_nodes : int
         Graph node count N (must match the Laplacian passed at forward time).
     feat_dim : int
@@ -138,12 +174,13 @@ class WiringEncoder(nn.Module):
     n_heads : int
         Attention heads in each VibrationalStateBlock.
     use_lambda_features : bool
-        If True, the lambda-fingerprint is concatenated to x before projection.
+        If True, the lambda-fingerprint (computed from lap at forward time)
+        is concatenated to x before the input projection.
     n_lambda_bins : int
         Histogram bins in the lambda-fingerprint.
     use_isotropic_kl : bool
         If True, kl_loss() uses the isotropic Gaussian KL (v1 fallback).
-        If False, the caller should use the Gamma KL from #24.
+        If False, the caller should use the Gamma KL from issue #24.
     dropout : float
         Dropout in VDT blocks and projection head.
     """
@@ -152,6 +189,7 @@ class WiringEncoder(nn.Module):
         self,
         input_dim: int,
         latent_dim: int,
+        q: int,
         n_nodes: int,
         feat_dim: int,
         n_layers: int = 4,
@@ -169,6 +207,9 @@ class WiringEncoder(nn.Module):
         self.n_nodes             = n_nodes
         self.feat_dim            = feat_dim
 
+        # input_proj width matches what forward() actually feeds in:
+        #   D + n_lambda_bins  when use_lambda_features=True  (fingerprint always computed from lap)
+        #   D                  when use_lambda_features=False
         in_dim = input_dim + (n_lambda_bins if use_lambda_features else 0)
 
         # Project raw input to node-feature matrix initialisation.
@@ -193,9 +234,10 @@ class WiringEncoder(nn.Module):
         self.mu_head      = nn.Linear(feat_dim, latent_dim)
         self.log_var_head = nn.Linear(feat_dim, latent_dim)
 
-        # Variational Gamma heads.
+        # Variational Gamma heads produce (B, q) -- q is the spectral mode
+        # count, independent of latent_dim.
         self.mode_weight_head = ModeWeightHead(
-            hidden_dim=feat_dim, q=latent_dim
+            hidden_dim=feat_dim, q=q
         )
 
     def forward(
@@ -204,32 +246,46 @@ class WiringEncoder(nn.Module):
         L_f: torch.Tensor,                       # (B, N, N) or (N, N)
         eigvecs: torch.Tensor,                   # (N, *)
         lap: DifferentiableLaplacian,
-        lambda_fp: Optional[torch.Tensor] = None,  # (B, n_lambda_bins)
     ) -> Tuple[
         torch.Tensor,  # z       (B, latent_dim)
         torch.Tensor,  # mu      (B, latent_dim)
         torch.Tensor,  # log_var (B, latent_dim)
-        torch.Tensor,  # log_a   (B, latent_dim)
-        torch.Tensor,  # log_b   (B, latent_dim)
+        torch.Tensor,  # log_a   (B, q)
+        torch.Tensor,  # log_b   (B, q)
     ]:
         """
         Parameters
         ----------
         x        : raw input embeddings  (B, D)
-        L_f      : feature-space Laplacian  (B, N, N)
+        L_f      : feature-space Laplacian  (B, N, N) or (N, N)
         eigvecs  : graph eigenvectors       (N, K_eig)
-        lap      : DifferentiableLaplacian for CFL clamping
-        lambda_fp: optional lambda-fingerprint  (B, n_lambda_bins)
+        lap      : DifferentiableLaplacian for CFL clamping and
+                   lambda-fingerprint computation when use_lambda_features=True.
+                   The fingerprint is derived from the fixed base graph
+                   topology (lap.base_laplacian) -- not rebuilt from data.
 
         Returns
         -------
-        z, mu, log_var, log_a, log_b  -- all (B, latent_dim)
+        z       : (B, latent_dim)  reparameterised VAE latent
+        mu      : (B, latent_dim)  posterior mean
+        log_var : (B, latent_dim)  posterior log-variance
+        log_a   : (B, q)           Gamma shape log-params (spectral modes)
+        log_b   : (B, q)           Gamma rate  log-params (spectral modes)
         """
-        # -- lambda-fingerprint concatenation (unchanged from v1) ---------
-        if self.use_lambda_features and lambda_fp is not None:
-            x = torch.cat([x, lambda_fp], dim=-1)   # (B, D + n_bins)
-
         B = x.shape[0]
+
+        # -- lambda-fingerprint injection  --------------------------------
+        # Compute the fingerprint from the fixed base Laplacian (L(I)) so
+        # the encoder always receives a (B, D + n_bins) input when
+        # use_lambda_features=True, consistent with how input_proj was built.
+        if self.use_lambda_features:
+            fp = lambda_fingerprint(
+                lap.base_laplacian,
+                tau_modes=self.n_lambda_bins,
+                n_bins=self.n_lambda_bins,
+            )  # (1, n_lambda_bins)
+            fp = fp.expand(B, -1)                    # (B, n_lambda_bins)
+            x = torch.cat([x, fp], dim=-1)           # (B, D + n_bins)
 
         # -- Project to (B, N, d) -----------------------------------------
         X0 = self.input_proj(x)                     # (B, N*d)
@@ -250,7 +306,7 @@ class WiringEncoder(nn.Module):
         log_var = self.log_var_head(z_modal).clamp(-10.0, 4.0)  # (B, latent_dim)
         z       = _reparameterise(mu, log_var)
 
-        log_a, log_b = self.mode_weight_head(z_modal)  # (B, latent_dim) each
+        log_a, log_b = self.mode_weight_head(z_modal)  # (B, q) each
 
         return z, mu, log_var, log_a, log_b
 
@@ -262,6 +318,7 @@ class WiringEncoder(nn.Module):
     ) -> torch.Tensor:
         """
         Isotropic Gaussian KL fallback (used when use_isotropic_kl=True).
-        The full Gamma KL from #24 should be used when use_isotropic_kl=False.
+        The full Gamma KL from issue #24 should be used when
+        use_isotropic_kl=False.
         """
         return kl_isotropic(mu, log_var, reduction)

@@ -1,8 +1,8 @@
-# VDT v2 — Spectral-PPCA Extensions to the Wiring Autoencoder
+# VDT  — Spectral-PPCA Extensions to the Wiring Autoencoder
 
 ## Overview
 
-The existing Wiring Autoencoder (VDT) already shares much of its theoretical DNA with the Spectral-PPCA VAE framework derived from first principles in the prior conversation. This document maps the precise overlaps, identifies the gaps, and specifies a concrete **VDT v2** architecture that upgrades the existing design with the three Spectral-PPCA structural priors: (1) Laplacian eigenbasis parametrisation of loadings, (2) Laplacian-precision priors on latents, and (3) \(\tau\)-mode frequency prior on active spectral bands. It also specifies how the resulting spectral artefact feeds a downstream transformer with pre-built spectral associative memory.
+The existing Wiring Autoencoder (VDT) already shares much of its theoretical DNA with the Spectral-PPCA VAE framework derived from first principles in the prior conversation. This document maps the precise overlaps, identifies the gaps, and specifies a concrete **VDT ** architecture that upgrades the existing design with the three Spectral-PPCA structural priors: (1) Laplacian eigenbasis parametrisation of loadings, (2) Laplacian-precision priors on latents, and (3) \(\tau\)-mode frequency prior on active spectral bands. It also specifies how the resulting spectral artefact feeds a downstream transformer with pre-built spectral associative memory.
 
 ***
 
@@ -10,20 +10,20 @@ The existing Wiring Autoencoder (VDT) already shares much of its theoretical DNA
 
 | Dimension | Existing VDT | Spectral-PPCA VAE | Gap / Upgrade |
 |---|---|---|---|
-| **Latent prior** \(p(z)\) | \(\mathcal{N}(0, I)\) — standard isotropic | \(\mathcal{N}(0, \Lambda_m^{-1})\) — modal prior via \(L_f\) eigenvalues | VDT README names the modal prior but does not enforce it in the KL; VDT v2 upgrades this |
+| **Latent prior** \(p(z)\) | \(\mathcal{N}(0, I)\) — standard isotropic | \(\mathcal{N}(0, \Lambda_m^{-1})\) — modal prior via \(L_f\) eigenvalues | VDT README names the modal prior but does not enforce it in the KL; VDT  upgrades this |
 | **Encoder output** | \((z, \mu, \log\sigma)\) from MLP + \(\lambda\)-fingerprint concatenation | \((z, \mu, \log\sigma)\) via reparametrisation under Laplacian-precision prior | Laplacian-precision KL replaces standard \(\mathrm{KL}(q(z)\|\mathcal{N}(0,I))\) |
 | **Loading matrix** \(W\) | Implicit — decoder MLP maps \(z \to\) edge deltas; no explicit spectral basis | Explicit: \(W = U_{1:q} S\), \(S\) lives in Laplacian eigenbasis | Critical gap: VDT does not constrain \(W\) to the eigenbasis |
-| **Wiring decoder** | Mixture-of-experts over \(n_\text{heads}\) edge templates | Replaced / augmented by spectral-basis edge synthesis | VDT v2 keeps MoE but gates heads by Laplacian mode index |
+| **Wiring decoder** | Mixture-of-experts over \(n_\text{heads}\) edge templates | Replaced / augmented by spectral-basis edge synthesis | VDT  keeps MoE but gates heads by Laplacian mode index |
 | **Diffusion decoder** | `TauModeDiffusion`: \(K_\tau = U_k \exp(-t\Lambda_k) U_k^\top\) | Heat kernel \(K_\tau\) with learnable \(t\) — **identical**; \(\tau\)-mode already present | No gap; existing TauModeDiffusion is already the spectral-PPCA decoder |
-| **Spectral cost** \(J_\text{freq}\) | \(\sum_{j>k} \lambda_j(L(z))\) — penalises high-frequency wiring | \(\tau\)-mode prior KL: \(\mathrm{KL}(q(\omega)\|p(\omega\mid\tau,\Lambda))\) | \(J_\text{freq}\) is a hard penalty; VDT v2 replaces it with a proper Bayesian KL over mode weights \(\omega\) |
-| **Latent smoothness** | None — no sample-graph Laplacian on \(z\) coordinates | \(p(X\mid\mathcal{I}) = \mathcal{N}(0, (I+\beta L_s)^{-1})\); Dirichlet energy in KL | New component in VDT v2 |
-| **Laplacian as index** \(\mathcal{I}\) | Fixed topology (kNN + RBF); edge weights learned via `WiringDecoder` | \(\mathcal{I}\) is the full ArrowSpace index; ELBO scores competing indices | VDT v2 adds ELBO-based index selection loop |
+| **Spectral cost** \(J_\text{freq}\) | \(\sum_{j>k} \lambda_j(L(z))\) — penalises high-frequency wiring | \(\tau\)-mode prior KL: \(\mathrm{KL}(q(\omega)\|p(\omega\mid\tau,\Lambda))\) | \(J_\text{freq}\) is a hard penalty; VDT  replaces it with a proper Bayesian KL over mode weights \(\omega\) |
+| **Latent smoothness** | None — no sample-graph Laplacian on \(z\) coordinates | \(p(X\mid\mathcal{I}) = \mathcal{N}(0, (I+\beta L_s)^{-1})\); Dirichlet energy in KL | New component in VDT  |
+| **Laplacian as index** \(\mathcal{I}\) | Fixed topology (kNN + RBF); edge weights learned via `WiringDecoder` | \(\mathcal{I}\) is the full ArrowSpace index; ELBO scores competing indices | VDT  adds ELBO-based index selection loop |
 | **ELBO objective** | \(\mathcal{L} = \mathbb{E}[\log p(x\mid z)] - \beta\cdot\mathrm{KL} - \alpha\cdot J_\text{freq}\) | \(\mathcal{L} = \text{recon} - \mathrm{KL}(X) - \mathrm{KL}(S) - \mathrm{KL}(\omega)\) | Three KL terms replace one KL + one hard penalty |
-| **Signed density matrix** \(\varrho_t\) | Defined in VDT backbone; tracked as stability diagnostic | Not in Spectral-PPCA VAE (pure VAE model) | VDT v2 retains \(\varrho_t\) as interpretability layer; new: \(\varrho_t\) initialises associative memory |
-| **Associative memory** | None | Pre-built \(S_\mathcal{I} = \sum_k \mathbb{E}[\omega_k] d_\theta(\hat{w}_k) \hat{w}_k^\top\) | Entirely new component in VDT v2 |
-| **Transformer memory init** | Standard random init | Spectral artefact initialises FFN / cross-attention value matrices | New in VDT v2 |
-| **Index selection** | Not Bayesian — single fixed graph | ELBO Bayes factor over candidate ArrowSpace indices | New in VDT v2 |
-| **Stability framework** | Full CFL / damping / density-matrix hierarchy in `04-stability.md` | No dedicated stability analysis in Spectral-PPCA VAE derivation | VDT v2 retains the full stability hierarchy from `04-stability.md` |
+| **Signed density matrix** \(\varrho_t\) | Defined in VDT backbone; tracked as stability diagnostic | Not in Spectral-PPCA VAE (pure VAE model) | VDT  retains \(\varrho_t\) as interpretability layer; new: \(\varrho_t\) initialises associative memory |
+| **Associative memory** | None | Pre-built \(S_\mathcal{I} = \sum_k \mathbb{E}[\omega_k] d_\theta(\hat{w}_k) \hat{w}_k^\top\) | Entirely new component in VDT  |
+| **Transformer memory init** | Standard random init | Spectral artefact initialises FFN / cross-attention value matrices | New in VDT  |
+| **Index selection** | Not Bayesian — single fixed graph | ELBO Bayes factor over candidate ArrowSpace indices | New in VDT  |
+| **Stability framework** | Full CFL / damping / density-matrix hierarchy in `04-stability.md` | No dedicated stability analysis in Spectral-PPCA VAE derivation | VDT  retains the full stability hierarchy from `04-stability.md` |
 
 ***
 
@@ -35,16 +35,16 @@ The existing VDT is more aligned with the Spectral-PPCA framework than a surface
 - The **`lambda_fingerprint`** fed to the encoder is the ArrowSpace spectral histogram — the same quantity that informs \(\mathcal{I}\) in the Spectral-PPCA framework.
 - The **`spectral_freq_cost`** penalising \(\sum_{j>k}\lambda_j\) is the direct precursor to the \(\tau\)-mode KL term. The upgrade is to replace the hard penalty with a proper variational Gamma prior on mode weights \(\omega_k\).
 - The **modal prior \(p(z) = \mathcal{N}(0, \Lambda_m^{-1})\)** is listed in the README concept table as the PPCA analogue, but the implementation (`WiringEncoder.kl_loss`) computes \(\mathrm{KL}(q(z)\|\mathcal{N}(0,I))\). The \(\Lambda_m\)-scaled prior is present conceptually but not yet wired into the KL.
-- The **signed density matrix** \(\varrho_t = \varrho_t^+ - \varrho_t^-\) in the VDT backbone provides a natural low-rank factorisation of the latent covariance — exactly the kind of structured uncertainty representation that VDT v2 can expose as the spectral artefact.
-- The **stability hierarchy** in `04-stability.md` (CFL condition, per-mode damping, spectral entropy, density-matrix PSD) is exactly the set of diagnostics needed to validate VDT v2 training.
+- The **signed density matrix** \(\varrho_t = \varrho_t^+ - \varrho_t^-\) in the VDT backbone provides a natural low-rank factorisation of the latent covariance — exactly the kind of structured uncertainty representation that VDT  can expose as the spectral artefact.
+- The **stability hierarchy** in `04-stability.md` (CFL condition, per-mode damping, spectral entropy, density-matrix PSD) is exactly the set of diagnostics needed to validate VDT  training.
 
 ***
 
-## 3. VDT v2 Architecture Specification
+## 3. VDT  Architecture Specification
 
 ### 3.1 Overview
 
-VDT v2 retains the full VDT encoder backbone, `DifferentiableLaplacian`, `TauModeDiffusion`, and stability diagnostics from the existing codebase. The five targeted changes are:
+VDT  retains the full VDT encoder backbone, `DifferentiableLaplacian`, `TauModeDiffusion`, and stability diagnostics from the existing codebase. The five targeted changes are:
 
 1. **Spectral-basis loading reparametrisation** — \(W = U_{1:q} S\), replacing the unconstrained MLP decoder mapping.
 2. **Laplacian-precision latent KL** — replacing the standard isotropic KL with the graph-smoothness-weighted KL.
@@ -54,7 +54,7 @@ VDT v2 retains the full VDT encoder backbone, `DifferentiableLaplacian`, `TauMod
 
 ### 3.2 Upgraded ELBO
 
-The VDT v2 training objective replaces:
+The VDT  training objective replaces:
 
 \[
 \mathcal{L}_\text{VDT} = \mathbb{E}_q[\log p(x\mid z)] - \beta\cdot\mathrm{KL}(q(z)\|\mathcal{N}(0,I)) - \alpha\cdot J_\text{freq}(L(z))
@@ -63,7 +63,7 @@ The VDT v2 training objective replaces:
 with the four-term Spectral-PPCA ELBO:
 
 \[
-\mathcal{L}_\text{VDT-v2} = \underbrace{\mathbb{E}_q[\log p(x\mid z, W)]}_\text{recon} - \underbrace{\mathrm{KL}(q(z)\|p_\text{Lap}(z))}_\text{latent smoothness} - \underbrace{\mathrm{KL}(q(S)\|p(S\mid\mathcal{I}))}_\text{spectral basis KL} - \underbrace{\mathrm{KL}(q(\omega)\|p(\omega\mid\tau,\Lambda))}_{\tau\text{-mode KL}}
+\mathcal{L}_\text{VDT-} = \underbrace{\mathbb{E}_q[\log p(x\mid z, W)]}_\text{recon} - \underbrace{\mathrm{KL}(q(z)\|p_\text{Lap}(z))}_\text{latent smoothness} - \underbrace{\mathrm{KL}(q(S)\|p(S\mid\mathcal{I}))}_\text{spectral basis KL} - \underbrace{\mathrm{KL}(q(\omega)\|p(\omega\mid\tau,\Lambda))}_{\tau\text{-mode KL}}
 \]
 
 where:
@@ -95,7 +95,7 @@ Replace the current unconstrained MLP with an explicit spectral-basis loading de
 ```python
 class SpectralLoadingDecoder(nn.Module):
     """
-    Replaces WiringDecoder for VDT v2.
+    Replaces WiringDecoder for VDT .
     Parametrises W = U_{1:q} * diag(omega) * S,
     where U_{1:q} are the q lowest eigenvectors of L(I).
     """
@@ -220,9 +220,9 @@ class SpectralAssociativeMemory(nn.Module):
             self.S.data += (residual.T @ key) / key.size(0)
 
     @classmethod
-    def from_vdt(cls, vdt_v2: WiringAutoencoder,
+    def from_vdt(cls, vdt: WiringAutoencoder,
                  loader, U_q, eigvals_q, d_model, **kw):
-        artefact = vdt_v2.extract_spectral_artefact(loader, U_q, eigvals_q)
+        artefact = vdt.extract_spectral_artefact(loader, U_q, eigvals_q)
         return cls(artefact, d_model, **kw)
 ```
 
@@ -230,7 +230,7 @@ class SpectralAssociativeMemory(nn.Module):
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│  PHASE 1 — OFFLINE (VDT v2 training)                 │
+│  PHASE 1 — OFFLINE (VDT  training)                 │
 │                                                      │
 │  ArrowSpace index I  ──►  L(I), U_q, Λ_q            │
 │      │                          │                    │
@@ -262,7 +262,7 @@ class SpectralAssociativeMemory(nn.Module):
 
 ## 4. Extended ELBO Comparison
 
-| Term | Existing VDT | VDT v2 |
+| Term | Existing VDT | VDT  |
 |---|---|---|
 | Reconstruction | \(-\|x - \hat{x}\|^2 / 2\sigma^2\) | Same; \(\sigma\) learnable via `log_sigma` |
 | Latent KL | \(\mathrm{KL}(q(z)\|\mathcal{N}(0,I))\) — isotropic | \(\mathrm{KL}(q(z)\|p_\text{Lap}(z))\) — Laplacian-precision; adds Dirichlet energy |
@@ -274,24 +274,24 @@ class SpectralAssociativeMemory(nn.Module):
 
 ## 5. Relationship to VDT Option Tracks
 
-VDT v2 as specified corresponds most directly to **Option 4 (Variational Laplace AE)** from `03-branching.md`, with the key difference that VDT v2 uses full reparametrisation (Monte Carlo ELBO) rather than Laplace approximation. However, the Spectral-PPCA ELBO is also compatible with Option 4's Laplace covariance interpretation: the posterior precision \((H_\text{recon} + \Lambda_m)\) in Option 4 corresponds exactly to the combined Laplacian-precision plus spectral-shrinkage terms in the VDT v2 KL.
+VDT  as specified corresponds most directly to **Option 4 (Variational Laplace AE)** from `03-branching.md`, with the key difference that VDT  uses full reparametrisation (Monte Carlo ELBO) rather than Laplace approximation. However, the Spectral-PPCA ELBO is also compatible with Option 4's Laplace covariance interpretation: the posterior precision \((H_\text{recon} + \Lambda_m)\) in Option 4 corresponds exactly to the combined Laplacian-precision plus spectral-shrinkage terms in the VDT  KL.
 
 The associative memory component is new across all six options and is most naturally layered on top of **Option 1** (Deterministic AE) or **Option 4** (Variational Laplace AE) as a post-training export step. It also connects to **Option 6** (Spectrally Regularised Classifier / Reasoner): the signed density matrix \(\varrho_t\) produced during VDT inference can be used to initialise `S_memory` rather than the VAE loading posterior, providing a reasoning-grounded associative prior.
 
-| Branching option | VDT v2 compatibility |
+| Branching option | VDT  compatibility |
 |---|---|
-| Option 1 — Deterministic AE | VDT v2 adds probabilistic latent on top; backward-compatible as deterministic limit \(\beta\to 0\) |
+| Option 1 — Deterministic AE | VDT  adds probabilistic latent on top; backward-compatible as deterministic limit \(\beta\to 0\) |
 | Option 2 — Energy-based | Spectral-basis loading can replace unconstrained proposer; Laplacian energy terms compatible |
-| Option 3 — Latent diffusion | VDT v2 provides Stage 1 encoder; spectral noise schedule in Option 3 matches \(\Lambda_m^{-1}\) latent prior |
-| Option 4 — Variational Laplace | VDT v2 is the full MC-ELBO version of Option 4; Laplace covariance is the deterministic approximation |
+| Option 3 — Latent diffusion | VDT  provides Stage 1 encoder; spectral noise schedule in Option 3 matches \(\Lambda_m^{-1}\) latent prior |
+| Option 4 — Variational Laplace | VDT  is the full MC-ELBO version of Option 4; Laplace covariance is the deterministic approximation |
 | Option 5 — Forecasting | Spectral artefact can be used as prior memory for the PDE-inspired predictor; CFL conditions unchanged |
 | Option 6 — Classifier / Reasoner | \(\varrho_t\) as spectral artefact → associative memory init; depth-supervised CE loss unchanged |
 
 ***
 
-## 6. Stability Considerations for VDT v2
+## 6. Stability Considerations for VDT 
 
-The full stability hierarchy from `04-stability.md` applies unchanged. Two additional considerations for VDT v2:
+The full stability hierarchy from `04-stability.md` applies unchanged. Two additional considerations for VDT :
 
 ### 6.1 Sample Laplacian \(L_s\) stability
 
@@ -310,9 +310,9 @@ The Gamma/Log-Normal mode weight prior can collapse to a point mass at zero for 
 
 ***
 
-## 7. New Metrics for VDT v2
+## 7. New Metrics for VDT 
 
-In addition to the existing benchmark metrics, VDT v2 reports:
+In addition to the existing benchmark metrics, VDT  reports:
 
 | Metric | How computed | What it measures |
 |---|---|---|
@@ -328,7 +328,7 @@ In addition to the existing benchmark metrics, VDT v2 reports:
 
 ## 8. Implementation Sequence
 
-Following the recommended order from `docs/README.md`, the VDT v2 upgrades should be applied in this sequence:
+Following the recommended order from `docs/README.md`, the VDT  upgrades should be applied in this sequence:
 
 1. **Swap `kl_loss` in `WiringEncoder`** to use the modal prior \(\mathcal{N}(0, \Lambda_m^{-1})\) (already named in README concept table; minimal code change).
 2. **Add `tau_mode_kl`** to replace hard \(J_\text{freq}\) penalty. Keep \(\alpha\cdot J_\text{freq}\) as an ablation flag.

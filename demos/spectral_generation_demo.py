@@ -18,7 +18,7 @@ In the VDT framework:
   * High-entropy state (thermal rest)        <->  flat eigenvalue spectrum
     (dense, high-frequency wiring).
 
-Three-term ELBO (v2, issue #13)
+Three-term ELBO (, issue #13)
 --------------------------------
 The model optimises a three-term variational bound:
 
@@ -980,7 +980,7 @@ def main() -> None:
     save_figures(out_dir, train_log, gen_results, entropy_results,
                  dataset, model, device)
 
-    # v2 metrics summary via vdt.metrics
+    #  metrics summary via vdt.metrics
     omega_bar  = model.mode_weights(n_samples=256, device=device)
     n_active   = v2_active_modes(omega_bar, delta=0.01)
     W_keys     = model.W_proj.T.detach().cpu()  # (tau_modes, latent_dim)
@@ -990,7 +990,7 @@ def main() -> None:
 
     # Print summary
     print("\n" + "=" * 62)
-    print("DEMO SUMMARY (v2 metrics)")
+    print("DEMO SUMMARY ( metrics)")
     print("=" * 62)
     print(f"  Dataset            : {args.n_graphs} graphs, {N} nodes")
     print(f"  Best val ELBO loss : {best_val_loss:.5f}")
