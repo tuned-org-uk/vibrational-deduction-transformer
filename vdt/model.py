@@ -115,6 +115,8 @@ class WiringAutoencoder(nn.Module):
         Diffusion time scale for kl_tau (mode frequency KL).  Default 0.5.
     laplacian : DifferentiableLaplacian
         Base Laplacian module shared with SpectralLoadingDecoder.
+        Its dense matrix (laplacian.L) is passed as L_base to
+        SpectralLoadingDecoder.forward() at each step.
     n_layers : int
         Number of VDT blocks inside WiringEncoder.  Default 4.
     n_heads : int
@@ -164,10 +166,11 @@ class WiringAutoencoder(nn.Module):
             use_isotropic_kl=True,
             dropout=dropout,
         )
+        # SpectralLoadingDecoder takes (q, d) at init; L_base is supplied
+        # at forward() time via self._laplacian.L.
         self.wiring_decoder = SpectralLoadingDecoder(
-            latent_dim=q,
             q=q,
-            laplacian=laplacian,
+            d=n_nodes,
         )
         self.diffusion_decoder = DiffusionDecoder(
             embedding_dim=input_dim,
@@ -249,8 +252,9 @@ class WiringAutoencoder(nn.Module):
         )
 
         # --- Spectral decode (wiring) -------------------------------------
-        # SpectralLoadingDecoder.forward() returns (W, omega, S, L_z)
-        W, omega, S, L_z = self.wiring_decoder(z, U_q)
+        # SpectralLoadingDecoder.forward() signature: (z, U_q, L_base)
+        # L_base is the dense base Laplacian held by self._laplacian.
+        W, omega, S, L_z = self.wiring_decoder(z, U_q, self._laplacian.L)
 
         # In v2 the caller passes x as both query and per-node embedding
         # table for the diffusion step.
@@ -339,7 +343,9 @@ class WiringAutoencoder(nn.Module):
         # Sample from the prior mean z = 0 to obtain the posterior-mode artefact.
         z_prior = torch.zeros(1, self.q, device=device)
 
-        W_hat, omega_raw, S, _L_z = self.wiring_decoder(z_prior, U_q)
+        W_hat, omega_raw, S, _L_z = self.wiring_decoder(
+            z_prior, U_q, self._laplacian.L
+        )
         # W_hat : (1, feat_dim, q)
         # omega_raw : (1, q)
 
@@ -393,7 +399,7 @@ class WiringAutoencoder(nn.Module):
         """
         device = next(self.parameters()).device
         z = torch.randn(n_samples, self.q, device=device)
-        W, omega, S, L_z = self.wiring_decoder(z, U_q)
+        W, omega, S, L_z = self.wiring_decoder(z, U_q, self._laplacian.L)
         return self.diffusion_decoder(L_z, E, node_idx=node_idx)
 
 
