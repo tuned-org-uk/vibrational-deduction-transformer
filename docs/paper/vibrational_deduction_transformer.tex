@@ -93,12 +93,12 @@
 \maketitle
 
 \begin{abstract}
-We present the \emph{Vibrational Wiring Deduction Transformer} (\VDT), a
+We present the \emph{Vibrational Wiring Deduction Transformer} (VDT), a
 fully Bayesian generative model that unifies vibrational graph dynamics,
 probabilistic PCA in a Laplacian eigenbasis (Spectral-PPCA), and spectral
 associative memory into a single trainable architecture.  The predecessor
 Wiring Autoencoder (WAE) used a hard high-frequency energy penalty
-($J_{\mathrm{freq}}$) and an isotropic Gaussian latent prior.  \VDT{} replaces
+($J_{\mathrm{freq}}$) and an isotropic Gaussian latent prior.  VDT replaces
 both with principled variational KL terms: (i) a spectral-basis KL over the
 loading matrix $\bS$ weighted by Laplacian eigenvalues, implementing a
 \emph{spectral Occam's razor}; (ii) a closed-form Gamma/Exponential KL over
@@ -142,7 +142,7 @@ probabilistic prior, which makes it difficult to:
         manifold.
 \end{enumerate}
 
-The \vdt{} (\VDT) addresses all three limitations by embedding the Wiring
+The VDT addresses all three limitations by embedding the Wiring
 Autoencoder within the Spectral-PPCA framework~\citep{design_a}, a Bayesian
 generative model in which the loading matrix
 $\bW = \bU_{1:q}\,\diag(\bomega)\,\bS$ lives explicitly in the Laplacian
@@ -222,7 +222,7 @@ the discrete graph setting is the normalised Laplacian $L$.  A positive
 amplitude on mode $k$ corresponds to a string displacement in the direction
 $\mathbf{u}_k$; a negative amplitude corresponds to the opposing displacement.
 This is the physical counterpart to the signed (positive/negative) latent
-amplitudes that the \VDT{} encoder learns.
+amplitudes that the VDT encoder learns.
 
 The signed density matrix
 $\varrho_t = \varrho_t^+ - \varrho_t^-$ maintained by the VDT recurrence
@@ -254,7 +254,7 @@ high-frequency wiring.  The reconstruction is provided by
 $K_\tau = \bU_k\exp(-t\bLambda_k)\bU_k^\top$ applied to an embedding table
 $\bE$, with learnable diffusion time $t$.
 
-Three limitations of WAE motivate \VDT:
+Three limitations of WAE motivate VDT:
 (a) $J_{\mathrm{freq}}$ is a deterministic penalty with no prior
 interpretation;
 (b) the latent prior is isotropic and ignores graph geometry;
@@ -318,7 +318,7 @@ means (stop-gradient).  The resulting KL expands to
   \label{eq:kl_lap}
 \end{equation}
 where the cross-term $\bmu_z^\top L_s\bmu_z$ is the graph Dirichlet energy of
-the latent means.  \emph{This prior is preserved in the \VDT{} codebase as an
+the latent means.  \emph{This prior is preserved in the VDT codebase as an
 ablation option} (\texttt{use\_isotropic\_kl=False} in
 \texttt{VibrationalEncoder}) but is \textbf{not} included in the default
 three-term ELBO following architectural review in PR\,\#35.
@@ -342,7 +342,7 @@ $(\log a_k, \log b_k)$ from a \texttt{ModeWeightHead} linear layer.
 
 \subsection{ELBO Decomposition}
 
-The default \VDT{} training objective is the following three-term ELBO
+The default VDT training objective is the following three-term ELBO
 (minimisation form, as implemented in \texttt{vdt/model.py}):
 \begin{equation}
   \boxed{
@@ -405,11 +405,11 @@ averaged over the batch.
 
 \begin{table}[h]
 \centering
-\caption{ELBO comparison: WAE (predecessor) vs \VDT.}
+\caption{ELBO comparison: WAE (predecessor) vs VDT.}
 \label{tab:elbo_comparison}
 \begin{tabular}{@{}llll@{}}
 \toprule
-Term & WAE & \VDT & Note \\
+Term & WAE & VDT & Note \\
 \midrule
 Reconstruction & $-\|\bx-\hat{\bx}\|^2/2\sigma^2$ & Same & $\sigma$ learnable \\
 Latent KL & $\KL(q(\bz)\|\N(\mathbf{0},\bm{I}))$ & Same (isotropic) & PR\,\#35 decision \\
@@ -447,7 +447,7 @@ Figure~\ref{fig:dataflow} illustrates the end-to-end data flow.
   \draw[arr] (sld) -- (diff) node[midway,right,font=\scriptsize]{$L(\bz),\,(B,N,N)$};
   \draw[arr] (diff) -- (loss) node[midway,right,font=\scriptsize]{$\hat{\bx},\,(B,D)$};
 \end{tikzpicture}
-\caption{\VDT{} data flow.  The eigenpairs $(\bU_q, \bLambda_q)$ of $L(\I)$
+\caption{VDT data flow.  The eigenpairs $(\bU_q, \bLambda_q)$ of $L(\I)$
 are frozen constants passed to both encoder and decoder; no Laplacian is
 computed at runtime.}
 \label{fig:dataflow}
@@ -499,7 +499,7 @@ reasoning-focused deployments (Option~6, Section~\ref{sec:tracks}).
 \label{sec:decoder}
 
 \texttt{SpectralLoadingDecoder} (\texttt{vdt/wiring\_decoder.py}) is the
-default \VDT{} wiring decoder.  The forward pass computes:
+default VDT wiring decoder.  The forward pass computes:
 \begin{align}
   \bS &= \texttt{S\_net}(\bz).\text{view}(B,q,q), \label{eq:S_net}\\
   \bomega &= \exp(\texttt{omega\_net}(\bz)), \label{eq:omega_net}\\
@@ -632,10 +632,10 @@ where $(\bm{k},\bm{v})$ are new key-value pairs.
 \section{Two-Phase Architecture}
 \label{sec:two_phase}
 
-\VDT{} cleanly separates spectral learning from online inference.
+VDT{cleanly separates spectral learning from online inference.
 
 \begin{algorithm}[h]
-\caption{\VDT{} Two-Phase Procedure}
+\caption{VDT Two-Phase Procedure}
 \label{alg:two_phase}
 \begin{algorithmic}[1]
 \Require ArrowSpace index $\I$, dataset $D$, hyperparameters
@@ -664,7 +664,7 @@ Laplacian is computed or inverted at each training step}.  All $O(N^3)$
 eigendecomposition cost is paid once in offline preprocessing.
 
 \paragraph{ELBO Bayes factor for index selection.}
-Training \VDT{} on competing indices $\I_1, \I_2$ yields ELBO estimates
+Training VDT on competing indices $\I_1, \I_2$ yields ELBO estimates
 $\elbo(\I_1),\elbo(\I_2)$.  The Bayes factor
 \begin{equation}
   \mathrm{BF}_{12} = \exp(\elbo(\I_1) - \elbo(\I_2))
@@ -678,7 +678,7 @@ ELBO~\citep{lotfi2022marginal}.
 \section{Stability Analysis}
 \label{sec:stability}
 
-\VDT{} inherits the full stability hierarchy from
+VDT inherits the full stability hierarchy from
 \texttt{docs/v2/04-stability.md}.  Two additional conditions apply.
 
 \paragraph{Sample-graph Laplacian feedback.}
@@ -709,7 +709,7 @@ selection from data alone.
 
 \begin{table}[h]
 \centering
-\caption{\VDT{} benchmark metrics.}
+\caption{VDT benchmark metrics.}
 \label{tab:metrics}
 \begin{tabular}{@{}lll@{}}
 \toprule
@@ -731,7 +731,7 @@ Spectral entropy $H(\Lambda)$ & $H(\text{normalised eigenvalues of }L(\bz))$ & W
 \section{Algorithm Tracks}
 \label{sec:tracks}
 
-The \VDT{} framework supports six implementation tracks.  The recommended
+The VDT framework supports six implementation tracks.  The recommended
 sequence is 6~$\to$ 1~$\to$ 4~$\to$ 3.
 
 \begin{itemize}
@@ -739,11 +739,11 @@ sequence is 6~$\to$ 1~$\to$ 4~$\to$ 3.
         with the soft $\tau$-mode KL; add \texttt{SpectralLoadingDecoder} as
         ablation.  Backward-compatible: $\beta\to 0$ recovers the deterministic
         limit.
-  \item \textbf{Option 3 --- Latent diffusion.}  \VDT{} provides the Stage~1
+  \item \textbf{Option 3 --- Latent diffusion.}  VDT provides the Stage~1
         encoder; the spectral noise schedule
         $a_\tau^{(k)}=\exp(-\tau\lambda_k t)$ matches the $\bLambda_q^{-1}$
         latent prior.
-  \item \textbf{Option 4 --- Variational Laplace AE.}  \VDT{} is the full
+  \item \textbf{Option 4 --- Variational Laplace AE.}  VDT is the full
         MC-ELBO version; Laplace covariance
         $(H_{\mathrm{recon}}+\bLambda_m)^{-1}$ is the deterministic
         approximation to the spectral-precision posterior.
@@ -759,22 +759,22 @@ sequence is 6~$\to$ 1~$\to$ 4~$\to$ 3.
 
 \paragraph{Graph VAEs.}  \citet{kipf2016vgae} encode graph structure
 into a VAE but do not impose Laplacian spectral priors on latent codes or
-loading matrices.  \VDT{} makes the spectral structure explicit and
+loading matrices.  VDT makes the spectral structure explicit and
 variational.
 
 \paragraph{Spectral graph convolution.}  Graph spectral
 methods~\citep{defferrard2016chebynet} use Laplacian eigenvectors as filter
-bases; \VDT{} places this basis \emph{in the generative model} as the loading
+bases; VDT places this basis \emph{in the generative model} as the loading
 matrix parametrisation.
 
 \paragraph{Laplacian priors.}  \citet{rao2008laplacian} and
 \citet{slawski2015lapprior} use Laplacian quadratic-form priors for Bayesian
-variable selection; \VDT{} applies this to both the loading matrix $\bS$
+variable selection; VDT applies this to both the loading matrix $\bS$
 and (optionally) the latent code $\bz$.
 
 \paragraph{Hopfield / associative memory.}  \citet{ramsauer2020hopfield}
 extended Hopfield networks to continuous attractors; \citet{geva2021ffn} showed
-that transformer FFN layers are key-value memories.  \VDT{} unifies these by
+that transformer FFN layers are key-value memories.  VDT unifies these by
 seeding the memory with spectral artefacts derived from vibrational graph
 dynamics.
 
@@ -829,7 +829,7 @@ correspondence is an open theoretical question.
 \section{Conclusion}
 \label{sec:conclusion}
 
-The \vdt{} (\VDT) reframes the Wiring Autoencoder as a principled Bayesian
+The (VDT) reframes the Wiring Autoencoder as a principled Bayesian
 VAE in which the latent space and loading matrix are explicitly shaped by
 Laplacian spectral geometry provided by an ArrowSpace index.  The
 three-term ELBO (\cref{eq:elbo_vdt}) replaces the hard $J_{\mathrm{freq}}$

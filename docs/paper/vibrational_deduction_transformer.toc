@@ -3,52 +3,56 @@
 \contentsline {section}{\numberline {2}Background}{3}{section.2}%
 \contentsline {subsection}{\numberline {2.1}Probabilistic PCA}{3}{subsection.2.1}%
 \contentsline {subsection}{\numberline {2.2}Graph Laplacian Spectral Theory}{4}{subsection.2.2}%
-\contentsline {subsection}{\numberline {2.3}Wiring Autoencoder (WAE)}{4}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.3}Vibrational Dynamics and Spectral Graph Waves}{4}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}Wiring Autoencoder (WAE) --- Predecessor}{4}{subsection.2.4}%
 \contentsline {section}{\numberline {3}Spectral-PPCA Generative Framework}{4}{section.3}%
 \contentsline {subsection}{\numberline {3.1}Three Structural Priors}{4}{subsection.3.1}%
 \contentsline {paragraph}{Prior 1: Spectral-basis loading.}{4}{section*.2}%
-\contentsline {paragraph}{Prior 2: $\tau $-mode frequency prior.}{4}{section*.3}%
+\contentsline {paragraph}{Prior 2: $\tau $-mode frequency prior.}{5}{section*.3}%
 \contentsline {paragraph}{Prior 3 (design option): Laplacian-precision latent prior.}{5}{section*.4}%
-\contentsline {section}{\numberline {4}WAE v2: Three-Term ELBO}{5}{section.4}%
+\contentsline {section}{\numberline {4}VDT: Three-Term ELBO}{5}{section.4}%
 \contentsline {subsection}{\numberline {4.1}Variational Family}{5}{subsection.4.1}%
 \contentsline {subsection}{\numberline {4.2}ELBO Decomposition}{5}{subsection.4.2}%
-\contentsline {subsection}{\numberline {4.3}Closed-Form KL Terms}{5}{subsection.4.3}%
-\contentsline {paragraph}{Isotropic latent KL.}{5}{section*.5}%
-\contentsline {paragraph}{Spectral-basis KL.}{5}{section*.6}%
+\contentsline {subsection}{\numberline {4.3}Closed-Form KL Terms}{6}{subsection.4.3}%
+\contentsline {paragraph}{Isotropic latent KL.}{6}{section*.5}%
+\contentsline {paragraph}{Spectral-basis KL.}{6}{section*.6}%
 \contentsline {paragraph}{$\tau $-mode KL.}{6}{section*.7}%
-\contentsline {subsection}{\numberline {4.4}Comparison with WAE v1}{6}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.4}Comparison with WAE Predecessor}{6}{subsection.4.4}%
 \contentsline {section}{\numberline {5}Model Architecture}{6}{section.5}%
 \contentsline {subsection}{\numberline {5.1}Data Flow}{6}{subsection.5.1}%
-\contentsline {subsection}{\numberline {5.2}WiringEncoderV2}{6}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.2}VibrationalEncoder}{6}{subsection.5.2}%
 \contentsline {paragraph}{ModeWeightHead.}{7}{section*.10}%
+\contentsline {paragraph}{Signed density matrix.}{7}{section*.11}%
 \contentsline {subsection}{\numberline {5.3}SpectralLoadingDecoder}{7}{subsection.5.3}%
-\contentsline {paragraph}{Initialisation.}{7}{section*.11}%
-\contentsline {paragraph}{Config dispatch.}{7}{section*.12}%
-\contentsline {subsection}{\numberline {5.4}DiffusionDecoder (Unchanged)}{7}{subsection.5.4}%
-\contentsline {subsection}{\numberline {5.5}WiringAutoencoderV2}{7}{subsection.5.5}%
-\contentsline {paragraph}{Model factory.}{8}{section*.13}%
+\contentsline {paragraph}{Initialisation.}{8}{section*.12}%
+\contentsline {paragraph}{Config dispatch.}{8}{section*.13}%
+\contentsline {subsection}{\numberline {5.4}DiffusionDecoder}{8}{subsection.5.4}%
+\contentsline {subsection}{\numberline {5.5}VibrationalDeductionTransformer (Top-level Module)}{8}{subsection.5.5}%
+\contentsline {paragraph}{Model factory.}{8}{section*.14}%
 \contentsline {section}{\numberline {6}Spectral Artefact and Associative Memory}{8}{section.6}%
 \contentsline {subsection}{\numberline {6.1}Spectral Artefact}{8}{subsection.6.1}%
-\contentsline {subsection}{\numberline {6.2}SpectralAssociativeMemory}{8}{subsection.6.2}%
-\contentsline {paragraph}{Online delta-rule updates.}{8}{section*.15}%
-\contentsline {section}{\numberline {7}Two-Phase Architecture}{8}{section.7}%
-\contentsline {paragraph}{No runtime eigensolves.}{8}{section*.16}%
-\contentsline {paragraph}{ELBO Bayes factor for index selection.}{9}{section*.17}%
-\contentsline {section}{\numberline {8}Stability Analysis}{9}{section.8}%
-\contentsline {paragraph}{Sample-graph Laplacian feedback.}{9}{section*.18}%
-\contentsline {paragraph}{Spectral-basis KL conditioning.}{9}{section*.19}%
-\contentsline {paragraph}{Mode weight collapse.}{9}{section*.20}%
-\contentsline {section}{\numberline {9}Benchmark Metrics}{9}{section.9}%
+\contentsline {subsection}{\numberline {6.2}SpectralAssociativeMemory}{9}{subsection.6.2}%
+\contentsline {paragraph}{Vibrational interpretation.}{9}{section*.16}%
+\contentsline {paragraph}{Online delta-rule updates.}{9}{section*.17}%
+\contentsline {section}{\numberline {7}Two-Phase Architecture}{9}{section.7}%
+\contentsline {paragraph}{No runtime eigensolves.}{9}{section*.18}%
+\contentsline {paragraph}{ELBO Bayes factor for index selection.}{10}{section*.19}%
+\contentsline {section}{\numberline {8}Stability Analysis}{10}{section.8}%
+\contentsline {paragraph}{Sample-graph Laplacian feedback.}{10}{section*.20}%
+\contentsline {paragraph}{Spectral-basis KL conditioning.}{10}{section*.21}%
+\contentsline {paragraph}{Mode weight collapse.}{10}{section*.22}%
+\contentsline {section}{\numberline {9}Benchmark Metrics}{10}{section.9}%
 \contentsline {section}{\numberline {10}Algorithm Tracks}{10}{section.10}%
-\contentsline {section}{\numberline {11}Relationship to Prior Work}{10}{section.11}%
-\contentsline {paragraph}{Graph VAEs.}{10}{section*.22}%
-\contentsline {paragraph}{Spectral graph convolution.}{10}{section*.23}%
-\contentsline {paragraph}{Laplacian priors.}{10}{section*.24}%
-\contentsline {paragraph}{Hopfield / associative memory.}{10}{section*.25}%
-\contentsline {paragraph}{VDT backbone.}{11}{section*.26}%
+\contentsline {section}{\numberline {11}Relationship to Prior Work}{11}{section.11}%
+\contentsline {paragraph}{Graph VAEs.}{11}{section*.24}%
+\contentsline {paragraph}{Spectral graph convolution.}{11}{section*.25}%
+\contentsline {paragraph}{Laplacian priors.}{11}{section*.26}%
+\contentsline {paragraph}{Hopfield / associative memory.}{11}{section*.27}%
+\contentsline {paragraph}{Vibrational mechanics.}{11}{section*.28}%
 \contentsline {section}{\numberline {12}Discussion and Open Problems}{11}{section.12}%
-\contentsline {paragraph}{Posterior variance head for $\bm {S}$.}{11}{section*.27}%
-\contentsline {paragraph}{Laplacian-precision latent KL.}{11}{section*.28}%
-\contentsline {paragraph}{Nonlinear value function.}{11}{section*.29}%
-\contentsline {paragraph}{Iterative eigensolver.}{11}{section*.30}%
-\contentsline {section}{\numberline {13}Conclusion}{11}{section.13}%
+\contentsline {paragraph}{Posterior variance head for $\bm {S}$.}{11}{section*.29}%
+\contentsline {paragraph}{Laplacian-precision latent KL.}{11}{section*.30}%
+\contentsline {paragraph}{Nonlinear value function.}{11}{section*.31}%
+\contentsline {paragraph}{Iterative eigensolver.}{12}{section*.32}%
+\contentsline {paragraph}{Complex-number-free quantum analogy.}{12}{section*.33}%
+\contentsline {section}{\numberline {13}Conclusion}{12}{section.13}%
