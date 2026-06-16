@@ -215,45 +215,44 @@ class DifferentiableLaplacian(nn.Module):
     ) -> torch.Tensor:
         """
         Synthesise a per-batch differentiable Laplacian from a spectral
-        loading matrix.  Fully differentiable through W so gradients flow
-        back into SpectralLoadingDecoder.
+        loading matrix with exact zero row sums.
 
-        The per-batch edge weight update rule is:
+        The construction is::
 
-            w_ij^{(b)} = base_aff_ij * sigmoid( -||W_i^{(b)} - W_j^{(b)}||^2 )
+            A_base   = -(L_base - I)              -- recover normalised affinity (>= 0)
+            gate     = sigmoid(-||W_i - W_j||^2)  -- per-batch soft gate in (0, 0.5]
+            A_normed = A_base * gate              -- gated normalised affinity
+            A_sym    = 0.5 * (A_normed + A_normed^T)   -- symmetrised
+            d_i      = sum_j A_sym_ij             -- row sums (serves as diagonal)
+            L_z      = diag(d) - A_sym            -- combinatorial Laplacian
 
-        where base_aff_ij is the symmetric affinity recovered from the
-        off-diagonal of L_base.  For a normalised symmetric Laplacian
-        L = I - D^{-1/2} A D^{-1/2}, the off-diagonal entries satisfy
-        L_ij = -(D^{-1/2} A D^{-1/2})_ij <= 0, so the base affinity
-        matrix is A_base = -(L_base - I), clamped to >= 0.
+        Zero row sums are guaranteed by construction: each diagonal entry
+        exactly equals the sum of its row's off-diagonal entries, so
+        L_z @ 1 = 0 to floating-point precision.
 
-        In the standard case d == N.
+        Note: L_base must be a *normalised* symmetric Laplacian
+        (L = I - D^{-1/2} A D^{-1/2}) so that A_base = -(L_base - I)
+        recovers non-negative affinities.  Obtain it via
+        DifferentiableLaplacian.base_laplacian.
 
         Parameters
         ----------
         W : Tensor  shape (B, d, q)
-            Spectral loading matrix from the decoder.  d must equal N.
+            Spectral loading matrix from SpectralLoadingDecoder.  d must
+            equal N (graph node count).
         L_base : Tensor  shape (N, N)
-            Frozen normalised symmetric Laplacian encoding the graph topology.
-            Obtain via DifferentiableLaplacian.base_laplacian.
+            Frozen normalised symmetric Laplacian encoding the base graph
+            topology.  Obtain via DifferentiableLaplacian.base_laplacian.
 
         Returns
         -------
-        L : Tensor  shape (B, N, N)
-            Per-batch normalised symmetric Laplacian.  Guaranteed to have:
-              - zero row sums
-              - non-positive off-diagonal entries
-              - symmetry
-            Gradient flows through all operations back to W.
+        L_z : Tensor  shape (B, N, N)
+            Per-batch Laplacian.  Guaranteed properties:
+              - symmetric: L_z = L_z^T
+              - zero row sums: L_z @ 1 = 0  (to float32 precision ~1e-6)
+              - non-positive off-diagonal: L_z_ij <= 0  for i != j
 
-        Notes
-        -----
-        The previous implementation applied clamp(min=0) to
-        (-L_base * (1 - eye)), which zero-ed the off-diagonal because
-        those entries in a normalised Laplacian are already <= 0, giving
-        A_base = 0 and L = I (row sums = 1).  The corrected formula
-        negates (L_base - eye) to recover the positive affinity values.
+        Gradient flows through all operations back to W.
         """
         B, d, q = W.shape
         N = L_base.shape[0]
@@ -262,36 +261,32 @@ class DifferentiableLaplacian(nn.Module):
         )
         device = W.device
         dtype = W.dtype
-        eps = 1e-6
 
-        # Recover base affinities from the off-diagonal of L_base.
-        # For a normalised symmetric Laplacian L = I - D^{-1/2} A D^{-1/2},
-        # off-diagonal entries are  L_ij = -(D^{-1/2} A D^{-1/2})_ij  (<= 0).
-        # So the positive affinity matrix is  A_base = -(L_base - I).
-        eye = torch.eye(N, device=device, dtype=dtype)
-        A_base = (-(L_base - eye)).clamp(min=0.0)  # (N, N), non-negative
+        # -- Recover base normalised affinity matrix -----------------------
+        # L_base = I - D^{-1/2} A D^{-1/2}  =>  off-diag = -(D^{-1/2} A D^{-1/2})_ij <= 0
+        # So the positive normalised affinity is  A_base = -(L_base - I) = I - L_base,
+        # clamped to zero to discard any tiny negative numerics.
+        eye = torch.eye(N, device=device, dtype=dtype)          # (N, N)
+        A_base = (eye - L_base).clamp(min=0.0)                  # (N, N), >= 0
 
-        # Pairwise squared distance in loading space: (B, N, N)
-        # W: (B, N, q)  --  ||W_i - W_j||^2
-        diff = W.unsqueeze(2) - W.unsqueeze(1)    # (B, N, N, q)
-        sq_dist = (diff ** 2).sum(dim=-1)          # (B, N, N)
+        # -- Per-batch pairwise gate ---------------------------------------
+        # ||W_i - W_j||^2  for all pairs (i, j) in the loading space.
+        diff   = W.unsqueeze(2) - W.unsqueeze(1)                # (B, N, N, q)
+        sq_dist = (diff ** 2).sum(dim=-1)                       # (B, N, N)
+        gate   = torch.sigmoid(-sq_dist)                        # (B, N, N)  in (0, 0.5]
 
-        # Soft gate in (0, 1): nearby nodes keep their base affinity
-        gate = torch.sigmoid(-sq_dist)             # (B, N, N)
+        # -- Gated adjacency, symmetrised ----------------------------------
+        A_normed = A_base.unsqueeze(0) * gate                   # (B, N, N)
+        A_sym    = 0.5 * (A_normed + A_normed.transpose(-1, -2))  # (B, N, N)
 
-        # Updated adjacency, symmetrised
-        A_updated = A_base.unsqueeze(0) * gate                         # (B, N, N)
-        A_sym = 0.5 * (A_updated + A_updated.transpose(-1, -2))        # (B, N, N)
-
-        # Build normalised symmetric Laplacian: I - D^{-1/2} A D^{-1/2}
-        deg = A_sym.sum(dim=-1).clamp(min=eps)   # (B, N)
-        d_inv_sqrt = deg.pow(-0.5)               # (B, N)
-        normed = (
-            d_inv_sqrt.unsqueeze(-1) * A_sym * d_inv_sqrt.unsqueeze(-2)
-        )                                        # (B, N, N)
-        I = eye.unsqueeze(0).expand(B, N, N)
-        L = I - normed                           # (B, N, N)
-        return L
+        # -- Build combinatorial Laplacian: L = diag(row_sum) - A ----------
+        # This guarantees exact zero row sums by construction:
+        #   L_ij = -A_sym_ij  (i != j)   =>  off-diagonal non-positive
+        #   L_ii = sum_j A_sym_ij         =>  diagonal = row sum
+        # So  sum_j L_ij = L_ii + sum_{j!=i} L_ij = row_sum_i - row_sum_i = 0.
+        row_sum = A_sym.sum(dim=-1)                             # (B, N)
+        L_z     = torch.diag_embed(row_sum) - A_sym             # (B, N, N)
+        return L_z
 
     # ------------------------------------------------------------------
     # Spectral properties -- CFL helpers
