@@ -115,8 +115,8 @@ class WiringAutoencoder(nn.Module):
         Diffusion time scale for kl_tau (mode frequency KL).  Default 0.5.
     laplacian : DifferentiableLaplacian
         Base Laplacian module shared with SpectralLoadingDecoder.
-        Its dense matrix (laplacian.L) is passed as L_base to
-        SpectralLoadingDecoder.forward() at each step.
+        Its dense base Laplacian (laplacian.base_laplacian) is passed as
+        L_base to SpectralLoadingDecoder.forward() at each step.
     n_layers : int
         Number of VDT blocks inside WiringEncoder.  Default 4.
     n_heads : int
@@ -167,7 +167,7 @@ class WiringAutoencoder(nn.Module):
             dropout=dropout,
         )
         # SpectralLoadingDecoder takes (q, d) at init; L_base is supplied
-        # at forward() time via self._laplacian.L.
+        # at forward() time via self._laplacian.base_laplacian.
         self.wiring_decoder = SpectralLoadingDecoder(
             q=q,
             d=n_nodes,
@@ -253,8 +253,10 @@ class WiringAutoencoder(nn.Module):
 
         # --- Spectral decode (wiring) -------------------------------------
         # SpectralLoadingDecoder.forward() signature: (z, U_q, L_base)
-        # L_base is the dense base Laplacian held by self._laplacian.
-        W, omega, S, L_z = self.wiring_decoder(z, U_q, self._laplacian.L)
+        # L_base is the dense base Laplacian from self._laplacian.
+        W, omega, S, L_z = self.wiring_decoder(
+            z, U_q, self._laplacian.base_laplacian
+        )
 
         # In v2 the caller passes x as both query and per-node embedding
         # table for the diffusion step.
@@ -344,7 +346,7 @@ class WiringAutoencoder(nn.Module):
         z_prior = torch.zeros(1, self.q, device=device)
 
         W_hat, omega_raw, S, _L_z = self.wiring_decoder(
-            z_prior, U_q, self._laplacian.L
+            z_prior, U_q, self._laplacian.base_laplacian
         )
         # W_hat : (1, feat_dim, q)
         # omega_raw : (1, q)
@@ -399,7 +401,9 @@ class WiringAutoencoder(nn.Module):
         """
         device = next(self.parameters()).device
         z = torch.randn(n_samples, self.q, device=device)
-        W, omega, S, L_z = self.wiring_decoder(z, U_q, self._laplacian.L)
+        W, omega, S, L_z = self.wiring_decoder(
+            z, U_q, self._laplacian.base_laplacian
+        )
         return self.diffusion_decoder(L_z, E, node_idx=node_idx)
 
 
