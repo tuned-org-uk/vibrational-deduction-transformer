@@ -14,12 +14,16 @@ Anderson 1972), not the modern (softmax) Hopfield network of Ramsauer et al.
 
   Linear associative memory  (this module)
   -----------------------------------------
-  Construction:  S = sum_k  v_k (x) k_k^T       # outer product sum
-  Retrieval:     output = query @ S              # one matrix multiply
-  Guarantee:     for orthonormal keys K and query q = k_i,
-                 output_i = v_i + interference   # interference ~ O(sqrt(q)/d)
-  Best for:      few, approximately orthonormal spectral keys;
-                 exact linear superposition; fast online delta-rule updates.
+  Construction:  S = sum_k  outer(v_k, k_k)     # S[d,e] = sum_k v_k[d]*k_k[e]
+                   = V^T K  in matrix notation   # shape (d_model, d_model)
+  Retrieval:     output = query @ S^T            # (B,d) @ (d,d) = (B,d)
+  Derivation:    query @ S^T
+                   = q @ (V^T K)^T
+                   = q @ K^T V
+                   = V (K q)                     # K q selects the matching row
+                 For orthonormal rows K and query q = k_i:
+                   = V e_i = v_i  (exact recovery)
+  Interference:  O(sqrt(q) / sqrt(d)) -- negligible for d=64, q=4.
 
   Modern (softmax) Hopfield  (not this module)
   ---------------------------------------------
@@ -48,20 +52,21 @@ PHASE 2 -- ONLINE (Spectral Memory Transformer)
 
 Memory matrix construction
 --------------------------
-The outer-product memory matrix is::
+The outer-product memory matrix is built as::
 
-    S_I = sum_{k=1}^{q}  E[omega_k] * v_k * w_hat_k^T
+    S_I = sum_{k=1}^{q}  E[omega_k] * outer(v_k, w_hat_k)
+        = V^T K   in matrix notation
 
 where w_hat_k are the spectral loading directions (keys) and v_k = d_theta(w_hat_k)
 are the decoder responses (values).  Retrieval is::
 
-    output = query @ S_I
+    output = query @ S_I^T
 
-For a query equal to key k_i, and orthonormal keys::
+For a query equal to key k_i and orthonormal rows K::
 
     output = v_i + sum_{j != i} (k_i . k_j) * v_j
 
-The interference sum vanishes when keys are exactly orthonormal.  With
+The interference sum vanishes for exactly orthonormal keys.  With
 approximately orthonormal spectral keys (d=64, q=4) the cosine similarity
 between output and v_i exceeds 0.95.
 
@@ -83,30 +88,30 @@ class SpectralAssociativeMemory(nn.Module):
     artefact A(I).
 
     The memory matrix S_memory is stored as a non-learnable buffer of shape
-    (d_model, d_model).  It encodes key-value associations as outer products::
+    (d_model, d_model) with layout S[d,e] = sum_k v_k[d] * key_k[e],
+    i.e.  S = V^T K in matrix notation (rows index value space, cols index
+    key space).  Retrieval uses the transpose::
 
-        S_memory = sum_k  v_k (x) k_k^T     # construction
-        output   = query  @  S_memory        # retrieval
+        output = query @ S_memory^T       # (B,d) @ (d,d) = (B,d)
 
-    For orthonormal keys the retrieval rule recovers the stored value v_i
-    exactly when queried with k_i; cross-pattern interference is
-    O(sqrt(q) / d) and drops below 5% for d=64, q=4.
+    For orthonormal keys the i-th query k_i recovers v_i exactly;
+    cross-pattern interference is O(sqrt(q) / sqrt(d)) and drops below
+    5% for d=64, q=4.
 
     Online delta-rule updates are supported::
 
-        S_memory  +=  v_new (x) k_new^T
+        S_memory += outer(v_new, k_new)   # maintains the V^T K convention
 
     Because the stored spectral keys are approximately orthonormal, a single
     delta update degrades prior-pattern cosine similarity by at most
-    |k_new . k_i| * ||v_new|| / d, which is < 0.20 for random unit-norm
-    keys at d=64.
+    |k_new . k_i| * ||v_new|| / sqrt(d_model), which is < 0.20 for random
+    unit-norm keys at d_model=64.
 
     Parameters
     ----------
     S_memory : Tensor
         Pre-built memory matrix.  Shape (d_model, d_model).
-        Constructed as sum_k outer(v_k, k_k) -- rows index the value space,
-        columns index the key space.
+        Must be constructed as sum_k outer(v_k, k_k)  (V^T K convention).
     d_model : int
         Dimensionality of the key/value space.  Must equal S_memory.shape[0].
 
@@ -139,21 +144,25 @@ class SpectralAssociativeMemory(nn.Module):
 
         Computes::
 
-            output = query @ S_memory          # (B, d_model)
+            output = query @ S_memory^T        # (B, d_model)
 
-        For a memory built as S = sum_k outer(v_k, k_k) and a query equal
-        to key k_i (unit norm, orthonormal to all other keys)::
+        S_memory is stored in the V^T K convention -- rows index value space,
+        columns index key space.  The transpose aligns the key-space columns
+        with the query so that a query equal to key k_i selects the
+        corresponding value v_i::
 
-            output_i = v_i + sum_{j != i} (k_i . k_j) v_j
+            output = k_i @ (V^T K)^T
+                   = k_i @ K^T V
+                   = V (K k_i)
+                   = V e_i   (K has orthonormal rows)
+                   = v_i     (exact recovery for orthonormal keys)
 
-        The interference terms vanish for exactly orthonormal keys and are
-        small when keys are approximately orthonormal (spectral loading
-        directions inherited from U_q).
+        Interference from the q-1 other patterns has magnitude
+        O(sqrt(q) / sqrt(d)) and is < 0.05 for d=64, q=4.
 
-        Note: this is NOT the modern softmax Hopfield retrieval rule
-        (Ramsauer et al. 2020).  Softmax attention over the columns of
-        S_memory would lose the linear superposition property and degrade
-        retrieval cosine similarity to near-random values.
+        Note: this is NOT the modern softmax Hopfield retrieval rule.
+        Using softmax(query @ S / sqrt(d)) @ S^T destroys the linear
+        superposition property and gives near-random cosine similarities.
 
         Parameters
         ----------
@@ -169,10 +178,8 @@ class SpectralAssociativeMemory(nn.Module):
             raise ValueError(
                 f"Expected query shape (B, {self.d_model}), got {tuple(query.shape)}"
             )
-        # Linear retrieval: output = query @ S_memory
-        # S_memory shape: (d_model, d_model) -- rows = value space, cols = key space
-        # query @ S_memory: (B, d_model) @ (d_model, d_model) = (B, d_model)
-        return query @ self.S_memory
+        # S_memory is V^T K; retrieval needs query @ S^T = query @ K^T V
+        return query @ self.S_memory.T
 
     # ------------------------------------------------------------------
     # delta_update -- online delta-rule write
@@ -184,16 +191,17 @@ class SpectralAssociativeMemory(nn.Module):
 
         Updates S_memory in-place::
 
-            S_memory += outer(value, key)      # value (x) key^T
+            S_memory += outer(value, key)      # maintains V^T K convention
 
         Applied inside torch.no_grad() so the buffer update is invisible to
-        autograd.  Subsequent forward() calls pick up the new association.
+        autograd.  Subsequent forward() calls use query @ S^T which picks up
+        the new outer(value, key)^T = outer(key, value) contribution,
+        correctly mapping the new key to the new value.
 
         Interference bound: for a unit-norm new key orthogonal to all stored
         keys, the prior-pattern cosine similarity is unchanged.  For a
-        random unit-norm new key (worst case), the degradation per pattern
-        is bounded by 1/sqrt(d_model), giving > 0.80 cosine retention for
-        d_model >= 64.
+        random unit-norm new key the degradation per pattern is bounded by
+        1/sqrt(d_model), giving > 0.80 cosine retention for d_model >= 64.
 
         Parameters
         ----------
@@ -212,6 +220,10 @@ class SpectralAssociativeMemory(nn.Module):
         if value.shape != (self.d_model,):
             raise ValueError(f"value must have shape ({self.d_model},), got {tuple(value.shape)}")
         with torch.no_grad():
+            # outer(value, key) adds a new v (x) k^T slice to S = V^T K.
+            # At retrieval time: query @ (S + v (x) k^T)^T
+            #   = query @ S^T + (query . k) * v
+            # so querying with the new key k returns v (plus prior patterns).
             self.S_memory += torch.outer(value, key)
 
     # ------------------------------------------------------------------
