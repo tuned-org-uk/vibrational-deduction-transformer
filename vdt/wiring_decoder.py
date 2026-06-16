@@ -4,11 +4,11 @@ Wiring Decoder  --  z  ->  edge weight adjustments  ->  Laplacian L(z).
 Two decoder classes are provided:
 
   WiringDecoder          v1, mixture-of-experts over edge templates (unchanged).
-  SpectralLoadingDecoder v2, eigenbasis factorisation W = U_q diag(omega) S.
+  SpectralLoadingDecoder , eigenbasis factorisation W = U_q diag(omega) S.
 
 For the v1 architecture see the class docstring of WiringDecoder below.
 
-v2 architecture (SpectralLoadingDecoder)
+ architecture (SpectralLoadingDecoder)
 -----------------------------------------
 Maps z (B, q) to a loading matrix W (B, d, q) in the Laplacian eigenbasis,
 then synthesises L(z) (B, N, N) via
@@ -25,10 +25,10 @@ through L(z) -> W -> S_net and omega_net -> z.
 
 Config dispatch
 ---------------
-    decoder_type: spectral           -> SpectralLoadingDecoder  (v2 default)
+    decoder_type: spectral           -> SpectralLoadingDecoder  ( default)
     decoder_type: mixture_of_experts -> WiringDecoder           (v1 fallback)
 
-Ref: docs/v2/00-architecture.md
+Ref: docs//00-architecture.md
 """
 from __future__ import annotations
 import torch
@@ -132,12 +132,12 @@ class WiringDecoder(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# SpectralLoadingDecoder  (v2)
+# SpectralLoadingDecoder  ()
 # ---------------------------------------------------------------------------
 
 class SpectralLoadingDecoder(nn.Module):
     """
-    v2 decoder: maps z (B, q) to a spectral loading matrix W (B, d, q)
+     decoder: maps z (B, q) to a spectral loading matrix W (B, d, q)
     and then to a differentiable Laplacian L(z) (B, N, N).
 
     The loading matrix is factorised in the Laplacian eigenbasis::

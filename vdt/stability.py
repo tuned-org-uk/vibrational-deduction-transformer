@@ -2,7 +2,7 @@
 Stability diagnostics for the Wiring Autoencoder.
 
 Provides four public functions covering the full diagnostic hierarchy
-described in docs/v2/04-stability.md.
+described in docs//04-stability.md.
 
 Functions
 ---------
@@ -15,11 +15,11 @@ log_preconditioner_stability
     convergence rate estimate.
 
 pre_training_checks
-    6-level checklist that must pass before any v2 training run.
+    6-level checklist that must pass before any  training run.
     Raises RuntimeError on a disconnected graph.
 
 spectral_kl_health_check
-    v2-only: ELBO component sanity checks including mode-collapse
+    -only: ELBO component sanity checks including mode-collapse
     and KL explosion detection.
 
 Integration points
@@ -255,7 +255,7 @@ def log_preconditioner_stability(
 # pre_training_checks
 # ---------------------------------------------------------------------------
 
-# Six-level stability hierarchy from docs/v2/04-stability.md section 7.
+# Six-level stability hierarchy from docs//04-stability.md section 7.
 _CHECKS_ORDER = [
     "graph_connected",
     "cfl_satisfied",
@@ -274,7 +274,7 @@ def pre_training_checks(
     kl_sample: Optional[float] = None,
 ) -> List[str]:
     """
-    Six-level pre-training checklist from docs/v2/04-stability.md section 7.
+    Six-level pre-training checklist from docs//04-stability.md section 7.
 
     Checks are run in order; on a hard failure (level 1 -- disconnected graph)
     a RuntimeError is raised immediately so the training loop cannot start
@@ -334,7 +334,7 @@ def pre_training_checks(
     if cond > 100.0:
         warnings_out.append(
             f"MassMatrix conditioning ratio {cond:.1f} > 100. "
-            "Laplacian may be poorly conditioned (docs/v2/04-stability.md S7)."
+            "Laplacian may be poorly conditioned (docs//04-stability.md S7)."
         )
 
     # Level 4 -- damping positivity
@@ -364,7 +364,7 @@ def pre_training_checks(
 
 
 # ---------------------------------------------------------------------------
-# spectral_kl_health_check  (v2)
+# spectral_kl_health_check  ()
 # ---------------------------------------------------------------------------
 
 def spectral_kl_health_check(
@@ -375,7 +375,7 @@ def spectral_kl_health_check(
     q: int,
 ) -> dict:
     """
-    v2 ELBO health check -- run after each WiringAutoencoder.forward().
+     ELBO health check -- run after each WiringAutoencoder.forward().
 
     Checks all three KL components for sign, finiteness, and explosion.
     Detects mode collapse (< 10% modes active) and mode explosion (all

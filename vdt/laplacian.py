@@ -13,7 +13,7 @@ API
     row = lap(edge_delta,
               node_idx=idx)        # (B, N)   -- only row i of L, no full matrix
 
-    # v2 class-method factory (used by SpectralLoadingDecoder, issue #26)
+    #  class-method factory (used by SpectralLoadingDecoder, issue #26)
     L_batch = DifferentiableLaplacian.from_spectral_loading(W, L_base)
 
     # Retrieve the dense (N, N) base Laplacian for passing to
@@ -51,7 +51,7 @@ class MassMatrix:
     smoothing exponent, and eps guards against division by zero.
 
     A conditioning warning is emitted when max(M_ii)/min(M_ii) > 100
-    (per docs/v2/04-stability.md section 7).
+    (per docs//04-stability.md section 7).
 
     Parameters
     ----------
@@ -93,7 +93,7 @@ class MassMatrix:
         if ratio > 100.0:
             warnings.warn(
                 f"MassMatrix conditioning ratio {ratio:.1f} > 100. "
-                "The Laplacian may be poorly conditioned (see docs/v2/04-stability.md S7).",
+                "The Laplacian may be poorly conditioned (see docs//04-stability.md S7).",
                 RuntimeWarning,
                 stacklevel=2,
             )
@@ -205,7 +205,7 @@ class DifferentiableLaplacian(nn.Module):
         return L
 
     # ------------------------------------------------------------------
-    # v2 class-method factory -- used by SpectralLoadingDecoder (#26)
+    #  class-method factory -- used by SpectralLoadingDecoder (#26)
     # ------------------------------------------------------------------
     @classmethod
     def from_spectral_loading(

@@ -319,7 +319,7 @@ class TestLinearProbeAcc:
 # evaluate  --  AC-metrics-2: returns all expected keys
 # ---------------------------------------------------------------------------
 
-class TestEvaluateV2:
+class TestEvaluate:
     def test_returns_all_expected_keys(self):
         """
         evaluate must return a dict with at least these keys:

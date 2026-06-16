@@ -3,12 +3,12 @@ Amortised encoder  q_phi(z | x).
 
 Two encoder classes are provided:
 
-  WiringEncoder -- v2 VDT encoder using VibrationalStateBlock recurrence
+  WiringEncoder --  VDT encoder using VibrationalStateBlock recurrence
                      and variational Gamma parameters (ModeWeightHead).
 
 Both share the same reparameterise / kl_loss utilities.
 
-Typical usage (v2)
+Typical usage ()
 ------------------
     encoder = WiringEncoder(
         input_dim=512, latent_dim=64,
@@ -67,7 +67,7 @@ def kl_isotropic(
 
 
 # ---------------------------------------------------------------------------
-# ModeWeightHead  (v2 only)
+# ModeWeightHead  ( only)
 # ---------------------------------------------------------------------------
 
 class ModeWeightHead(nn.Module):
@@ -110,12 +110,12 @@ class ModeWeightHead(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# WiringEncoder  (v2 VDT encoder)
+# WiringEncoder  ( VDT encoder)
 # ---------------------------------------------------------------------------
 
 class WiringEncoder(nn.Module):
     """
-    v2 encoder: VDT recurrence + ModeWeightHead.
+     encoder: VDT recurrence + ModeWeightHead.
 
     The encoder projects input x to an (N, d) node-feature matrix,
     runs K VDT blocks, and reads out:

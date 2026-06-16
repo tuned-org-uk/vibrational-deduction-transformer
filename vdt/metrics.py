@@ -1,7 +1,7 @@
 """
 vdt/metrics.py  --  Benchmark metrics for WiringAutoencoder (issue #32)
 
-All 7 active v2 benchmark metrics are implemented as pure functions.
+All 7 active  benchmark metrics are implemented as pure functions.
 Metrics that were removed per merged PR #35 (kl_lap) are not included.
 
 Metric summary
@@ -29,8 +29,8 @@ Design notes
 * linear_probe_acc requires only mu.detach() -- no model gradients.
 * spectral_entropy delegates the eigensystem to DifferentiableLaplacian.
 
-Ref: docs/v2/00-architecture.md -- Benchmark Metrics (v2 additions)
-Ref: docs/v2/04-stability.md
+Ref: docs//00-architecture.md -- Benchmark Metrics ( additions)
+Ref: docs//04-stability.md
 Ref: issue #32
 """
 from __future__ import annotations
@@ -357,7 +357,7 @@ def evaluate(
     device: Optional[torch.device] = None,
 ) -> Dict[str, float]:
     """
-    Compute all active v2 benchmark metrics on a full DataLoader pass.
+    Compute all active  benchmark metrics on a full DataLoader pass.
 
     Each batch is passed through model.forward(x, U_q, eigvals_q) and the
     9-key output dict is used to accumulate metric values.  No metric

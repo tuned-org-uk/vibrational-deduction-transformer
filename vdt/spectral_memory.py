@@ -8,7 +8,7 @@ transformer's feed-forward or cross-attention value matrices.
 
 Two-phase architecture
 ----------------------
-PHASE 1 -- OFFLINE (VDT v2 training)
+PHASE 1 -- OFFLINE (VDT  training)
     ArrowSpace index I  ->  L(I), U_q, Lambda_q
     WiringAutoencoder.train()  ->  ELBO maximisation
     extract_spectral_artefact()  ->  A(I)  = {S_memory, omega_hat, W_hat}
@@ -37,7 +37,7 @@ The matrix S_I is stored as a non-persistent nn.Buffer so the module is
 serialised by torch.save / torch.load without being treated as a learnable
 parameter.
 
-Ref: docs/v2/00-architecture.md -- Spectral Artefact and Associative Memory
+Ref: docs//00-architecture.md -- Spectral Artefact and Associative Memory
 Ref: issue #28
 """
 from __future__ import annotations
@@ -51,7 +51,7 @@ from typing import Dict
 
 class SpectralAssociativeMemory(nn.Module):
     """
-    Pre-built Hopfield associative memory seeded from the VDT v2 spectral
+    Pre-built Hopfield associative memory seeded from the VDT  spectral
     artefact A(I).
 
     The memory matrix S_memory is stored as a non-learnable buffer of shape
@@ -185,7 +185,7 @@ class SpectralAssociativeMemory(nn.Module):
         Parameters
         ----------
         vdt : WiringAutoencoder
-            A trained VDT v2 instance.
+            A trained VDT  instance.
         U_q : Tensor
             Leading q eigenvectors of the frozen index Laplacian L(I).
             Shape (N, q).

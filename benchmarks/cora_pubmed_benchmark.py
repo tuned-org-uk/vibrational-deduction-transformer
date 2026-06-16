@@ -3,10 +3,10 @@ benchmarks/cora_pubmed_benchmark.py -- resolves issue #9
 ==========================================================
 
 Multi-seed benchmark of WiringAutoencoder on the Cora and PubMed citation
-graph datasets, reporting all 7 active v2 metrics and an ELBO Bayes-factor
+graph datasets, reporting all 7 active  metrics and an ELBO Bayes-factor
 leaderboard comparing the two datasets as competing ArrowSpace indices.
 
-Metrics reported (all 7 v2 metrics)
+Metrics reported (all 7  metrics)
 ------------------------------------
   kl_S              KL( q(S) || p(S|I) )        spectral basis posterior
   kl_tau            KL( q(omega) || Exp(tau*L) ) mode-weight posterior
@@ -43,7 +43,7 @@ Design notes
 
 Reference
 ---------
-Issue #9 -- Multi-seed benchmark results on Cora/PubMed, all 7 v2 metrics,
+Issue #9 -- Multi-seed benchmark results on Cora/PubMed, all 7  metrics,
              ELBO Bayes factor comparison.
 """
 from __future__ import annotations
@@ -365,7 +365,7 @@ def train_one_seed(
 ) -> Tuple[BenchmarkModel, Dict[str, float]]:
     """
     Train BenchmarkModel on one dataset / seed pair and return the model and
-    a dict of all 7 v2 metric values on the full dataset.
+    a dict of all 7  metric values on the full dataset.
 
     Parameters
     ----------
@@ -432,7 +432,7 @@ def train_one_seed(
             optimiser.step()
         scheduler.step()
 
-    # --- Evaluate all 7 v2 metrics ---
+    # --- Evaluate all 7  metrics ---
     eval_loader = _make_dataloader(x, batch_size=batch_size, shuffle=False)
     base_metrics = evaluate(
         model=model,
@@ -606,7 +606,7 @@ def save_figures(
         ax.set_xticklabels([d[:4] for d in datasets], fontsize=8)
         ax.grid(axis="y", alpha=0.3)
     axes[0].set_ylabel("Value", fontsize=9)
-    fig.suptitle("v2 Benchmark Metrics: Cora vs PubMed (mean +/- std over seeds)",
+    fig.suptitle(" Benchmark Metrics: Cora vs PubMed (mean +/- std over seeds)",
                  fontsize=11)
     plt.tight_layout()
     plt.savefig(figs / "metric_bars.png", dpi=150, bbox_inches="tight")
@@ -680,7 +680,7 @@ def export_csvs(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Multi-seed v2 benchmark on Cora / PubMed (issue #9)"
+        description="Multi-seed  benchmark on Cora / PubMed (issue #9)"
     )
     parser.add_argument(
         "--datasets", nargs="+", default=["cora", "pubmed"],

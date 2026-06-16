@@ -1,11 +1,11 @@
 """
-Wiring Autoencoder  --  v2 only.
+Wiring Autoencoder  --   only.
 
 This module provides the single top-level model class::
 
-    WiringAutoencoder   v2, three-term ELBO (recon + kl_z + kl_S + kl_tau).
+    WiringAutoencoder   , three-term ELBO (recon + kl_z + kl_S + kl_tau).
 
-v2 architecture (three-term ELBO, issue #27)
+ architecture (three-term ELBO, issue #27)
 --------------------------------------------
 Assembles WiringEncoder, SpectralLoadingDecoder, and DiffusionDecoder
 under the three-term variational objective::
@@ -30,10 +30,10 @@ v1 (WiringAutoencoder) has been removed.  Only version 2 is supported.
 
 Config dispatch
 ---------------
-    model.version: 2  -> WiringAutoencoder   (v2)
+    model.version: 2  -> WiringAutoencoder   ()
 
-Ref: docs/v2/00-architecture.md
-Ref: docs/v2/05-Code.md
+Ref: docs//00-architecture.md
+Ref: docs//05-Code.md
 """
 from __future__ import annotations
 import torch
@@ -46,7 +46,7 @@ from .laplacian import DifferentiableLaplacian
 
 
 # ---------------------------------------------------------------------------
-# v2-specific imports  (SpectralLoadingDecoder + KL helpers)
+# -specific imports  (SpectralLoadingDecoder + KL helpers)
 # ---------------------------------------------------------------------------
 
 from .wiring_decoder import SpectralLoadingDecoder
@@ -54,12 +54,12 @@ from .spectral import spectral_basis_kl, tau_mode_kl
 
 
 # ---------------------------------------------------------------------------
-# WiringAutoencoder  (v2 -- three-term ELBO, issue #27)
+# WiringAutoencoder  ( -- three-term ELBO, issue #27)
 # ---------------------------------------------------------------------------
 
 class WiringAutoencoder(nn.Module):
     """
-    Wiring Autoencoder v2 -- three-term ELBO with spectral mode priors.
+    Wiring Autoencoder  -- three-term ELBO with spectral mode priors.
 
     Assembles WiringEncoder, SpectralLoadingDecoder, and DiffusionDecoder
     under the three-term variational objective::
@@ -151,7 +151,7 @@ class WiringAutoencoder(nn.Module):
             n_nodes = laplacian.n_nodes
         self._n_nodes = n_nodes
 
-        # WiringEncoder v2 signature:
+        # WiringEncoder  signature:
         #   input_dim, latent_dim, n_nodes, feat_dim, n_layers, ...
         # hidden_dim plays the role of feat_dim (per-node feature channels).
         # q spectral modes are matched by setting latent_dim=q inside the
@@ -258,7 +258,7 @@ class WiringAutoencoder(nn.Module):
             z, U_q, self._laplacian.base_laplacian
         )
 
-        # In v2 the caller passes x as both query and per-node embedding
+        # In  the caller passes x as both query and per-node embedding
         # table for the diffusion step.
         E = x  # (B, D)
 
@@ -408,7 +408,7 @@ class WiringAutoencoder(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# from_config  --  v2-only factory
+# from_config  --  -only factory
 # ---------------------------------------------------------------------------
 
 def from_config(
@@ -421,7 +421,7 @@ def from_config(
     Only version 2 is supported.  Passing any other version raises
     ValueError.
 
-    v2 YAML config example::
+     YAML config example::
 
         model:
           version: 2

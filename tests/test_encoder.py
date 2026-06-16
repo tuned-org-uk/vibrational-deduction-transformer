@@ -6,7 +6,7 @@ Acceptance criteria from issue #25
 AC1  WiringEncoder.forward returns (z, mu, log_var, log_a, log_b)
      all (B, latent_dim) on (B=4, D=32, q=8) input.
 AC2  ModeWeightHead outputs finite log_a, log_b on random input.
-AC3  kl_isotropic (the only kl_z path in v2) is non-negative.
+AC3  kl_isotropic (the only kl_z path in ) is non-negative.
 AC4  kl_z scalar is differentiable through mu (gradcheck).
 AC5  WiringEncoder still passes its 3-tuple contract.
 

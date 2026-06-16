@@ -40,7 +40,7 @@ Optionally include:
     eigvals : (N_nodes,) float32  pre-computed eigenvalues of L_f
     eigvecs : (N_nodes, N_nodes)  pre-computed eigenvectors of L_f
 
-Ref: docs/v2/03-branching.md -- Option 1
+Ref: docs//03-branching.md -- Option 1
 Depends on: vdt/vib_autoencoder.py (#20), vdt/wiring_decoder.py
 """
 from __future__ import annotations
@@ -252,20 +252,20 @@ def check_v1_regression(
     tol: float = 0.02,
 ) -> None:
     """
-    Assert that v2 (spectral_penalty='hard') reconstruction MSE is within
+    Assert that  (spectral_penalty='hard') reconstruction MSE is within
     ``tol`` (default 2%) of the v1 reference MSE.
 
     The relative gap is computed as::
 
         rel_gap = (v2_recon - v1_ref_mse) / v1_ref_mse
 
-    A positive gap means v2 is worse than v1.  The check passes if
+    A positive gap means  is worse than v1.  The check passes if
     rel_gap <= tol.
 
     Parameters
     ----------
     v2_recon : float
-        Best validation reconstruction MSE from the v2 training run.
+        Best validation reconstruction MSE from the  training run.
     v1_ref_mse : float
         Reference MSE from a v1 VibrationalAutoencoder trained on the
         same data (supplied by the caller via --v1_ref_mse).
@@ -283,7 +283,7 @@ def check_v1_regression(
         f"v1_ref={v1_ref_mse:.6f}  rel_gap={rel_gap:+.4f}  tol={tol:.4f}"
     )
     assert rel_gap <= tol, (
-        f"Option 1 regression guard FAILED: v2 MSE {v2_recon:.6f} exceeds "
+        f"Option 1 regression guard FAILED:  MSE {v2_recon:.6f} exceeds "
         f"v1 reference {v1_ref_mse:.6f} by {rel_gap*100:.2f}% "
         f"(allowed: {tol*100:.1f}%).  "
         f"Check spectral_penalty='hard', alpha, and eigenbasis quality."
@@ -324,7 +324,7 @@ def main() -> None:
     parser.add_argument(
         "--v1_ref_mse", type=float, default=None,
         help="Reference reconstruction MSE from a v1 VibrationalAutoencoder "
-             "trained on the same data.  When provided, asserts that v2 "
+             "trained on the same data.  When provided, asserts that  "
              "spectral_penalty='hard' stays within 2%% of this value (#20 AC)."
     )
     args = parser.parse_args()

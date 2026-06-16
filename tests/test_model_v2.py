@@ -6,7 +6,7 @@ Acceptance criteria from issue #27:
   AC1  forward() returns a dict with all 9 keys; all are finite tensors.
   AC2  Total loss == recon + kl_z + kl_S + kl_tau (test with known scalars).
   AC3  extract_spectral_artefact() produces S_memory with shape (d_model, d_model).
-  AC4  from_config() correctly dispatches v1 vs v2 on model.version.
+  AC4  from_config() correctly dispatches v1 vs  on model.version.
   AC5  Integration: one full training loop on synthetic (B=4, D=32, N=16, q=8)
        data; all three ELBO terms (kl_z, kl_S, kl_tau) finite at every step,
        and the total loss strictly decreasing after 10 SGD steps.
@@ -159,7 +159,7 @@ class TestExtractSpectralArtefact:
 
 
 # ---------------------------------------------------------------------------
-# AC4  --  from_config() dispatches v1 vs v2 on model.version
+# AC4  --  from_config() dispatches v1 vs  on model.version
 # ---------------------------------------------------------------------------
 
 class TestFromConfig:

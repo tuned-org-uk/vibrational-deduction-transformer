@@ -8,7 +8,7 @@ of the VDT training loop:
     spectral_freq_cost  J_freq high-frequency energy penalty (training signal)
     lambda_fingerprint  ArrowSpace-style lambda-distribution summary (encoder enrichment)
 
-v2 additions (issue #24 / three-term ELBO):
+ additions (issue #24 / three-term ELBO):
 
     spectral_basis_kl   KL between Gaussian basis posterior q(S) and
                         eigenvalue-weighted prior p(S|I)
@@ -396,7 +396,7 @@ def lambda_fingerprint(
 
 
 # ---------------------------------------------------------------------------
-# spectral_basis_kl  --  v2 three-term ELBO, basis term  (issue #24)
+# spectral_basis_kl  --   three-term ELBO, basis term  (issue #24)
 # ---------------------------------------------------------------------------
 
 def spectral_basis_kl(
@@ -458,7 +458,7 @@ def spectral_basis_kl(
 
 
 # ---------------------------------------------------------------------------
-# tau_mode_kl  --  v2 three-term ELBO, mode-weight term  (issue #24)
+# tau_mode_kl  --   three-term ELBO, mode-weight term  (issue #24)
 # ---------------------------------------------------------------------------
 
 def tau_mode_kl(

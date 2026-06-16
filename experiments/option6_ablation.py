@@ -62,7 +62,7 @@ The data file must be a .pt dict with keys:
     y  : (N_total,)             long    class labels
     L_f: (n_nodes, n_nodes)     float32 frozen index Laplacian
 
-Ref: docs/v2/03-branching.md -- Option 6 / Track A ablation
+Ref: docs//03-branching.md -- Option 6 / Track A ablation
 Depends on: vdt/classifier.py (#18), vdt/spectral_memory.py (#28), vdt/vib_autoencoder.py (#20)
 """
 from __future__ import annotations

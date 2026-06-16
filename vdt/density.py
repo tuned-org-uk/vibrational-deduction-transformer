@@ -1,5 +1,5 @@
 """
-Signed density matrix for the v2 vibrational architecture.
+Signed density matrix for the  vibrational architecture.
 
 The signed density matrix rho = rho_plus - rho_minus models positive and
 negative probability contributions in the feature-space Laplacian.  Both
@@ -7,7 +7,7 @@ components are constrained to be positive semi-definite (PSD) through a
 combination of softplus activation and symmetric outer-product construction.
 
 At convergence, rho_K can be used as an alternative spectral artefact
-source (see issue #29 / docs/v2/00-architecture.md).
+source (see issue #29 / docs//00-architecture.md).
 
 Reference
 ---------
@@ -129,7 +129,7 @@ class SignedDensityMatrix(nn.Module):
         Minimum eigenvalue of rho_plus and rho_minus.
 
         Both should be >= 0 (PSD) at any point during training.  These
-        values are logged by the v2 stability diagnostics (issue #19).
+        values are logged by the  stability diagnostics (issue #19).
 
         Returns
         -------
