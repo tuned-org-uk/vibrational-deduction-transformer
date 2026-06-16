@@ -18,7 +18,8 @@ under the three-term variational objective::
 Data flow::
 
     x  (B, D),  U_q (N, q),  eigvals_q (q,),  L_f (B, N, N)
-      --> WiringEncoder      z, mu, log_var, log_a, log_b
+      --> WiringEncoder      z (B, latent_dim), mu, log_var, log_a, log_b
+      --> z_to_q projection  z_q (B, q)
       --> SpectralLoadingDecoder  W (B, d, q), omega (B, q), S (B, q, q),
                                   L_z (B, N, N)
       --> DiffusionDecoder   uses self.embedding (N, D) as the node table
@@ -26,6 +27,15 @@ Data flow::
       --> three-term ELBO
 
 The L_z key is NOT included in the return dict (PR #35).
+
+latent_dim vs q
+---------------
+``latent_dim`` is the dimension of the isotropic VAE latent z returned by
+WiringEncoder (and exposed in the output dict).  ``q`` is the number of
+spectral modes consumed by SpectralLoadingDecoder.  They may differ.
+A linear projection ``self.z_to_q`` (shape latent_dim -> q) bridges them.
+When latent_dim == q the projection is the identity in spirit but is still
+present to keep the data flow uniform.
 
 Embedding table
 ---------------
@@ -36,15 +46,18 @@ query x (B, D) must NOT be used as E -- its leading dimension is B, not N.
 
 WiringAutoencoder therefore stores ``self.embedding`` as an nn.Parameter
 of shape (n_nodes, input_dim), initialised to zeros.  Callers should
-populate it (e.g. with pre-trained node embeddings) before training.
+populate it (e.g. with pre-trained node embeddings) before training::
+
+    model.embedding.data.copy_(pretrained_E)
+
 forward() passes self.embedding as E by default; an explicit
 ``embedding_table`` kwarg overrides it for inference on a new graph.
 
-v1 (WiringAutoencoder) has been removed.  Only version 2 is supported.
-
-Config dispatch
----------------
-    model.version: 2  -> WiringAutoencoder   ()
+Config dispatch (from_config)
+------------------------------
+    model.version: 2  -> WiringAutoencoder  (canonical path)
+    model.version: 1  -> legacy alias; old v1 keys mapped to v2 defaults
+    version absent    -> treated as legacy (same as v1 alias)
 
 Ref: docs//00-architecture.md
 Ref: docs//05-Code.md
@@ -87,6 +100,14 @@ class WiringAutoencoder(nn.Module):
     removed per PR #35.  The L_z tensor is also not returned from forward()
     for the same reason.
 
+    latent_dim vs q
+    ---------------
+    ``latent_dim`` controls the dimension of the reparameterised VAE latent
+    z (and hence mu, log_var).  ``q`` is the number of spectral modes used
+    by SpectralLoadingDecoder and the KL priors.  They are independent.
+    A linear projection ``self.z_to_q`` maps z from latent_dim to q before
+    the wiring decoder.
+
     Embedding table
     ---------------
     ``self.embedding`` is a learnable nn.Parameter of shape
@@ -103,11 +124,13 @@ class WiringAutoencoder(nn.Module):
 
         x  (B, D),  U_q (N, q),  eigvals_q (q,),  L_f (B, N, N)
           --> WiringEncoder
-                z        (B, latent_dim)
+                z        (B, latent_dim)  -- reparameterised VAE latent
                 mu       (B, latent_dim)
                 log_var  (B, latent_dim)
                 log_a    (B, q)           -- Gamma shape log-params
                 log_b    (B, q)           -- Gamma rate  log-params
+          --> z_to_q  (linear, latent_dim -> q)
+                z_q  (B, q)
           --> SpectralLoadingDecoder
                 W        (B, feat_dim, q) -- spectral loading matrix
                 omega    (B, q)           -- mode weights
@@ -123,15 +146,14 @@ class WiringAutoencoder(nn.Module):
     input_dim : int
         D -- node embedding dimension.
     latent_dim : int
-        Dimension of the isotropic VAE latent z and the number of latent
-        modes passed to WiringEncoder as latent_dim.
+        Dimension of the isotropic VAE latent z, mu, and log_var returned
+        by WiringEncoder and exposed in the output dict.
     hidden_dim : int
         Per-node feature channel width (feat_dim) used inside WiringEncoder
         and also the MLP width of DiffusionDecoder.
     q : int
         Number of spectral modes; must match U_q.shape[1] at runtime.
-        Passed to WiringEncoder as latent_dim so that mode-weight heads
-        produce exactly q outputs.
+        SpectralLoadingDecoder and the KL priors both operate on q modes.
     n_nodes : int or None
         Graph node count N.  Inferred from laplacian.n_nodes when None.
     tau_modes : int
@@ -169,6 +191,7 @@ class WiringAutoencoder(nn.Module):
     ) -> None:
         super().__init__()
         self.q = q
+        self.latent_dim = latent_dim
         self.lam_s = lam_s
         self.tau = tau
         self.tau_modes = tau_modes
@@ -186,21 +209,25 @@ class WiringAutoencoder(nn.Module):
             torch.zeros(n_nodes, input_dim), requires_grad=True
         )
 
-        # WiringEncoder  signature:
-        #   input_dim, latent_dim, n_nodes, feat_dim, n_layers, ...
-        # hidden_dim plays the role of feat_dim (per-node feature channels).
-        # q spectral modes are matched by setting latent_dim=q inside the
-        # encoder so that ModeWeightHead produces q outputs.
+        # WiringEncoder uses latent_dim for the reparameterised VAE latent z.
+        # The mode-weight heads (log_a, log_b) produce q outputs separately.
         self.encoder = WiringEncoder(
             input_dim=input_dim,
-            latent_dim=q,          # encoder latent_dim == number of modes
+            latent_dim=latent_dim,
             n_nodes=n_nodes,
-            feat_dim=hidden_dim,   # hidden_dim -> per-node feature channels
+            feat_dim=hidden_dim,
             n_layers=n_layers,
             n_heads=n_heads,
             use_isotropic_kl=True,
             dropout=dropout,
         )
+
+        # Bridge from VAE latent space to spectral mode space.
+        # Maps z (B, latent_dim) -> z_q (B, q) for SpectralLoadingDecoder.
+        # When latent_dim == q this is still an explicit linear layer so the
+        # data flow is always consistent.
+        self.z_to_q = nn.Linear(latent_dim, q, bias=False)
+
         # SpectralLoadingDecoder takes (q, d) at init; L_base is supplied
         # at forward() time via self._laplacian.base_laplacian.
         self.wiring_decoder = SpectralLoadingDecoder(
@@ -285,8 +312,9 @@ class WiringAutoencoder(nn.Module):
             L_f = L_f.unsqueeze(0).expand(B, -1, -1)
 
         # --- Encode -------------------------------------------------------
-        # WiringEncoder.forward() returns (z, mu, log_var, log_a, log_b).
-        # eigvecs argument accepts (N, K_eig); we pass the full U_q.
+        # WiringEncoder returns (z, mu, log_var, log_a, log_b).
+        # z, mu, log_var are shape (B, latent_dim).
+        # log_a, log_b are shape (B, q) from the mode-weight heads.
         z, mu, log_var, log_a, log_b = self.encoder(
             x,
             L_f=L_f,
@@ -294,11 +322,15 @@ class WiringAutoencoder(nn.Module):
             lap=self._laplacian,
         )
 
+        # --- Project latent -> spectral modes ----------------------------
+        # z is (B, latent_dim); SpectralLoadingDecoder expects (B, q).
+        z_q = self.z_to_q(z)   # (B, q)
+
         # --- Spectral decode (wiring) -------------------------------------
         # SpectralLoadingDecoder.forward() signature: (z, U_q, L_base)
         # L_base is the dense base Laplacian from self._laplacian.
         W, omega, S, L_z = self.wiring_decoder(
-            z, U_q, self._laplacian.base_laplacian
+            z_q, U_q, self._laplacian.base_laplacian
         )
 
         # Embedding table E must be (N, D) -- the full node feature matrix.
@@ -315,7 +347,7 @@ class WiringAutoencoder(nn.Module):
         # Term 1: reconstruction  E_q[log p(x|z,W)]
         recon = self.diffusion_decoder.recon_loss(x, x_hat)
 
-        # Term 2: isotropic KL  KL(q(z) || N(0,I))
+        # Term 2: isotropic KL  KL(q(z) || N(0,I))  -- uses full latent_dim z
         kl_z = -0.5 * (1.0 + log_var - mu.pow(2) - log_var.exp()).sum(dim=-1).mean()
 
         # Term 3: spectral basis KL  KL(q(S) || p(S|I))
@@ -387,10 +419,12 @@ class WiringAutoencoder(nn.Module):
         """
         device = next(self.parameters()).device
         # Sample from the prior mean z = 0 to obtain the posterior-mode artefact.
-        z_prior = torch.zeros(1, self.q, device=device)
+        # z_prior is in latent_dim space; project to q before decoding.
+        z_prior = torch.zeros(1, self.latent_dim, device=device)
+        z_q = self.z_to_q(z_prior)  # (1, q)
 
         W_hat, omega_raw, S, _L_z = self.wiring_decoder(
-            z_prior, U_q, self._laplacian.base_laplacian
+            z_q, U_q, self._laplacian.base_laplacian
         )
         # W_hat : (1, feat_dim, q)
         # omega_raw : (1, q)
@@ -444,15 +478,16 @@ class WiringAutoencoder(nn.Module):
         torch.Tensor  (n_samples, D) or (n_samples, N, D)
         """
         device = next(self.parameters()).device
-        z = torch.randn(n_samples, self.q, device=device)
+        z = torch.randn(n_samples, self.latent_dim, device=device)
+        z_q = self.z_to_q(z)   # (n_samples, q)
         W, omega, S, L_z = self.wiring_decoder(
-            z, U_q, self._laplacian.base_laplacian
+            z_q, U_q, self._laplacian.base_laplacian
         )
         return self.diffusion_decoder(L_z, E, node_idx=node_idx)
 
 
 # ---------------------------------------------------------------------------
-# from_config  --  -only factory
+# from_config  --  factory with v1/v2 dispatch
 # ---------------------------------------------------------------------------
 
 def from_config(
@@ -462,15 +497,24 @@ def from_config(
     """
     Build WiringAutoencoder from a parsed YAML config dict.
 
-    Only version 2 is supported.  Passing any other version raises
-    ValueError.
+    Version dispatch
+    ----------------
+    version 2  (canonical)
+        All keys must be present: latent_dim, hidden_dim, q, tau_modes,
+        lam_s, tau.  Optional: n_layers, n_heads, dropout.
 
-     YAML config example::
+    version 1  (legacy alias)  or version absent
+        Old v1 keys (n_wiring_heads, beta, alpha, use_lambda_features) are
+        silently ignored.  Missing q is derived from tau_modes (or defaults
+        to 8 when both are absent).  This path always produces a
+        WiringAutoencoder instance identical to the v2 path.
+
+     YAML config example (v2)::
 
         model:
           version: 2
-          latent_dim: 32   # used as q (number of spectral modes)
-          hidden_dim: 256  # feat_dim inside WiringEncoder
+          latent_dim: 32
+          hidden_dim: 256
           q: 16
           lam_s: 0.01
           tau: 0.5
@@ -496,13 +540,7 @@ def from_config(
     WiringAutoencoder
     """
     mc = cfg["model"]
-    version = int(mc.get("version", 2))
-
-    if version != 2:
-        raise ValueError(
-            f"Only model version 2 is supported; got version={version}.  "
-            "WiringAutoencoder (v1) has been removed."
-        )
+    version = int(mc.get("version", 1))  # absent -> treat as legacy v1
 
     gc = cfg.get("graph", {})
     lap = DifferentiableLaplacian.from_embeddings(
@@ -512,12 +550,18 @@ def from_config(
         normalised=gc.get("normalised", True),
         sparse=gc.get("sparse", False),
     )
+
+    # Resolve q: v2 configs supply it explicitly; v1/legacy configs may not.
+    # Fall back to tau_modes, then to 8.
+    tau_modes_default = mc.get("tau_modes", 8)
+    q = mc.get("q", tau_modes_default)
+
     model = WiringAutoencoder(
         input_dim=E.shape[1],
-        latent_dim=mc["latent_dim"],
+        latent_dim=mc.get("latent_dim", 16),
         hidden_dim=mc.get("hidden_dim", 256),
-        q=mc["q"],
-        tau_modes=mc.get("tau_modes", mc["q"]),
+        q=q,
+        tau_modes=mc.get("tau_modes", q),
         lam_s=mc.get("lam_s", 0.01),
         tau=mc.get("tau", 0.5),
         laplacian=lap,
