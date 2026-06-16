@@ -54,6 +54,10 @@
 \newcommand{\bL}{\bm{L}}
 \newcommand{\bK}{\bm{K}}
 
+% ---- Shorthand for the model name ------------------------------------------
+\newcommand{\VDT}{VDT\xspace}
+\newcommand{\vdt}{Vibrational Wiring Deduction Transformer\xspace}
+
 % ---- Code style -------------------------------------------------------------
 \lstset{
   basicstyle=\ttfamily\footnotesize,
@@ -70,8 +74,8 @@
 
 % ---- Title ------------------------------------------------------------------
 \title{%
-  \textbf{Vibrational Wiring Deduction Transformer:}\\[4pt]
-  \large A Generative Framework for\\[2pt]
+  \textbf{Vibrational Wiring Deduction Transformer (VDT):}\\[4pt]
+  \large A Spectral-PPCA Generative Framework for\\[2pt]
   Graph-Structured Latent Spaces and Spectral Associative Memory
 }
 
@@ -89,28 +93,29 @@
 \maketitle
 
 \begin{abstract}
-We present the \emph{Wiring Autoencoder v2} (WAE\,v2), a fully Bayesian
-generative model that upgrades the original WAE family with three coupled
-spectral priors derived from probabilistic PCA in a Laplacian eigenbasis
-(Spectral-PPCA).  The v1 architecture used a hard high-frequency energy
-penalty ($J_{\mathrm{freq}}$) and an isotropic Gaussian latent prior.  WAE\,v2
-replaces both with principled variational KL terms: (i) a spectral-basis KL
-over the loading matrix $\bS$ weighted by Laplacian eigenvalues, implementing a
+We present the \emph{Vibrational Wiring Deduction Transformer} (\VDT), a
+fully Bayesian generative model that unifies vibrational graph dynamics,
+probabilistic PCA in a Laplacian eigenbasis (Spectral-PPCA), and spectral
+associative memory into a single trainable architecture.  The predecessor
+Wiring Autoencoder (WAE) used a hard high-frequency energy penalty
+($J_{\mathrm{freq}}$) and an isotropic Gaussian latent prior.  \VDT{} replaces
+both with principled variational KL terms: (i) a spectral-basis KL over the
+loading matrix $\bS$ weighted by Laplacian eigenvalues, implementing a
 \emph{spectral Occam's razor}; (ii) a closed-form Gamma/Exponential KL over
-per-mode weights $\bomega$, providing soft $\tau$-mode band-limiting; and (iii)
-the standard isotropic Gaussian latent KL retained for stability (the
-Laplacian-precision latent KL is preserved as a design option and ablation, but
-is not included in the default three-term ELBO following architectural review in
-PR\,\#35).  After training, a \emph{spectral artefact} $\A(\I)$ is extracted
-and used to initialise a transformer with pre-built spectral associative memory.
-The two-phase (offline training, online inference) architecture separates
-spectral learning from deployment, with frozen eigenpairs eliminating all
-runtime $O(N^3)$ eigendecompositions during training.  We detail the complete
-module design, three-term ELBO, stability analysis, benchmark metrics, and
-associative memory construction.
+per-mode weights $\bomega$, providing soft $\tau$-mode band-limiting; and
+(iii) the standard isotropic Gaussian latent KL retained for stability (the
+Laplacian-precision latent KL is preserved as a design option and ablation,
+but is not included in the default three-term ELBO following architectural
+review in PR\,\#35).  After training, a \emph{spectral artefact} $\A(\I)$ is
+extracted and used to initialise a downstream transformer with pre-built
+spectral associative memory.  The two-phase (offline training, online
+inference) architecture separates spectral learning from deployment, with
+frozen eigenpairs eliminating all runtime $O(N^3)$ eigendecompositions during
+training.  We detail the complete module design, three-term ELBO, stability
+analysis, benchmark metrics, and associative memory construction.
 \end{abstract}
 
-% ---- ToC (optional for a long paper) ----------------------------------------
+% ---- ToC --------------------------------------------------------------------
 \tableofcontents
 \newpage
 
@@ -121,7 +126,7 @@ associative memory construction.
 Graph-structured latent variable models occupy an increasingly important niche
 between classical variational autoencoders (VAEs) and geometric deep learning:
 they can encode both the \emph{content} of nodes and the \emph{relational
-structure} that organises them.  The original Wiring Autoencoder~\citep{wae_v1}
+structure} that organises them.  The Wiring Autoencoder~\citep{wae_v1}
 recognised this, using a differentiable graph Laplacian $L(z)$ as an
 intermediate latent object whose spectral properties are regularised by a hard
 frequency penalty $J_{\mathrm{freq}} = \sum_{j>k}\lambda_j(L(z))$.  While
@@ -137,23 +142,28 @@ probabilistic prior, which makes it difficult to:
         manifold.
 \end{enumerate}
 
-WAE\,v2 addresses all three limitations by embedding the Wiring Autoencoder
-within the Spectral-PPCA framework~\citep{design_a}, a Bayesian generative
-model in which the loading matrix $\bW = \bU_{1:q}\,\diag(\bomega)\,\bS$
-lives explicitly in the Laplacian eigenbasis and is endowed with
-eigenvalue-weighted shrinkage priors.
+The \vdt{} (\VDT) addresses all three limitations by embedding the Wiring
+Autoencoder within the Spectral-PPCA framework~\citep{design_a}, a Bayesian
+generative model in which the loading matrix
+$\bW = \bU_{1:q}\,\diag(\bomega)\,\bS$ lives explicitly in the Laplacian
+eigenbasis and is endowed with eigenvalue-weighted shrinkage priors.  The VDT
+encoder backbone implements a discrete damped wave equation in the graph
+spectral domain, connecting the probabilistic latent space to the physical
+intuition of vibrational modes in string and spring systems.
 
 \subsection{Contributions}
 \begin{itemize}
   \item A three-term ELBO replacing $J_{\mathrm{freq}}$ and preserving the
         isotropic latent prior (Section~\ref{sec:elbo}).
   \item A \texttt{SpectralLoadingDecoder} that maps latent codes to
-        eigenbasis-factorised loading matrices (Section~\ref{sec:modules}).
-  \item A \texttt{WiringEncoderV2} with VDT recurrence and
+        eigenbasis-factorised loading matrices
+        (Section~\ref{sec:modules}).
+  \item A \texttt{VibrationalEncoder} (VDT recurrence) with
         \texttt{ModeWeightHead} producing variational Gamma parameters
         (Section~\ref{sec:modules}).
-  \item A \texttt{SpectralAssociativeMemory} module that pre-builds a Hopfield
-        memory from the spectral artefact (Section~\ref{sec:memory}).
+  \item A \texttt{SpectralAssociativeMemory} module that pre-builds a
+        Hopfield memory from the spectral artefact
+        (Section~\ref{sec:memory}).
   \item A two-phase offline/online architecture eliminating runtime
         eigensolves during training (Section~\ref{sec:two_phase}).
   \item An eight-metric evaluation suite including ELBO Bayes factors for
@@ -166,7 +176,8 @@ eigenvalue-weighted shrinkage priors.
 
 \subsection{Probabilistic PCA}
 
-Standard PPCA~\citep{tipping1999ppca} defines a linear-Gaussian generative model:
+Standard PPCA~\citep{tipping1999ppca} defines a linear-Gaussian generative
+model:
 \begin{equation}
   \bz \sim \N(\mathbf{0}, \bm{I}_q), \qquad
   \bx \mid \bz \sim \N(\bW\bz + \bmu,\, \sigma^2 \bm{I}_d),
@@ -201,12 +212,35 @@ Given ArrowSpace index $\I$, we denote the frozen $q$-truncated eigendecompositi
 These eigenpairs are computed once offline and used as frozen constants
 throughout training.
 
-\subsection{Wiring Autoencoder (WAE)}
+\subsection{Vibrational Dynamics and Spectral Graph Waves}
+\label{sec:vibration}
+
+The VDT encoder draws its physical motivation from Rayleigh's Theory of
+Sound~\citep{rayleigh1877sound}: the eigenmodes of a vibrating string or spring
+system are exactly the eigenvectors of the system's stiffness matrix, which in
+the discrete graph setting is the normalised Laplacian $L$.  A positive
+amplitude on mode $k$ corresponds to a string displacement in the direction
+$\mathbf{u}_k$; a negative amplitude corresponds to the opposing displacement.
+This is the physical counterpart to the signed (positive/negative) latent
+amplitudes that the \VDT{} encoder learns.
+
+The signed density matrix
+$\varrho_t = \varrho_t^+ - \varrho_t^-$ maintained by the VDT recurrence
+(Section~\ref{sec:encoder}) is precisely a decomposition of the current state
+into constructive and destructive vibrational contributions.  The low-entropy
+state of this system corresponds to coherent oscillation (the string vibrating
+in a definite mode); the high-entropy state corresponds to rest (the wave
+function collapsed, all modes equally weighted).  This mirrors Brownian
+motion, where the low-entropy state is the non-heated stationary system and
+the high-entropy state is maximal thermal agitation.
+
+\subsection{Wiring Autoencoder (WAE) --- Predecessor}
 \label{sec:wae_v1}
 
-WAE\,v1 trains a differentiable Laplacian $L(\bz)$ whose topology is fixed
-(kNN + RBF graph) but whose edge weights are learned by a mixture-of-experts
-decoder $W_{\mathrm{dec}}:\bz\mapsto\delta_e$.  The training objective is
+WAE~\citep{wae_v1} trains a differentiable Laplacian $L(\bz)$ whose topology
+is fixed (kNN + RBF graph) but whose edge weights are learned by a
+mixture-of-experts decoder $W_{\mathrm{dec}}:\bz\mapsto\delta_e$.  The
+training objective is
 \begin{equation}
   \elbo_{\mathrm{WAE}} =
     \E_q[\log p(\bx\mid\bz)] -
@@ -220,9 +254,10 @@ high-frequency wiring.  The reconstruction is provided by
 $K_\tau = \bU_k\exp(-t\bLambda_k)\bU_k^\top$ applied to an embedding table
 $\bE$, with learnable diffusion time $t$.
 
-Three limitations of this design motivate WAE\,v2:
-(a) $J_{\mathrm{freq}}$ is a deterministic penalty with no prior interpretation;
-(b) the latent prior is isotropic and ignores the graph geometry;
+Three limitations of WAE motivate \VDT:
+(a) $J_{\mathrm{freq}}$ is a deterministic penalty with no prior
+interpretation;
+(b) the latent prior is isotropic and ignores graph geometry;
 (c) there is no principled post-training artefact for downstream use.
 
 % =============================================================================
@@ -245,8 +280,9 @@ Place an eigenvalue-weighted Gaussian shrinkage prior on $\bS$:
   \label{eq:prior_S}
 \end{equation}
 This implements a \emph{spectral Occam's razor}: high-frequency components
-(large $\lambda_k$) are penalised exponentially more strongly than low-frequency
-ones, pulling the loading matrix toward smooth directions of the index graph.
+(large $\lambda_k$) are penalised exponentially more strongly than
+low-frequency ones, pulling the loading matrix toward smooth directions of the
+index graph.
 
 \paragraph{Prior 2: $\tau$-mode frequency prior.}
 Let $\omega_k > 0$ be a weight on the $k$-th mode.  The $\tau$-mode prior is a
@@ -256,9 +292,9 @@ product of exponentials with rates that scale with Laplacian eigenvalues:
   \qquad k=1,\dots,q.
   \label{eq:prior_omega}
 \end{equation}
-Small $\lambda_k$ (low-frequency modes) receive weak penalisation; large
-$\lambda_k$ receive strong penalisation, naturally selecting the effective
-spectral bandwidth.  The loading matrix is a mode-weighted linear combination
+Small $\lambda_k$ (low-frequency / low-entropy vibrational modes) receive weak
+penalisation; large $\lambda_k$ receive strong penalisation, naturally
+selecting the effective spectral bandwidth.  The loading matrix is
 $\bW = \bU_{1:q}\diag(\bomega)\bS$.
 
 \paragraph{Prior 3 (design option): Laplacian-precision latent prior.}
@@ -269,8 +305,7 @@ Laplacian-precision prior:
   \label{eq:prior_z_lap}
 \end{equation}
 where $L_s$ is a sample-graph Laplacian built from the current batch of latent
-means (stop-gradient).  This enforces smoothness of latent codes over the
-data manifold.  The resulting KL expands to
+means (stop-gradient).  The resulting KL expands to
 \begin{equation}
   \KL(q(\bz)\|p_{\mathrm{Lap}}(\bz)) = \tfrac{1}{2}\!
   \left[
@@ -283,13 +318,13 @@ data manifold.  The resulting KL expands to
   \label{eq:kl_lap}
 \end{equation}
 where the cross-term $\bmu_z^\top L_s\bmu_z$ is the graph Dirichlet energy of
-the latent means.  \emph{This prior is preserved in the WAE\,v2 codebase as an
+the latent means.  \emph{This prior is preserved in the \VDT{} codebase as an
 ablation option} (\texttt{use\_isotropic\_kl=False} in
-\texttt{WiringEncoderV2}) but is \textbf{not} included in the default
+\texttt{VibrationalEncoder}) but is \textbf{not} included in the default
 three-term ELBO following architectural review in PR\,\#35.
 
 % =============================================================================
-\section{WAE v2: Three-Term ELBO}
+\section{VDT: Three-Term ELBO}
 \label{sec:elbo}
 
 \subsection{Variational Family}
@@ -300,18 +335,18 @@ We adopt a mean-field amortised variational family:
   q_\phi(\bS\mid\bx) &= \N(M_S, \diag(\exp(\bm{v}_S))), \\
   q_\phi(\omega_k\mid\bx) &= \mathrm{Gamma}(a_k, b_k),
 \end{align}
-where all parameters are outputs of the encoder network \texttt{WiringEncoderV2}.
+where all parameters are outputs of the \texttt{VibrationalEncoder} network.
 The Gamma distribution is reparametrisable via the implicit reparametrisation
 trick~\citep{figurnov2018implicit}; in practice we parametrise through
 $(\log a_k, \log b_k)$ from a \texttt{ModeWeightHead} linear layer.
 
 \subsection{ELBO Decomposition}
 
-The default WAE\,v2 training objective is the following three-term ELBO
-(minimisation form, as implemented in \texttt{wae/model.py}):
+The default \VDT{} training objective is the following three-term ELBO
+(minimisation form, as implemented in \texttt{vdt/model.py}):
 \begin{equation}
   \boxed{
-  \mathcal{L}_{\mathrm{WAE-v2}}
+  \mathcal{L}_{\mathrm{VDT}}
   = \underbrace{\E_q[\|\bx - \hat{\bx}\|^2 / 2\sigma^2]}_
       {\text{reconstruction}}
   + \underbrace{\KL\bigl(q(\bz)\|\N(\mathbf{0},\bm{I})\bigr)}_
@@ -321,7 +356,7 @@ The default WAE\,v2 training objective is the following three-term ELBO
   + \underbrace{\KL\bigl(q(\bomega)\|p(\bomega\mid\tau,\bLambda)\bigr)}_
       {\tau\text{-mode KL }(\mathtt{kl\_tau})}
   }
-  \label{eq:elbo_v2}
+  \label{eq:elbo_vdt}
 \end{equation}
 All four terms are non-negative; the total loss is minimised (ELBO is
 maximised by negating) during gradient descent.
@@ -347,11 +382,12 @@ For the entry $(k,j)$ of $\bS$, with precision $\lambda_s\lambda_k$
   \label{eq:kl_S}
 \end{equation}
 where $v_{S,kj} = \exp(\log\mathrm{var}_{S,kj})$.  In the current
-implementation, the log-variance is approximated as
+implementation the log-variance is approximated as
 $\log\mathrm{var}_{S,kj} = \log(S_{kj}^2 + \epsilon)$, deriving uncertainty
-directly from the magnitude of the mean --- a simplification that avoids adding
-a separate posterior variance head to \texttt{SpectralLoadingDecoder}.  Future
-work should add a dedicated variance head for a proper amortised posterior.
+from the magnitude of the mean --- a simplification that avoids adding a
+separate posterior variance head to \texttt{SpectralLoadingDecoder}.
+Future work should add a dedicated variance head for a proper amortised
+posterior.
 
 \paragraph{$\tau$-mode KL.}
 For mode $k$ with $q(\omega_k)=\mathrm{Gamma}(a_k, b_k)$ and
@@ -365,15 +401,15 @@ $p(\omega_k)=\mathrm{Gamma}(1, \tau\lambda_k)$, the closed-form KL is:
 where $\psi$ is the digamma function.  This is summed over all $q$ modes and
 averaged over the batch.
 
-\subsection{Comparison with WAE v1}
+\subsection{Comparison with WAE Predecessor}
 
 \begin{table}[h]
 \centering
-\caption{ELBO comparison: WAE\,v1 vs WAE\,v2.}
+\caption{ELBO comparison: WAE (predecessor) vs \VDT.}
 \label{tab:elbo_comparison}
 \begin{tabular}{@{}llll@{}}
 \toprule
-Term & WAE\,v1 & WAE\,v2 & Note \\
+Term & WAE & \VDT & Note \\
 \midrule
 Reconstruction & $-\|\bx-\hat{\bx}\|^2/2\sigma^2$ & Same & $\sigma$ learnable \\
 Latent KL & $\KL(q(\bz)\|\N(\mathbf{0},\bm{I}))$ & Same (isotropic) & PR\,\#35 decision \\
@@ -396,39 +432,43 @@ Figure~\ref{fig:dataflow} illustrates the end-to-end data flow.
 \centering
 \begin{tikzpicture}[
   box/.style={draw, rounded corners=4pt, fill=blue!8,
-              minimum width=4.8cm, minimum height=0.8cm,
+              minimum width=5.2cm, minimum height=0.8cm,
               font=\small, align=center},
   sbox/.style={draw, rounded corners=4pt, fill=orange!12,
-              minimum width=4.8cm, minimum height=0.8cm,
+              minimum width=5.2cm, minimum height=0.8cm,
               font=\small, align=center},
   arr/.style={-Stealth, thick},
 ]
-  \node[box] (enc) {\textbf{WiringEncoderV2}\\VDT recurrence + ModeWeightHead\\$\to (\bz,\bmu,\log\bm{s},\log\bm{a},\log\bm{b})$};
+  \node[box] (enc) {\textbf{VibrationalEncoder}\\VDT recurrence + ModeWeightHead\\$\to (\bz,\bmu,\log\bm{s},\log\bm{a},\log\bm{b})$};
   \node[box, below=1.0cm of enc] (sld) {\textbf{SpectralLoadingDecoder}\\$\bW = \bU_q\diag(\bomega)\bS$\\$L(\bz) = \texttt{from\_spectral\_loading}(\bW, L_{\mathrm{base}})$};
-  \node[box, below=1.0cm of sld] (diff) {\textbf{DiffusionDecoder} (unchanged)\\TauModeDiffusion + MLP refinement\\$\to \hat{\bx}\,(B,D)$};
-  \node[sbox, below=1.0cm of diff] (loss) {\textbf{Three-term ELBO}\\$\mathcal{L} = \text{recon} + \texttt{kl\_z} + \texttt{kl\_S} + \texttt{kl\_tau}$};
+  \node[box, below=1.0cm of sld] (diff) {\textbf{DiffusionDecoder}\\TauModeDiffusion + MLP refinement\\$\to \hat{\bx}\,(B,D)$};
+  \node[sbox, below=1.0cm of diff] (loss) {\textbf{Three-term ELBO}\\$\mathcal{L}_{\mathrm{VDT}} = \text{recon} + \texttt{kl\_z} + \texttt{kl\_S} + \texttt{kl\_tau}$};
   \draw[arr] (enc) -- (sld) node[midway,right,font=\scriptsize]{$\bz,\,(B,q)$};
   \draw[arr] (sld) -- (diff) node[midway,right,font=\scriptsize]{$L(\bz),\,(B,N,N)$};
   \draw[arr] (diff) -- (loss) node[midway,right,font=\scriptsize]{$\hat{\bx},\,(B,D)$};
 \end{tikzpicture}
-\caption{WAE\,v2 data flow.  The eigenpairs $(\bU_q, \bLambda_q)$ of $L(\I)$
+\caption{\VDT{} data flow.  The eigenpairs $(\bU_q, \bLambda_q)$ of $L(\I)$
 are frozen constants passed to both encoder and decoder; no Laplacian is
 computed at runtime.}
 \label{fig:dataflow}
 \end{figure}
 
-\subsection{WiringEncoderV2}
+\subsection{VibrationalEncoder}
 \label{sec:encoder}
 
-\texttt{WiringEncoderV2} (\texttt{wae/encoder.py}) replaces the v1 MLP encoder
-with a VDT (Vibrational Discrete Transformer) recurrence stack:
+\texttt{VibrationalEncoder} (\texttt{vdt/encoder.py}) replaces the WAE MLP
+encoder with a VDT (Vibrational Discrete Transformer) recurrence stack:
 \begin{enumerate}
   \item \textbf{Input projection}: linear layer mapping $(B,D)\to(B,N{\cdot}d)$,
         reshaped to $(B,N,d)$.
-  \item \textbf{VDT blocks}: $K$ \texttt{VibrationalStateBlock} layers operating
-        on $(B,N,d)$ state matrices using the feature-space Laplacian $L_f$.
-        The recurrence implements a discrete damped wave equation in the graph
-        spectral domain.
+  \item \textbf{VibrationalStateBlocks}: $K$ recurrence layers operating on
+        $(B,N,d)$ state matrices using the feature-space Laplacian $L_f$.  The
+        recurrence implements a discrete damped wave equation in the graph
+        spectral domain: the state evolves as
+        $\mathbf{h}_{t+1} = (2\bm{I} - \alpha L_f)\mathbf{h}_t - \mathbf{h}_{t-1}$,
+        where $\alpha$ is a learnable damping coefficient.  This is a
+        finite-difference discretisation of the wave equation
+        $\ddot{\mathbf{u}} + \alpha L_f\mathbf{u} = 0$.
   \item \textbf{Modal projection}: mean-pool output over the node dimension
         after projecting through eigenvectors $\bm{v}\in\R^d$.
   \item \textbf{Readout heads}: separate linear layers producing
@@ -444,20 +484,26 @@ A single linear layer \texttt{Linear(feat\_dim, 2q)} splits into
 $(\log\bm{a}, \log\bm{b})\in\R^q\times\R^q$.  The Gamma parameters are
 obtained as $a_k = e^{\log a_k}>0$, $b_k = e^{\log b_k}>0$.
 The mode-weight KL \eqref{eq:kl_tau} is computed from these in
-\texttt{wae/spectral.py:tau\_mode\_kl}.
+\texttt{vdt/spectral.py:tau\_mode\_kl}.
+
+\paragraph{Signed density matrix.}
+During the VDT recurrence each block maintains a signed density matrix
+$\varrho_t = \varrho_t^+ - \varrho_t^-$, decomposing the state into
+constructive and destructive vibrational contributions (positive and negative
+amplitudes).  This object is the discrete analogue of the quantum density
+matrix when amplitudes are real-valued rather than complex.  It is used as a
+stability diagnostic and, optionally, as the seed for the spectral artefact in
+reasoning-focused deployments (Option~6, Section~\ref{sec:tracks}).
 
 \subsection{SpectralLoadingDecoder}
 \label{sec:decoder}
 
-\texttt{SpectralLoadingDecoder} (\texttt{wae/wiring\_decoder.py}) replaces
-\texttt{WiringDecoder} as the default v2 wiring decoder.  The forward pass
-computes:
+\texttt{SpectralLoadingDecoder} (\texttt{vdt/wiring\_decoder.py}) is the
+default \VDT{} wiring decoder.  The forward pass computes:
 \begin{align}
   \bS &= \texttt{S\_net}(\bz).\text{view}(B,q,q), \label{eq:S_net}\\
   \bomega &= \exp(\texttt{omega\_net}(\bz)), \label{eq:omega_net}\\
-  \bW &= \bU_q^\top \otimes (\bomega_{k}\bS),\quad
-        \text{i.e.}\quad
-        \bW = \bU_q.\text{unsqueeze}(0)
+  \bW &= \bU_q.\text{unsqueeze}(0)
         \;\texttt{@}\;(\bomega.\text{unsqueeze}(-1)\ast\bS),
         \label{eq:W}\\
   L(\bz) &= \texttt{DifferentiableLaplacian.from\_spectral\_loading}(\bW, L_{\mathrm{base}}).
@@ -466,7 +512,7 @@ computes:
 
 Edge weights in \eqref{eq:Lz} are synthesised as
 $w_{ij} = w_{ij}^{\mathrm{base}}\cdot\sigma(-\|\bW_i-\bW_j\|^2)$ where
-$\bW_i$ is the $i$-th row of $\bW$, and $\sigma$ is the logistic sigmoid.
+$\bW_i$ is the $i$-th row of $\bW$ and $\sigma$ is the logistic sigmoid.
 This path is fully differentiable from $L(\bz)$ back to $\bz$ through $\bW$.
 
 \paragraph{Initialisation.}
@@ -476,14 +522,14 @@ $\omega_k\approx 1$ for all modes.  This gives a warm-start close to the
 eigenbasis reparametrisation $\bW\approx\bU_q$.
 
 \paragraph{Config dispatch.}
-The v1 \texttt{WiringDecoder} (mixture-of-experts) is retained as a
+The legacy WAE \texttt{WiringDecoder} (mixture-of-experts) is retained as a
 fallback: \texttt{decoder\_type: spectral} selects
 \texttt{SpectralLoadingDecoder}; \texttt{decoder\_type: mixture\_of\_experts}
 selects \texttt{WiringDecoder}.
 
-\subsection{DiffusionDecoder (Unchanged)}
+\subsection{DiffusionDecoder}
 
-\texttt{DiffusionDecoder} is identical to v1.  It wraps
+\texttt{DiffusionDecoder} is retained from WAE.  It wraps
 \texttt{TauModeDiffusion}: the truncated heat kernel
 \begin{equation}
   K_\tau = \bU_k\,\diag(e^{-t\bLambda_k})\,\bU_k^\top,
@@ -493,18 +539,23 @@ with learnable log-diffusion-time $\log t$.  A small MLP refinement
 residually corrects the output.  Reconstruction loss is Gaussian NLL:
 $\|\bx-\hat{\bx}\|^2/(2\sigma^2)$.
 
-\subsection{WiringAutoencoderV2}
+The heat kernel \eqref{eq:heat_kernel} has a direct vibrational
+interpretation: $e^{-t\lambda_k}$ is the amplitude decay factor for mode $k$
+after time $t$, exactly as in the damped wave equation.  Modes with large
+$\lambda_k$ (high-frequency, high-entropy) decay faster; low-frequency modes
+persist.
 
-\texttt{WiringAutoencoderV2} (\texttt{wae/model.py}) assembles all three
-modules.  Its \texttt{forward()} method returns a dict with exactly nine keys:
-\texttt{\{loss, recon, kl\_z, kl\_S, kl\_tau, x\_hat, z, mu, log\_var\}}.
-The \texttt{L\_z} key present in v1 is not returned (PR\,\#35: no runtime
-Laplacian is exposed).
+\subsection{VibrationalDeductionTransformer (Top-level Module)}
+
+\texttt{VibrationalDeductionTransformer} (\texttt{vdt/model.py}) assembles all
+three modules.  Its \texttt{forward()} method returns a dict with exactly nine
+keys: \texttt{\{loss, recon, kl\_z, kl\_S, kl\_tau, x\_hat, z, mu, log\_var\}}.
 
 \paragraph{Model factory.}
-\texttt{from\_config(cfg, E)} dispatches on \texttt{cfg[`model'][`version']}:
-version~1 builds \texttt{WiringAutoencoder}; version~2 builds
-\texttt{WiringAutoencoderV2}.
+\texttt{from\_config(cfg, E)} dispatches on
+\texttt{cfg[`model'][`version']}: version~1 builds the legacy
+\texttt{WiringAutoencoder}; version~2 builds
+\texttt{VibrationalDeductionTransformer}.
 
 % =============================================================================
 \section{Spectral Artefact and Associative Memory}
@@ -525,9 +576,10 @@ by evaluating the model at the prior mean $\bz=\mathbf{0}$:
   \label{eq:artefact}
 \end{equation}
 where $\hat{\bm{w}}_k$ is the $k$-th column of $\hat{\bW}$.
-Note that \eqref{eq:artefact} uses $d_{\theta}(\hat{\bm{w}}_k)\approx\hat{\bm{w}}_k$
-(linear decoder approximation for $S_{\I}$); a full nonlinear value function
-$d_{\theta}(\hat{\bm{w}}_k)$ is left as future work.
+Equation~\eqref{eq:artefact} uses
+$d_{\theta}(\hat{\bm{w}}_k)\approx\hat{\bm{w}}_k$ (linear decoder
+approximation for $S_{\I}$); a full nonlinear value function
+$d_{\theta}(\hat{\bm{w}}_k)$ is left as future work (Section~\ref{sec:discussion}).
 
 \begin{table}[h]
 \centering
@@ -537,7 +589,7 @@ $d_{\theta}(\hat{\bm{w}}_k)$ is left as future work.
 \toprule
 Component & Symbol & Meaning \\
 \midrule
-Posterior loading basis & $\hat{\bW}=(1,d,q)$ & Mean loading matrix in Laplacian eigenbasis \\
+Posterior loading basis & $\hat{\bW}\in\R^{d\times q}$ & Mean loading matrix in Laplacian eigenbasis \\
 Posterior mode weights & $\hat{\bomega}\in\R^q$ & Per-mode activity under $\tau$-mode prior \\
 Associative memory matrix & $S_{\I}\in\R^{d\times d}$ & Outer-product Hopfield key matrix \\
 \bottomrule
@@ -547,7 +599,7 @@ Associative memory matrix & $S_{\I}\in\R^{d\times d}$ & Outer-product Hopfield k
 \subsection{SpectralAssociativeMemory}
 \label{sec:assoc_mem}
 
-\texttt{SpectralAssociativeMemory} (\texttt{wae/spectral\_memory.py}) wraps
+\texttt{SpectralAssociativeMemory} (\texttt{vdt/spectral\_memory.py}) wraps
 $S_{\I}$ as a pre-built Hopfield / linear associative memory.  For query
 $\bm{q}\in\R^{d_k}$, retrieval proceeds via:
 \begin{equation}
@@ -559,6 +611,14 @@ The approximately-orthonormal keys $\hat{\bm{w}}_k$ (columns of $\hat{\bW}$
 are linear combinations of eigenvectors, orthonormal when $\bS\approx\bm{I}$)
 maximise retrieval SNR~\citep{ramsauer2020hopfield}:
 $\mathrm{SNR}^{-1}\approx N_{\mathrm{stored}}/d_k$.
+
+\paragraph{Vibrational interpretation.}
+The columns of $\hat{\bW}$ are superpositions of Laplacian eigenmodes:
+low-frequency modes (small $\lambda_k$, high $\hat{\omega}_k$) correspond to
+the fundamental vibrational tones of the graph, while high-frequency modes
+correspond to harmonics that are suppressed by the $\tau$-mode prior.  The
+memory matrix $S_{\I}$ thus stores information in the basis of the system's
+natural resonances --- an associative memory grounded in physical intuition.
 
 \paragraph{Online delta-rule updates.}
 New associations can be written without overwriting spectral structure:
@@ -572,25 +632,25 @@ where $(\bm{k},\bm{v})$ are new key-value pairs.
 \section{Two-Phase Architecture}
 \label{sec:two_phase}
 
-WAE\,v2 cleanly separates spectral learning from online inference.
+\VDT{} cleanly separates spectral learning from online inference.
 
 \begin{algorithm}[h]
-\caption{WAE\,v2 Two-Phase Procedure}
+\caption{\VDT{} Two-Phase Procedure}
 \label{alg:two_phase}
 \begin{algorithmic}[1]
 \Require ArrowSpace index $\I$, dataset $D$, hyperparameters
-\State \textbf{// Phase 1 --- Offline}
+\State \textbf{// Phase 1 --- Offline spectral learning}
 \State Compute eigendecomposition: $(\bU_q,\bLambda_q)\leftarrow\texttt{eigh}(L(\I))$ \Comment{once; $O(N^3)$}
 \State Freeze $(\bU_q,\bLambda_q)$
 \For{each training step}
-  \State $\bz,\bmu,\log\bm{s},\log\bm{a},\log\bm{b}\leftarrow\texttt{WiringEncoderV2}(\bx)$
+  \State $\bz,\bmu,\log\bm{s},\log\bm{a},\log\bm{b}\leftarrow\texttt{VibrationalEncoder}(\bx)$
   \State $\bW,\bomega,\bS,L(\bz)\leftarrow\texttt{SpectralLoadingDecoder}(\bz,\bU_q,L_{\mathrm{base}})$
   \State $\hat{\bx}\leftarrow\texttt{DiffusionDecoder}(L(\bz),\bE)$
-  \State Compute $\mathcal{L}_{\mathrm{WAE-v2}}$ (\cref{eq:elbo_v2}) and update $\phi,\theta$
+  \State Compute $\mathcal{L}_{\mathrm{VDT}}$ (\cref{eq:elbo_vdt}) and update $\phi,\theta$
 \EndFor
 \State $\A(\I)\leftarrow\texttt{extract\_spectral\_artefact}(\bU_q,\bLambda_q)$
 \State $S_{\I}\leftarrow\texttt{SpectralAssociativeMemory}(\A(\I))$
-\State \textbf{// Phase 2 --- Online}
+\State \textbf{// Phase 2 --- Online inference}
 \State Initialise transformer FFN / cross-attention from $S_{\I}$
 \For{each inference query $\bm{q}$}
   \State Retrieve via \cref{eq:hopfield}; optionally update via \cref{eq:delta_rule}
@@ -604,7 +664,7 @@ Laplacian is computed or inverted at each training step}.  All $O(N^3)$
 eigendecomposition cost is paid once in offline preprocessing.
 
 \paragraph{ELBO Bayes factor for index selection.}
-Training WAE\,v2 on competing indices $\I_1, \I_2$ yields ELBO estimates
+Training \VDT{} on competing indices $\I_1, \I_2$ yields ELBO estimates
 $\elbo(\I_1),\elbo(\I_2)$.  The Bayes factor
 \begin{equation}
   \mathrm{BF}_{12} = \exp(\elbo(\I_1) - \elbo(\I_2))
@@ -618,8 +678,8 @@ ELBO~\citep{lotfi2022marginal}.
 \section{Stability Analysis}
 \label{sec:stability}
 
-WAE\,v2 inherits the full v1 stability hierarchy from
-\texttt{docs/v2/04-stability.md}.  Two additional conditions apply:
+\VDT{} inherits the full stability hierarchy from
+\texttt{docs/v2/04-stability.md}.  Two additional conditions apply.
 
 \paragraph{Sample-graph Laplacian feedback.}
 When the Laplacian-precision latent KL (design option) is enabled, $L_s$ is
@@ -631,7 +691,7 @@ sample Laplacian refreshed every $T_{\mathrm{refresh}}$ epochs.
 If $\lambda_1\approx 0$ (Fiedler vector near zero), the prior on the first
 mode becomes nearly flat, increasing gradient variance.  Apply a floor
 $\lambda_k\leftarrow\max(\lambda_k,\epsilon)$ with $\epsilon=10^{-3}$ in all
-KL computations (already implemented in \texttt{spectral.py} as
+KL computations (implemented in \texttt{vdt/spectral.py} as
 \texttt{eigvals.clamp(min=1e-6)}).
 
 \paragraph{Mode weight collapse.}
@@ -643,13 +703,13 @@ soft floor on the Gamma shape $a_k\ge a_{\min}$.
 \section{Benchmark Metrics}
 \label{sec:benchmarks}
 
-\texttt{evaluate\_v2()} in \texttt{wae/metrics.py} computes the eight metrics
-in Table~\ref{tab:metrics}.  The ELBO Bayes factor enables ArrowSpace index
+\texttt{evaluate()} in \texttt{vdt/metrics.py} computes the eight metrics in
+Table~\ref{tab:metrics}.  The ELBO Bayes factor enables ArrowSpace index
 selection from data alone.
 
 \begin{table}[h]
 \centering
-\caption{WAE\,v2 benchmark metrics.}
+\caption{\VDT{} benchmark metrics.}
 \label{tab:metrics}
 \begin{tabular}{@{}lll@{}}
 \toprule
@@ -671,7 +731,7 @@ Spectral entropy $H(\Lambda)$ & $H(\text{normalised eigenvalues of }L(\bz))$ & W
 \section{Algorithm Tracks}
 \label{sec:tracks}
 
-The WAE\,v2 framework supports six implementation tracks.  The recommended
+The \VDT{} framework supports six implementation tracks.  The recommended
 sequence is 6~$\to$ 1~$\to$ 4~$\to$ 3.
 
 \begin{itemize}
@@ -679,90 +739,112 @@ sequence is 6~$\to$ 1~$\to$ 4~$\to$ 3.
         with the soft $\tau$-mode KL; add \texttt{SpectralLoadingDecoder} as
         ablation.  Backward-compatible: $\beta\to 0$ recovers the deterministic
         limit.
-  \item \textbf{Option 3 --- Latent diffusion.}  WAE\,v2 provides the Stage~1
+  \item \textbf{Option 3 --- Latent diffusion.}  \VDT{} provides the Stage~1
         encoder; the spectral noise schedule
         $a_\tau^{(k)}=\exp(-\tau\lambda_k t)$ matches the $\bLambda_q^{-1}$
         latent prior.
-  \item \textbf{Option 4 --- Variational Laplace AE.}  WAE\,v2 is the full
+  \item \textbf{Option 4 --- Variational Laplace AE.}  \VDT{} is the full
         MC-ELBO version; Laplace covariance
         $(H_{\mathrm{recon}}+\bLambda_m)^{-1}$ is the deterministic
         approximation to the spectral-precision posterior.
   \item \textbf{Option 6 --- Classifier/Reasoner.}  The signed density matrix
-        $\varrho_t=\varrho_t^+-\varrho_t^-$ from the VDT backbone can be used
-        to initialise $S_{\I}$, grounding associative memory in
-        reasoning-time spectral structure.
+        $\varrho_t=\varrho_t^+-\varrho_t^-$ from the \texttt{VibrationalStateBlock}
+        backbone can be used to initialise $S_{\I}$, grounding associative
+        memory in reasoning-time spectral structure.
 \end{itemize}
 
 % =============================================================================
 \section{Relationship to Prior Work}
 \label{sec:related}
 
-WAE\,v2 integrates ideas from several lines of work:
-
 \paragraph{Graph VAEs.}  \citet{kipf2016vgae} encode graph structure
 into a VAE but do not impose Laplacian spectral priors on latent codes or
-loading matrices.  WAE\,v2 makes the spectral structure explicit and
+loading matrices.  \VDT{} makes the spectral structure explicit and
 variational.
 
-\paragraph{Spectral graph convolution.}  Graph spectral methods~\citep{defferrard2016chebynet}
-use Laplacian eigenvectors as filter bases; WAE\,v2 places this basis \emph{in
-the generative model} as the loading matrix parametrisation.
+\paragraph{Spectral graph convolution.}  Graph spectral
+methods~\citep{defferrard2016chebynet} use Laplacian eigenvectors as filter
+bases; \VDT{} places this basis \emph{in the generative model} as the loading
+matrix parametrisation.
 
 \paragraph{Laplacian priors.}  \citet{rao2008laplacian} and
 \citet{slawski2015lapprior} use Laplacian quadratic-form priors for Bayesian
-variable selection; WAE\,v2 applies this to both the loading matrix $\bS$
+variable selection; \VDT{} applies this to both the loading matrix $\bS$
 and (optionally) the latent code $\bz$.
 
 \paragraph{Hopfield / associative memory.}  \citet{ramsauer2020hopfield}
 extended Hopfield networks to continuous attractors; \citet{geva2021ffn} showed
-that transformer FFN layers are key-value memories.  WAE\,v2 unifies these by
-seeding the memory with spectral artefacts from a generative model.
+that transformer FFN layers are key-value memories.  \VDT{} unifies these by
+seeding the memory with spectral artefacts derived from vibrational graph
+dynamics.
 
-\paragraph{VDT backbone.}  The encoder uses the Vibrational Discrete Transformer
-from~\citet{moriondo2026vdt}, which implements a discrete damped wave equation
-in the graph spectral domain as the recurrent state update.
+\paragraph{Vibrational mechanics.}  The \texttt{VibrationalStateBlock}
+recurrence is a direct discretisation of the damped wave equation, connecting
+the architecture to Rayleigh's Theory of Sound~\citep{rayleigh1877sound}.  The
+positive/negative amplitude decomposition ($\varrho_t^+, \varrho_t^-$) is a
+real-valued analogue of the complex amplitude representation in standard
+quantum mechanics, as discussed in~\citet{aaronson2006democritus}~Chapter~9.
 
 % =============================================================================
 \section{Discussion and Open Problems}
 \label{sec:discussion}
 
 \paragraph{Posterior variance head for $\bS$.}
-The current implementation approximates $\log\mathrm{var}_{S,kj}\approx\log(S_{kj}^2+\epsilon)$.
-Adding a dedicated variance head in \texttt{SpectralLoadingDecoder} would give
-a proper amortised Gaussian posterior for $\bS$ and is a prioritised open
-task.
+The current implementation approximates
+$\log\mathrm{var}_{S,kj}\approx\log(S_{kj}^2+\epsilon)$.  Adding a dedicated
+variance head in \texttt{SpectralLoadingDecoder} would give a proper amortised
+Gaussian posterior for $\bS$ and is a prioritised open task.
 
 \paragraph{Laplacian-precision latent KL.}
 PR\,\#35 removed this term from the default ELBO after finding that the
 feedback loop between $\bmu_z$ and the dynamically-constructed $L_s$
 required careful stop-gradient discipline and added training instability.
-A frozen sample Laplacian (refreshed every $T$ epochs) may resolve this;
+A frozen sample Laplacian refreshed every $T$ epochs may resolve this;
 experiments are ongoing.
 
 \paragraph{Nonlinear value function.}
 The current spectral artefact uses a linear decoder approximation
 $d_\theta(\hat{\bm{w}}_k)\approx\hat{\bm{w}}_k$ for constructing $S_{\I}$.
 Using the full \texttt{DiffusionDecoder} response at each spectral direction
-would produce a proper key-value Hopfield structure and is left as future work.
+would produce a proper key-value Hopfield structure and is left as future
+work.
 
 \paragraph{Iterative eigensolver.}
 For large graphs ($N\gg 10^3$), truncated LOBPCG or ARPACK can replace
 full \texttt{eigh} in the offline phase, reducing the preprocessing cost
 from $O(N^3)$ to $O(N\cdot q)$.
 
+\paragraph{Complex-number-free quantum analogy.}
+A core motivation for the signed density matrix $\varrho_t = \varrho_t^+ -
+\varrho_t^-$ is to represent quantum-like superposition without complex
+numbers, following the observation in~\citet{aaronson2006democritus} that
+negative probability amplitudes already capture the essential interference
+phenomena of quantum mechanics.  The graph Laplacian in feature space serves
+as the minimal structure that admits this representation: its eigenmodes
+carry the role of quantum basis states, and the signed weights $\omega_k^+ -
+\omega_k^-$ play the role of real-valued amplitudes.  Formalising this
+correspondence is an open theoretical question.
+
 % =============================================================================
 \section{Conclusion}
 \label{sec:conclusion}
 
-WAE\,v2 upgrades the Wiring Autoencoder from a heuristically regularised
-generative model to a principled Bayesian VAE in which the latent space and
-loading matrix are explicitly shaped by Laplacian spectral geometry provided by
-an ArrowSpace index.  The three-term ELBO (Eq.~\ref{eq:elbo_v2}) replaces the
-hard $J_{\mathrm{freq}}$ penalty with interpretable variational KL terms; the
-two-phase offline/online architecture eliminates runtime eigensolves; and the
-spectral artefact $\A(\I)$ provides a principled initialiser for transformer
-associative memory.  ELBO Bayes factors make ArrowSpace index selection a
-first-class modelling decision.
+The \vdt{} (\VDT) reframes the Wiring Autoencoder as a principled Bayesian
+VAE in which the latent space and loading matrix are explicitly shaped by
+Laplacian spectral geometry provided by an ArrowSpace index.  The
+three-term ELBO (\cref{eq:elbo_vdt}) replaces the hard $J_{\mathrm{freq}}$
+penalty with interpretable variational KL terms grounded in vibrational
+physics; the two-phase offline/online architecture eliminates runtime
+eigensolves; and the spectral artefact $\A(\I)$ provides a principled
+initialiser for transformer associative memory whose keys are the natural
+resonances of the data graph.  ELBO Bayes factors make ArrowSpace index
+selection a first-class modelling decision.  The signed density matrix
+$\varrho_t = \varrho_t^+ - \varrho_t^-$ maintained throughout the
+\texttt{VibrationalStateBlock} recurrence establishes a real-valued analogue
+of quantum amplitude representation, connecting the architecture to both
+Rayleigh's theory of vibrating systems and the foundational question of
+whether negative probability amplitudes suffice to recover quantum-like
+behaviour without complex numbers.
 
 % =============================================================================
 \bibliographystyle{abbrvnat}
