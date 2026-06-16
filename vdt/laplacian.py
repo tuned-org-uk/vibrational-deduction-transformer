@@ -220,9 +220,14 @@ class DifferentiableLaplacian(nn.Module):
 
         The per-batch edge weight update rule is:
 
-            w_ij^{(b)} = base_w_ij * sigmoid( -||W_i^{(b)} - W_j^{(b)}||^2 )
+            w_ij^{(b)} = base_aff_ij * sigmoid( -||W_i^{(b)} - W_j^{(b)}||^2 )
 
-        where base_w_ij is recovered from the off-diagonal of L_base.
+        where base_aff_ij is the symmetric affinity recovered from the
+        off-diagonal of L_base.  For a normalised symmetric Laplacian
+        L = I - D^{-1/2} A D^{-1/2}, the off-diagonal entries satisfy
+        L_ij = -(D^{-1/2} A D^{-1/2})_ij <= 0, so the base affinity
+        matrix is A_base = -(L_base - I), clamped to >= 0.
+
         In the standard case d == N.
 
         Parameters
@@ -230,19 +235,25 @@ class DifferentiableLaplacian(nn.Module):
         W : Tensor  shape (B, d, q)
             Spectral loading matrix from the decoder.  d must equal N.
         L_base : Tensor  shape (N, N)
-            Frozen base Laplacian encoding the graph topology.
+            Frozen normalised symmetric Laplacian encoding the graph topology.
             Obtain via DifferentiableLaplacian.base_laplacian.
 
         Returns
         -------
         L : Tensor  shape (B, N, N)
-            Per-batch normalised symmetric Laplacian.  Gradient flows
-            through all operations back to W.
+            Per-batch normalised symmetric Laplacian.  Guaranteed to have:
+              - zero row sums
+              - non-positive off-diagonal entries
+              - symmetry
+            Gradient flows through all operations back to W.
 
         Notes
         -----
-        Zero row-sum and non-positive off-diagonal are guaranteed by
-        construction of the normalised symmetric Laplacian.
+        The previous implementation applied clamp(min=0) to
+        (-L_base * (1 - eye)), which zero-ed the off-diagonal because
+        those entries in a normalised Laplacian are already <= 0, giving
+        A_base = 0 and L = I (row sums = 1).  The corrected formula
+        negates (L_base - eye) to recover the positive affinity values.
         """
         B, d, q = W.shape
         N = L_base.shape[0]
@@ -254,10 +265,11 @@ class DifferentiableLaplacian(nn.Module):
         eps = 1e-6
 
         # Recover base affinities from the off-diagonal of L_base.
-        # For a normalised symmetric Laplacian, off-diagonal entries are
-        # -D^{-1/2} A D^{-1/2}, so base affinities are their negations.
+        # For a normalised symmetric Laplacian L = I - D^{-1/2} A D^{-1/2},
+        # off-diagonal entries are  L_ij = -(D^{-1/2} A D^{-1/2})_ij  (<= 0).
+        # So the positive affinity matrix is  A_base = -(L_base - I).
         eye = torch.eye(N, device=device, dtype=dtype)
-        A_base = (-L_base * (1.0 - eye)).clamp(min=0.0)  # (N, N)
+        A_base = (-(L_base - eye)).clamp(min=0.0)  # (N, N), non-negative
 
         # Pairwise squared distance in loading space: (B, N, N)
         # W: (B, N, q)  --  ||W_i - W_j||^2
