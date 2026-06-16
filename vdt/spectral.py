@@ -472,17 +472,27 @@ def tau_mode_kl(
     mode prior.
 
     For each mode k, the posterior is:
-        q(omega_k) = Gamma( a_k, b_k )
+        q(omega_k) = Gamma( a_k, b_k )   (rate parameterisation)
     and the prior is:
         p(omega_k | tau, lambda_k) = Exponential( tau * lambda_k )
                                    = Gamma(1, tau * lambda_k)
 
-    Closed-form KL (Gamma || Exponential)::
+    Closed-form derivation::
 
-        KL( Gamma(a, b) || Exp(r) )
-          = log(b) - log(r) + lgamma(a) + (1-a)*digamma(a) + a*b/r
+        KL( Gamma(a,b) || Exp(r) )
+          = E_q[log q(omega) - log p(omega)]
+          = -H[Gamma(a,b)] - log(r) + r * E_q[omega]
 
-    where r = tau * lambda_k.
+        where, for Gamma with rate parameterisation:
+          E_q[omega]    = a / b
+          H[Gamma(a,b)] = a - log(b) + lgamma(a) + (1-a)*digamma(a)
+
+        Substituting::
+
+          KL = -(a - log(b) + lgamma(a) + (1-a)*digamma(a)) - log(r) + r*(a/b)
+             = log(b) - log(r) - lgamma(a) - (1-a)*digamma(a) - a + a*r/b
+
+        Note the sign on lgamma and the final term a*r/b (NOT a*b/r).
 
     Parameters
     ----------
@@ -508,12 +518,16 @@ def tau_mode_kl(
     r = (tau * eigvals_q.clamp(min=1e-6)).unsqueeze(0)  # (1, q)
 
     # Closed-form KL( Gamma(a,b) || Exp(r) = Gamma(1, r) )
+    # Derivation:  KL = -H[Gamma(a,b)] - log(r) + r*(a/b)
+    #   H[Gamma(a,b)] = a - log(b) + lgamma(a) + (1-a)*digamma(a)
+    # => KL = log(b) - log(r) - lgamma(a) - (1-a)*digamma(a) - a + a*r/b
     kl = (
         log_b                              # log b
         - r.log()                          # - log r
-        + torch.lgamma(a)                  # lgamma(a)
-        + (1.0 - a) * torch.digamma(a)     # (1 - a) * psi(a)
-        + a * b / r                        # a * b / r
+        - torch.lgamma(a)                  # - lgamma(a)
+        - (1.0 - a) * torch.digamma(a)     # - (1-a)*digamma(a)
+        - a                                # - a
+        + a * r / b                        # + a*r/b   (was a*b/r -- wrong)
     )  # (B, q)
 
     # Sum over q modes, mean over batch.
