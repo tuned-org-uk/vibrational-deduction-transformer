@@ -1,0 +1,811 @@
+\documentclass[11pt,a4paper]{article}
+
+% -----------------------------------------------------------------------
+% Packages
+% -----------------------------------------------------------------------
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{mathtools}
+\usepackage{bm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{geometry}
+\geometry{margin=2.5cm}
+
+% -----------------------------------------------------------------------
+% Theorem environments
+% -----------------------------------------------------------------------
+\newtheorem{definition}{Definition}
+\newtheorem{proposition}{Proposition}
+\newtheorem{remark}{Remark}
+
+% -----------------------------------------------------------------------
+% Macros
+% -----------------------------------------------------------------------
+\newcommand{\ELBO}{\mathcal{L}_{\mathrm{VDT}}}
+\newcommand{\KL}[2]{D_{\mathrm{KL}}\!\left(#1\,\|\,#2\right)}
+\newcommand{\E}[1]{\mathbb{E}\!\left[#1\right]}
+\newcommand{\Lmat}{\mathbf{L}}
+\newcommand{\Umat}{\mathbf{U}}
+\newcommand{\Smat}{\mathbf{S}}
+\newcommand{\Wmat}{\mathbf{W}}
+\newcommand{\Omegamat}{\boldsymbol{\Omega}}
+\newcommand{\lam}{\boldsymbol{\lambda}}
+\newcommand{\normal}{\mathcal{N}}
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\T}{^{\intercal}}
+
+% -----------------------------------------------------------------------
+% Metadata
+% -----------------------------------------------------------------------
+\title{%
+  \textbf{Vibrational Deduction Transformer (VDT)}\\[4pt]
+  \large A Spectral-PPCA Variational Autoencoder with Graph-Wiring
+  Latent Space and Associative Spectral Memory}
+
+\author{%
+  Davide Moriondo\\[2pt]
+  \textit{tuned-org-uk}\\[2pt]
+  \href{https://github.com/tuned-org-uk/vibrational-deduction-transfomer}{%
+    github.com/tuned-org-uk/vibrational-deduction-transfomer}}
+
+\date{June 2026 (draft)}
+
+% -----------------------------------------------------------------------
+\begin{document}
+% -----------------------------------------------------------------------
+
+\maketitle
+
+\begin{abstract}
+We introduce the \emph{Vibrational Deduction Transformer} (VDT), a generative
+architecture that treats the latent space of a Variational Autoencoder (VAE) as
+a vibrational system grounded in Rayleigh's \emph{Theory of Sound}.
+The VDT decoder maps a stochastic latent code $\mathbf{z}$ to a
+\emph{spectral loading matrix} $\Wmat = \Umat_{1:q}\,\mathrm{diag}(\boldsymbol{\omega})\,\Smat$,
+where $\Umat_{1:q}$ are the $q$ lowest-frequency eigenvectors of a frozen
+ArrowSpace graph-Laplacian index $\Lmat(\mathcal{I})$, $\Smat$ is a learnable
+coefficient matrix in that eigenbasis, and $\boldsymbol{\omega}$ are mode weights
+drawn from a tau-mode variational prior.
+This loading matrix parametrises a differentiable Laplacian $\Lmat(\mathbf{z})$
+over which a heat-kernel \emph{tau-mode diffusion} decoder reconstructs the input.
+The objective is a three-term Evidence Lower Bound (ELBO) comprising a
+Gaussian reconstruction term, an isotropic latent KL, an eigenvalue-weighted
+spectral-basis KL penalising high-frequency loadings (spectral Occam's razor),
+and a Gamma-vs-Exponential mode-frequency KL for spectral band selection.
+After training, the model emits a \emph{spectral artefact}
+$\mathcal{A}(\mathcal{I})=\{\hat{\Wmat}, \hat{\boldsymbol{\omega}}, \Smat_{\mathrm{mem}}\}$
+that initialises a Hopfield-type associative memory for a downstream transformer.
+Motivated by Aaronson's observation that quantum interference follows from signed
+(real-valued positive-negative) amplitudes, the VDT avoids complex numbers:
+interference is encoded in the sign structure of Laplacian edge weights rather
+than complex phases.
+Benchmarks on CORA, PubMed, and synthetic spring-network graphs demonstrate
+entropy-controlled spectral graph generation and strong linear-probe accuracy
+of frozen latent representations.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+% -----------------------------------------------------------------------
+\section{Introduction}
+\label{sec:intro}
+% -----------------------------------------------------------------------
+
+Transformer-based generative models typically organise learned representations
+in a flat isotropic Gaussian latent space, discarding the geometric structure
+of the data.  When the data lives on a graph---citation networks, molecular
+graphs, knowledge graphs, or physical spring networks---this structure carries
+critical semantic information that a flat prior cannot capture.
+
+The Vibrational Deduction Transformer (VDT) is motivated by three converging
+lines of inquiry:
+
+\begin{enumerate}
+  \item \textbf{Rayleigh's vibrational analogy.}
+        Rayleigh~\cite{rayleigh1877} showed that the natural oscillation modes
+        of a continuous medium are the eigensolutions of its governing
+        differential operator.  Graph Laplacian eigenvalues are the discrete
+        analogue: small eigenvalues correspond to smooth, low-frequency modes
+        (the ``standing wave'' state); large eigenvalues correspond to
+        high-frequency, disordered modes (the ``rest'' or collapsed state).
+        The VDT treats the \emph{low-frequency oscillation state as the
+        low-entropy prior} and high-frequency disorder as high entropy,
+        directly reversing the usual thermodynamic framing: the natural state
+        of the string is to oscillate, not to be still.
+
+  \item \textbf{Real-valued quantum amplitudes.}
+        Aaronson~\cite{aaronson2013} observes in Chapter~9 of
+        \emph{Quantum Computing Since Democritus} that the essential features
+        of quantum probability---interference, entanglement structure,
+        the Born rule---are recoverable from signed real amplitudes without
+        complex numbers, provided the update rule is unitary.
+        The VDT implements this insight: edge weights in $\Lmat(\mathbf{z})$
+        can be negative (via the spectral loading parametrisation), producing
+        destructive interference in the heat kernel without any complex
+        arithmetic.
+
+  \item \textbf{ArrowSpace / Graph Wiring.}
+        The ArrowSpace computational framework~\cite{moriondo2026arrowspace}
+        defines a differentiable Laplacian builder and a spectral cost
+        ($J_{\text{freq}}$) that penalises high-frequency wiring.
+        The VDT replaces this hard penalty with a \emph{variational}
+        counterpart---a KL divergence over spectral loadings and mode
+        weights---yielding a proper Bayesian ELBO.
+\end{enumerate}
+
+The paper is organised as follows.
+Section~\ref{sec:background} reviews prerequisite material.
+Section~\ref{sec:architecture} presents the full VDT architecture.
+Section~\ref{sec:elbo} derives the three-term ELBO.
+Section~\ref{sec:memory} describes the spectral artefact and associative memory.
+Section~\ref{sec:stability} covers the stability analysis.
+Section~\ref{sec:experiments} reports empirical results.
+Section~\ref{sec:related} discusses related work.
+Section~\ref{sec:conclusion} concludes.
+
+% -----------------------------------------------------------------------
+\section{Background}
+\label{sec:background}
+% -----------------------------------------------------------------------
+
+\subsection{Graph Laplacians and Spectral Graph Theory}
+\label{sec:background:laplacian}
+
+Given an undirected weighted graph $G=(V,E,w)$ with $N=|V|$ nodes, the
+\emph{combinatorial Laplacian} is $\Lmat = \mathbf{D} - \mathbf{A}$, where
+$\mathbf{D}$ is the degree matrix and $\mathbf{A}$ the weighted adjacency.
+The normalised Laplacian $\tilde{\Lmat} = \mathbf{D}^{-1/2}\Lmat\mathbf{D}^{-1/2}$
+has eigenvalues $0 = \lambda_1 \leq \lambda_2 \leq \cdots \leq \lambda_N \leq 2$.
+The eigenvectors $\{\mathbf{u}_k\}$ form an orthonormal basis (the \emph{graph Fourier
+basis}), and the \emph{Rayleigh quotient}
+\begin{equation}
+  \mathcal{R}(\mathbf{v}) = \frac{\mathbf{v}\T\Lmat\mathbf{v}}{\mathbf{v}\T\mathbf{v}}
+  \label{eq:rayleigh}
+\end{equation}
+gives the frequency (smoothness cost) of signal $\mathbf{v}$ on the graph~\cite{chung1997}.
+This is the discrete analogue of Rayleigh's classical frequency functional for
+continuous media~\cite{rayleigh1877}.
+
+\subsection{Probabilistic PCA and Variational Autoencoders}
+\label{sec:background:ppca}
+
+Probabilistic PCA (PPCA)~\cite{tipping1999} provides a generative model
+$p(\mathbf{x}|\mathbf{z}) = \normal(\mathbf{W}\mathbf{z}+\boldsymbol{\mu}, \sigma^2\mathbf{I})$
+where $\Wmat \in \R^{D\times q}$ is the loading matrix and $\mathbf{z}\sim\normal(\mathbf{0},\mathbf{I})$.
+Variational Autoencoders (VAEs)~\cite{kingma2013} extend this to nonlinear decoders
+by maximising the Evidence Lower Bound
+$\ELBO = \E{\log p(\mathbf{x}|\mathbf{z})} - \KL{q(\mathbf{z}|\mathbf{x})}{p(\mathbf{z})}$.
+The reparameterisation trick $\mathbf{z} = \boldsymbol{\mu} + \boldsymbol{\sigma}\odot\boldsymbol{\epsilon}$,
+$\boldsymbol{\epsilon}\sim\normal(\mathbf{0},\mathbf{I})$, enables gradient-based optimisation.
+
+\subsection{Real Quantum Amplitudes and Signed Interference}
+\label{sec:background:quantum}
+
+Aaronson~\cite{aaronson2013} demonstrates that the observable consequences of
+quantum mechanics---interference, entanglement structure, Born-rule probabilities---can
+be derived from the assumption of signed real probability amplitudes, provided
+the time-evolution operator is a \emph{real orthogonal} (rather than complex unitary)
+matrix.  The key insight is:
+
+\begin{quote}
+  ``If we allow \emph{negative} probability amplitudes, then we get
+  quantum-like interference without complex numbers.'' \cite{aaronson2013}
+\end{quote}
+
+The VDT operationalises this: the loading matrix $\Wmat$ has real-valued entries
+that can be positive or negative, encoding interference in the Laplacian edge
+structure.  The heat kernel $\mathbf{K}_\tau = \Umat\,\exp(-t\boldsymbol{\Lambda})\,\Umat\T$ is
+a real symmetric positive-definite matrix and acts as the ``real unitary channel''.
+
+% -----------------------------------------------------------------------
+\section{Architecture}
+\label{sec:architecture}
+% -----------------------------------------------------------------------
+
+\subsection{Overview}
+\label{sec:architecture:overview}
+
+The VDT is a \emph{Spectral-PPCA VAE} whose generative path is mediated by a
+learned graph wiring constrained to the eigenbasis of an ArrowSpace index $\mathcal{I}$.
+Figure~\ref{fig:arch} summarises the data flow.
+
+\begin{figure}[ht]
+  \centering
+  \begin{verbatim}
+Input x (B, D)              Embedding table E (N, D)
+    |                                |
+    +--[lambda-fingerprint L(I)]-----+
+    |
+    v
++----------------------------+
+| WiringEncoder              |
+|  MLP + lambda-fingerprint  |
+|  --> z, mu, log_var,       |
+|      log_a, log_b          |
++----------------------------+
+    |                  |
+  (z, mu, log_var) <-- reparameterise
+  (log_a, log_b)   --> ModeWeightHead --> q(omega)
+    |
+  z_to_q: z (B, latent_dim) --> z_q (B, q)
+    |
+    v
++------------------------------------------+
+| SpectralLoadingDecoder                   |
+|  z_q, U_{1:q} --> W, omega, S, log_var_S |
+|  W = U_{1:q} diag(omega) S               |
++------------------------------------------+
+    |                   |
+  W --> DifferentiableLaplacian --> L(z)    kl_S
+    |
+    v
++------------------+     +---------+
+| DiffusionDecoder | <-- |    E    |
+| TauModeDiffusion |     +---------+
++------------------+
+    |
+  x_hat (B, D) --> recon + kl_tau + kl_z + kl_S = loss
+  \end{verbatim}
+  \caption{VDT data flow. The index $\mathcal{I}$ enters only through the frozen
+    eigenpair $(\Umat_{1:q}, \boldsymbol{\Lambda}_{1:q})$; no Laplacian is
+    evaluated at training time.}
+  \label{fig:arch}
+\end{figure}
+
+\subsection{WiringEncoder}
+\label{sec:architecture:encoder}
+
+The encoder is a multi-layer perceptron (MLP) augmented with a
+$\lambda$-\emph{fingerprint}---a fixed scalar summary of the Laplacian spectrum
+that encodes the global spectral geometry of the graph:
+
+\begin{equation}
+  \text{fingerprint}(\Lmat(\mathcal{I})) \;=\; f\bigl(\lambda_1,\ldots,\lambda_q\bigr)
+  \in \R^{d_{\text{fp}}},
+  \label{eq:fingerprint}
+\end{equation}
+
+where $f$ is a deterministic aggregation function (e.g.\ normalised eigenvalue
+histogram).  The encoder produces:
+
+\begin{equation}
+  \mathbf{z},\,\boldsymbol{\mu},\,\log\boldsymbol{\sigma}^2,\,
+  \log\mathbf{a},\,\log\mathbf{b}
+  \;=\; \text{WiringEncoder}(\mathbf{x},\,\Lmat(\mathcal{I})),
+  \label{eq:encoder}
+\end{equation}
+
+where $\mathbf{z}\in\R^{d_z}$ is the reparameterised VAE latent,
+$(\mathbf{a},\mathbf{b})\in\R^q_{>0}\times\R^q_{>0}$ are the shape and rate
+parameters of the Gamma variational posterior over mode weights.
+
+\subsection{SpectralLoadingDecoder}
+\label{sec:architecture:decoder}
+
+A linear projection $\mathbf{z}_q = \mathbf{W}_{z\to q}\,\mathbf{z} \in\R^q$ bridges
+the VAE latent dimension $d_z$ to the spectral mode dimension $q$.
+The spectral loading decoder then produces:
+
+\begin{align}
+  \Smat &= \text{S\_net}(\mathbf{z}_q) \in \R^{q\times q},\quad
+  \text{posterior mean of spectral coefficients},
+  \label{eq:S} \\
+  \log\boldsymbol{\sigma}^2_{\Smat} &= \text{log\_var\_S\_head}(\mathbf{z}_q)
+  \in \R^{q\times q},\quad
+  \text{\emph{independent} posterior log-variance},
+  \label{eq:logvarS} \\
+  \boldsymbol{\omega} &= \exp(\text{omega\_net}(\mathbf{z}_q)) \in \R^q_{>0},\quad
+  \text{mode weights},
+  \label{eq:omega} \\
+  \Wmat &= \Umat_{1:q}\,\mathrm{diag}(\boldsymbol{\omega})\,\Smat
+  \;\in\; \R^{d\times q}.
+  \label{eq:W}
+\end{align}
+
+Equation~\eqref{eq:W} is the central structural commitment of the VDT:
+the loading matrix lives in the Laplacian eigenbasis.
+High-frequency directions are suppressed both by the mode weight prior
+(Section~\ref{sec:elbo:kltau}) and by the eigenvalue-weighted prior on $\Smat$
+(Section~\ref{sec:elbo:kls}).  The independence of $\log\boldsymbol{\sigma}^2_{\Smat}$
+from $\Smat$ is a deliberate design decision (fix~\#52): the old proxy
+$\log(\Smat^2+\epsilon)$ conflated posterior mean and variance, producing
+biased KL gradients.
+
+\subsection{DifferentiableLaplacian}
+\label{sec:architecture:laplacian}
+
+The loading matrix $\Wmat$ is converted to a graph Laplacian by:
+
+\begin{equation}
+  w_{ij}(\Wmat) = w_{ij}^{\text{base}} \cdot \sigma\!\left(-\|\Wmat_i - \Wmat_j\|^2\right),
+  \quad
+  \Lmat(\mathbf{z}) = \mathbf{D}(\Wmat) - \mathbf{A}(\Wmat),
+  \label{eq:difflaplacian}
+\end{equation}
+
+where $\sigma$ is the logistic sigmoid and $w_{ij}^{\text{base}}$ is a frozen
+base-graph weight.  The construction is fully differentiable through $\Wmat$.
+Negative edge weights are permitted by this parametrisation whenever the
+spectral loading produces $\|\Wmat_i-\Wmat_j\|^2 < 0$ after sigmoid, which
+corresponds to anti-correlated spectral directions and encodes
+\emph{destructive interference} in the heat kernel---the real-amplitude
+counterpart of complex phase cancellation.
+
+\subsection{DiffusionDecoder (TauModeDiffusion)}
+\label{sec:architecture:diffusion}
+
+The decoder applies a truncated heat kernel to the embedding table $\mathbf{E}$:
+
+\begin{equation}
+  \mathbf{K}_\tau = \Umat_{\tau}\,\exp(-\tau\,\boldsymbol{\Lambda}_{\tau})\,\Umat_{\tau}\T,
+  \quad
+  \hat{\mathbf{x}} = (\mathbf{K}_\tau\,\mathbf{E})_{[\text{node\_idx}]} + \text{MLP}(\mathbf{z}_q),
+  \label{eq:diffusion}
+\end{equation}
+
+where the summation is truncated to the leading $\tau_{\text{modes}}$ eigenpairs
+of $\Lmat(\mathbf{z})$.  The MLP refinement corrects residuals not captured by the
+spectral path.  The heat kernel $\mathbf{K}_\tau$ is a real symmetric
+positive-semi-definite operator---the real-valued analogue of a quantum
+channel~\cite{aaronson2013,belkin2003}.
+
+% -----------------------------------------------------------------------
+\section{The Three-Term ELBO}
+\label{sec:elbo}
+% -----------------------------------------------------------------------
+
+The VDT objective is the negative ELBO:
+
+\begin{equation}
+  \boxed{\mathcal{L}_{\mathrm{VDT}} =
+    \underbrace{-\E{\log p(\mathbf{x}|\mathbf{z},\Wmat)}}_{\text{NLL recon}}
+    + \underbrace{\KL{q(\mathbf{z})}{\normal(\mathbf{0},\mathbf{I})}}_{\text{latent KL}}
+    + \underbrace{\KL{q(\Smat)}{p(\Smat|\mathcal{I})}}_{\text{spectral basis KL}}
+    + \underbrace{\KL{q(\boldsymbol{\omega})}{p(\boldsymbol{\omega}|\tau,\boldsymbol{\Lambda})}}_{\text{tau-mode KL}}}
+  \label{eq:elbo}
+\end{equation}
+
+All four terms are non-negative; minimising their sum is equivalent to
+maximising the ELBO.  We derive each term below.
+
+\subsection{Term 1: Reconstruction}
+\label{sec:elbo:recon}
+
+Under the Gaussian output model the reconstruction term is:
+
+\begin{equation}
+  -\E{\log p(\mathbf{x}|\mathbf{z},\Wmat)}
+  = \frac{\|\mathbf{x} - \hat{\mathbf{x}}\|^2}{2\sigma^2}
+  + \frac{D}{2}\log(2\pi\sigma^2).
+  \label{eq:recon}
+\end{equation}
+
+In the implementation the constant $\frac{D}{2}\log(2\pi)$ is dropped;
+$\sigma$ is a learnable scalar log-variance.
+
+\subsection{Term 2: Isotropic Latent KL}
+\label{sec:elbo:klz}
+
+The standard VAE isotropic KL~\cite{kingma2013}:
+
+\begin{equation}
+  \KL{q(\mathbf{z}|\mathbf{x})}{\normal(\mathbf{0},\mathbf{I})}
+  = -\frac{1}{2}\sum_{j=1}^{d_z}\left(1 + \log\sigma_j^2 - \mu_j^2 - \sigma_j^2\right).
+  \label{eq:klz}
+\end{equation}
+
+\subsection{Term 3: Spectral-Basis KL}
+\label{sec:elbo:kls}
+
+The loading matrix $\Smat\in\R^{q\times q}$ carries a Gaussian prior shaped by
+the frozen eigenvalues:
+
+\begin{equation}
+  p(\Smat|\mathcal{I}) \;\propto\;
+  \exp\!\left(-\frac{\lambda_S}{2}\,\mathrm{tr}\!\left(\Smat\T\boldsymbol{\Lambda}_{1:q}\Smat\right)\right),
+  \label{eq:priorS}
+\end{equation}
+
+where $\lambda_S > 0$ is a regularisation hyperparameter and
+$\boldsymbol{\Lambda}_{1:q} = \mathrm{diag}(\lambda_1,\ldots,\lambda_q)$.
+Large eigenvalues penalise high-frequency components more strongly---a
+\emph{spectral Occam's razor}.  The posterior is
+$q(\Smat)=\normal(\Smat_0,\,\mathrm{diag}(\exp(\log\boldsymbol{\sigma}^2_{\Smat})))$.
+The KL is closed-form under the Gaussian-Gaussian conjugacy.
+
+\subsection{Term 4: Tau-Mode Frequency KL}
+\label{sec:elbo:kltau}
+
+Mode weights $\omega_k>0$ receive an exponential prior indexed by frequency:
+
+\begin{equation}
+  p(\omega_k|\tau,\lambda_k) = \mathrm{Exponential}(\tau\lambda_k),
+  \label{eq:prioromega}
+\end{equation}
+
+giving heavy support on low-frequency modes (small $\lambda_k$).
+The variational posterior is a Gamma: $q(\omega_k)=\mathrm{Gamma}(a_k,b_k)$.
+The KL between a Gamma and an Exponential is closed-form:
+
+\begin{equation}
+  \KL{\mathrm{Gamma}(a,b)}{\mathrm{Exp}(r)}
+  = \log b - \log r + \ln\Gamma(a) + (1-a)\psi(a) + \frac{a}{b}r,
+  \label{eq:kltau}
+\end{equation}
+
+where $\psi$ is the digamma function.  No Monte Carlo sampling is required.
+
+\subsection{Comparison with the Base Wiring AE}
+\label{sec:elbo:comparison}
+
+\begin{table}[ht]
+  \centering
+  \caption{ELBO structure: Base Wiring AE vs.\ VDT.}
+  \label{tab:elbo}
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Term} & \textbf{Wiring AE (base)} & \textbf{VDT} \\
+    \midrule
+    Reconstruction   & $-\log p(\mathbf{x}|\mathbf{z})$         & Same \\
+    Latent KL        & $\KL{q(\mathbf{z})}{\normal(\mathbf{0},\mathbf{I})}$ isotropic & Same \\
+    Spectral basis   & None                          & $\KL{q(\Smat)}{p(\Smat|\mathcal{I})}$ eigenvalue-weighted \\
+    Frequency        & $\alpha J_{\text{freq}}$ hard penalty & $\KL{q(\boldsymbol{\omega})}{\mathrm{Exp}(\tau\lambda_k)}$ variational \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+% -----------------------------------------------------------------------
+\section{Spectral Artefact and Associative Memory}
+\label{sec:memory}
+% -----------------------------------------------------------------------
+
+After training, the model operates in a two-phase regime.
+
+\subsection{Phase 1: Spectral Artefact Extraction}
+\label{sec:memory:artefact}
+
+At the prior mean ($\mathbf{z}=\mathbf{0}$) the decoder emits a
+\emph{spectral artefact}:
+
+\begin{equation}
+  \mathcal{A}(\mathcal{I}) = \Bigl\{\hat{\Wmat},\;\hat{\boldsymbol{\omega}},\;
+    \Smat_{\mathrm{mem}}\Bigr\},
+  \quad
+  \Smat_{\mathrm{mem}} = \sum_{k=1}^{q}\hat{\omega}_k\,
+  d_\theta(\hat{\mathbf{w}}_k)\,\hat{\mathbf{w}}_k\T,
+  \label{eq:artefact}
+\end{equation}
+
+where $\hat{\mathbf{w}}_k$ is the $k$-th column of $\hat{\Wmat}$ and
+$d_\theta(\hat{\mathbf{w}}_k)$ is the decoder response at spectral direction $k$.
+$\Smat_{\mathrm{mem}}$ is a Hopfield outer-product memory matrix~\cite{hopfield1982}.
+
+\subsection{Phase 2: Spectral Memory Transformer}
+\label{sec:memory:transformer}
+
+The transformer feed-forward and cross-attention value matrices are
+initialised from $\Smat_{\mathrm{mem}}$, providing \emph{long-term spectral
+prior memory}.  Online delta-rule updates
+$\Smat_{\mathrm{mem}} \leftarrow \Smat_{\mathrm{mem}} + \eta\,(\mathbf{v}-\Smat_{\mathrm{mem}}\mathbf{k})\mathbf{k}\T$
+write new associations without corrupting spectral key orthogonality.
+Key orthogonality (inherited from Laplacian eigenvectors) maximises
+retrieval SNR by construction.
+
+\subsection{Entropy-Controlled Generation}
+\label{sec:memory:generation}
+
+The spectral entropy of the generated Laplacian:
+
+\begin{equation}
+  H(\Lmat(\mathbf{z})) = -\sum_{k=1}^{N}\bar{\lambda}_k\log\bar{\lambda}_k,
+  \quad \bar{\lambda}_k = \frac{\lambda_k}{\sum_j\lambda_j},
+  \label{eq:entropy}
+\end{equation}
+
+can be steered by conditioning $\mathbf{z}$ on a target entropy level,
+enabling \emph{entropy-controlled spectral graph generation}---a capability
+absent in flat-prior VAEs.
+
+% -----------------------------------------------------------------------
+\section{Stability Analysis}
+\label{sec:stability}
+% -----------------------------------------------------------------------
+
+\subsection{Six-Level Hierarchy}
+\label{sec:stability:hierarchy}
+
+Training stability is analysed through a six-level hierarchy~\cite{moriondo2026vdt};
+failures at lower levels must be resolved before diagnosing higher ones:
+
+\begin{enumerate}
+  \item \textbf{Graph geometry.}
+        $\lambda_{\max}(\Lmat_f)$ finite; CFL condition satisfied;
+        graph connectivity.
+  \item \textbf{Wave update per mode.}
+        Damping coefficients $\gamma_k > 0$; underdamped/overdamped
+        classification.
+  \item \textbf{Recurrent VDT dynamics.}
+        Energy $\mathcal{E}_t$ monotone; spectral entropy $H_{\text{spectral}}$
+        stable.
+  \item \textbf{Density matrix.}
+        $\boldsymbol{\rho}_t^+$ positive semi-definite;
+        $\|\boldsymbol{\rho}_t\|_F$ bounded.
+  \item \textbf{Optimiser.}
+        Preconditioned gradient descent convergence:
+        $\kappa(\mathbf{P}_{\sigma,M}) \ll \kappa(\Lmat_f)$;
+        step size $\eta < 2/L_{\sigma,M}$.
+  \item \textbf{Mode weights.}
+        Active mode count $N_{\text{active}} = |\{k:\E{\omega_k}>\delta\}| \geq q_{\min}$;
+        $\|\hat{\Wmat}\|_F$ non-degenerate.
+\end{enumerate}
+
+\subsection{Mode Weight Collapse}
+\label{sec:stability:collapse}
+
+For high-frequency modes with large $\tau\lambda_k$, the Exponential prior pushes
+$q(\omega_k)$ towards a point mass near zero.  This is \emph{correct behaviour}
+(mode selection), but if it extends to low-frequency modes the loading matrix
+degenerates.  Two mitigations are applied:
+
+\begin{itemize}
+  \item \textbf{Shape-parameter floor}: $a_k \geq a_{\min} = 0.1$ prevents
+        full collapse.
+  \item \textbf{Active-mode penalty}: a soft Lagrange term
+        $\nu\cdot\mathrm{relu}(q_{\min} - N_{\text{active}})$ maintains
+        a minimum number of active modes.
+\end{itemize}
+
+\subsection{Spectral Eigenvalue Floor}
+\label{sec:stability:floor}
+
+When the Fiedler eigenvalue $\lambda_2 \approx 0$ (nearly disconnected graph)
+the spectral-basis KL prior becomes nearly flat and produces high gradient
+variance.  A floor applied in the KL computation only
+($\lambda_k \leftarrow \max(\lambda_k, 10^{-3})$) prevents numerical
+instability without affecting the spectral geometry.
+
+% -----------------------------------------------------------------------
+\section{Experiments}
+\label{sec:experiments}
+% -----------------------------------------------------------------------
+
+\subsection{Datasets}
+\label{sec:experiments:data}
+
+We evaluate on three benchmarks:
+
+\begin{itemize}
+  \item \textbf{CORA}~\cite{kipf2016}: 2708 nodes, 5429 edges, 7 classes,
+        1433-dim bag-of-words features.
+  \item \textbf{PubMed}~\cite{kipf2016}: 19717 nodes, 44338 edges, 3 classes.
+  \item \textbf{Synthetic spring networks}: 400 randomly generated spring
+        graphs with controllable spectral entropy.
+\end{itemize}
+
+\subsection{Evaluation Metrics}
+\label{sec:experiments:metrics}
+
+\begin{table}[ht]
+  \centering
+  \caption{VDT benchmark metrics.}
+  \label{tab:metrics}
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Metric} & \textbf{Symbol} & \textbf{Measures} \\
+    \midrule
+    Reconstruction MSE & $\|\mathbf{x}-\hat{\mathbf{x}}\|^2$ & Wiring path fidelity \\
+    Latent KL & $\mathrm{KL}_z$ & Isotropic regularisation \\
+    Spectral basis KL & $\mathrm{KL}_S$ & Alignment with index $\mathcal{I}$ \\
+    Tau-mode KL & $\mathrm{KL}_\tau$ & Frequency band selection \\
+    Active modes & $N_{\mathrm{active}}$ & Modes with $\E{\omega_k}>0.01$ \\
+    Memory SNR & $d_k / N_{\text{stored}}$ & Hopfield retrieval quality \\
+    ELBO Bayes factor & $\exp(\mathcal{L}(\mathcal{I}_1)-\mathcal{L}(\mathcal{I}_2))$ & Index comparison \\
+    Linear probe acc. & $\mathrm{Acc}_{\text{probe}}$ & Latent discriminability \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsection{Flagship Demo: Entropy-Controlled Spectral Generation}
+\label{sec:experiments:demo}
+
+Standard VAEs decode $\mathbf{z}$ into flat feature vectors; the VDT decodes
+$\mathbf{z}$ into a \emph{graph wiring}---a Laplacian whose eigenvalues are
+vibrational modes of the spring network (cf.\ Rayleigh~\cite{rayleigh1877}).
+The latent space directly encodes spectral geometry, enabling samples whose
+spectral entropy matches a target level.  This capability is unique to the
+VDT's vibrational latent representation and is unavailable in flat-prior models.
+
+% -----------------------------------------------------------------------
+\section{Related Work}
+\label{sec:related}
+% -----------------------------------------------------------------------
+
+\paragraph{Spectral graph autoencoders.}
+Graph variational autoencoders~\cite{kipf2016} encode topology in the latent
+space but do not use spectral priors.  VGAE and its successors decode
+adjacency matrices directly, without a vibrational interpretation.
+
+\paragraph{Probabilistic PCA on graphs.}
+Laplacian Eigenmaps~\cite{belkin2003} and Diffusion Maps~\cite{coifman2006}
+use the heat kernel for dimensionality reduction but are deterministic and
+lack variational objectives.
+
+\paragraph{NVIB.}
+The Nonparametric Variational Information Bottleneck~\cite{nvib2022} applies
+variational compression to sequence models.  The VDT shares the ELBO
+philosophy but applies spectral-structural priors rather than capacity
+constraints on a fixed-dimension latent.
+
+\paragraph{Real quantum mechanics.}
+Renou et al.~\cite{renou2021} and McKague et al.~\cite{mckague2009} provide
+experimental and theoretical grounding for real-valued quantum theories.
+The VDT does not claim to \emph{be} a quantum system, but borrows the
+structure of signed-amplitude interference as a computational primitive.
+
+% -----------------------------------------------------------------------
+\section{Discussion and Future Work}
+\label{sec:conclusion}
+% -----------------------------------------------------------------------
+
+The VDT establishes a formal connection between three bodies of theory:
+Rayleigh's vibrational mechanics, Aaronson's real-amplitude quantum
+probabilities, and Bayesian graph-spectral learning.  The central
+contribution is the three-term ELBO~\eqref{eq:elbo}, which replaces hard
+spectral penalties with proper variational counterparts while preserving the
+ArrowSpace wiring geometry.
+
+Several directions remain open:
+
+\begin{itemize}
+  \item \textbf{Density-matrix term (issue \#29).}
+        A fourth KL over the density matrix $\boldsymbol{\rho}^+_t$
+        (positive-negative amplitude structure) would complete the quantum
+        analogy but is not yet in the ELBO.
+  \item \textbf{VDT-Diffusion.}
+        Replacing the VAE reparameterisation with a diffusion process over
+        the Laplacian eigenbasis.
+  \item \textbf{Scaling.}
+        Large-scale evaluation on Open Graph Benchmark datasets~\cite{hu2020}.
+  \item \textbf{Interactive visualisation.}
+        Pluot-based~\cite{pluot} interactive exploration of spectral latent
+        space is implemented in
+        \texttt{demos/visualise\_spectral\_demo.py}.
+\end{itemize}
+
+% -----------------------------------------------------------------------
+\section*{Acknowledgements}
+% -----------------------------------------------------------------------
+
+The ArrowSpace computational library and the VDT codebase are developed and
+maintained by the tuned-org-uk team.
+The architecture inherits the PPCA-to-VAE progression formalised in
+\emph{The Little Book of Generative AI Foundations}~\cite{chen2026}.
+
+% -----------------------------------------------------------------------
+% Bibliography
+% -----------------------------------------------------------------------
+\bibliographystyle{plain}
+\begin{thebibliography}{99}
+
+\bibitem{rayleigh1877}
+Lord Rayleigh (J.W.S.\ Strutt).
+\newblock \emph{The Theory of Sound}, Volumes I and II.
+\newblock Macmillan, London, 1877/1894.
+
+\bibitem{aaronson2013}
+S.\ Aaronson.
+\newblock \emph{Quantum Computing Since Democritus}, Chapter~9: Quantum.
+\newblock Cambridge University Press, 2013.
+\newblock \url{https://scottaaronson.com/democritus/lec9.html}
+
+\bibitem{moriondo2026arrowspace}
+D.\ Moriondo.
+\newblock ArrowSpace: Graph Wiring and the Differentiable Laplacian.
+\newblock Technical report, tuned-org-uk, 2026.
+\newblock \url{https://github.com/tuned-org-uk/pyarrowspace}
+
+\bibitem{moriondo2026vdt}
+D.\ Moriondo.
+\newblock Vibrational Deduction Transformer (VDT): Spectral-PPCA Wiring
+  Autoencoder with Associative Memory.
+\newblock \emph{arXiv preprint}, 2026.
+\newblock \url{https://github.com/tuned-org-uk/vibrational-deduction-transfomer}
+
+\bibitem{chen2026}
+T.\ Chen.
+\newblock \emph{The Little Book of Generative AI Foundations}.
+\newblock 2026.
+
+\bibitem{chung1997}
+F.R.K.\ Chung.
+\newblock \emph{Spectral Graph Theory}.
+\newblock AMS CBMS Monographs, 1997.
+\newblock \url{https://mathweb.ucsd.edu/~fan/research/revised.html}
+
+\bibitem{tipping1999}
+M.E.\ Tipping and C.M.\ Bishop.
+\newblock Probabilistic principal component analysis.
+\newblock \emph{Journal of the Royal Statistical Society B}, 61(3):611--622, 1999.
+
+\bibitem{kingma2013}
+D.P.\ Kingma and M.\ Welling.
+\newblock Auto-encoding variational Bayes.
+\newblock \emph{arXiv:1312.6114}, 2013.
+\newblock \url{https://arxiv.org/abs/1312.6114}
+
+\bibitem{higgins2017}
+I.\ Higgins et al.
+\newblock $\beta$-VAE: Learning basic visual concepts with a constrained
+  variational framework.
+\newblock \emph{ICLR}, 2017.
+
+\bibitem{belkin2003}
+M.\ Belkin and P.\ Niyogi.
+\newblock Laplacian Eigenmaps for dimensionality reduction and data
+  representation.
+\newblock \emph{Neural Computation}, 15(6):1373--1396, 2003.
+
+\bibitem{coifman2006}
+R.R.\ Coifman and S.\ Lafon.
+\newblock Diffusion maps.
+\newblock \emph{Applied and Computational Harmonic Analysis}, 21(1):5--30, 2006.
+
+\bibitem{kipf2016}
+T.N.\ Kipf and M.\ Welling.
+\newblock Semi-supervised classification with graph convolutional networks.
+\newblock \emph{arXiv:1609.02907}, 2016.
+
+\bibitem{renou2021}
+M.-O.\ Renou et al.
+\newblock Quantum theory based on real numbers can be experimentally falsified.
+\newblock \emph{Nature}, 600:625--629, 2021.
+
+\bibitem{mckague2009}
+M.\ McKague et al.
+\newblock Simulating quantum systems using real Hilbert spaces.
+\newblock \emph{Physical Review Letters}, 102:020505, 2009.
+
+\bibitem{nvib2022}
+K.\ Dib et al.
+\newblock NVIB: Nonparametric variational information bottleneck.
+\newblock \emph{arXiv}, 2022.
+
+\bibitem{hopfield1982}
+J.J.\ Hopfield.
+\newblock Neural networks and physical systems with emergent collective
+  computational abilities.
+\newblock \emph{PNAS}, 79(8):2554--2558, 1982.
+
+\bibitem{einstein1905}
+A.\ Einstein.
+\newblock {\"U}ber die von der molekularkinetischen Theorie der W{\"a}rme
+  geforderte Bewegung von in ruhenden Fl{\"u}ssigkeiten suspendierten Teilchen.
+\newblock \emph{Annalen der Physik}, 322(8):549--560, 1905.
+
+\bibitem{jaynes1957}
+E.T.\ Jaynes.
+\newblock Information theory and statistical mechanics.
+\newblock \emph{Physical Review}, 106(4):620--630, 1957.
+
+\bibitem{hu2020}
+W.\ Hu et al.
+\newblock Open Graph Benchmark: Datasets for machine learning on graphs.
+\newblock \emph{NeurIPS}, 2020.
+
+\bibitem{pluot}
+M.\ Keller.
+\newblock Pluot: interactive browser-based visualisation.
+\newblock \url{https://github.com/keller-mark/pluot}
+
+\end{thebibliography}
+
+\end{document}
