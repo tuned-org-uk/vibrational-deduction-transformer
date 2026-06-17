@@ -145,12 +145,23 @@ class TestVibrationalStateBlock:
         assert (vdt_block.gamma > 0).all()
 
     def test_density_shapes(self, vdt_block, L_f, lap):
-        """rho_plus and rho_minus are (N, N)."""
+        """
+        rho_plus and rho_minus are (feat_dim, feat_dim), NOT (n_nodes, n_nodes).
+
+        The density matrix lives in feature space: SignedDensityMatrix is
+        parameterised with n=feat_dim (D) so that update() can consume
+        outer products Q^T Q of shape (d, d).  The graph size N is
+        unrelated to the density dimension (issue #54).
+        """
         Q_t   = torch.randn(B, N, D)
         Q_tm1 = torch.zeros(B, N, D)
         _, rp, rm = vdt_block(Q_t, Q_tm1, L_f, lap)
-        assert rp.shape == (N, N)
-        assert rm.shape == (N, N)
+        assert rp.shape == (D, D), (
+            f"rho_plus shape {rp.shape} != (feat_dim, feat_dim) = ({D}, {D})"
+        )
+        assert rm.shape == (D, D), (
+            f"rho_minus shape {rm.shape} != (feat_dim, feat_dim) = ({D}, {D})"
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -188,12 +188,21 @@ class TestFromSpectralLoadingGradient:
         assert W.grad.shape == W.shape
 
     def test_grad_nonzero(self):
-        """At least some gradient elements should be nonzero."""
+        """
+        At least some gradient elements must be nonzero.
+
+        Note: L_z.sum() is identically zero by the Laplacian row-sum
+        property: sum(diag(row_sum)) - sum(A_sym) = sum(A_sym) - sum(A_sym) = 0.
+        Calling L.sum().backward() therefore always gives zero gradient
+        regardless of the gate formula.  We use L.pow(2).sum() instead,
+        which is strictly positive and whose gradient w.r.t. W is nonzero
+        through the dot-product gate.
+        """
         torch.manual_seed(9)
         W = torch.randn(2, N, 4, requires_grad=True)
         L_base = _make_L_base(N)
         L = DifferentiableLaplacian.from_spectral_loading(W, L_base)
-        L.sum().backward()
+        L.pow(2).sum().backward()
         assert W.grad.abs().sum() > 0
 
 

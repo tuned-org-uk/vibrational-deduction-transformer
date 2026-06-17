@@ -81,13 +81,23 @@ class TestStabilityDiagnosticsKeys:
     """
     AC1: stability_diagnostics returns all expected keys and CFL_ok=True
     when dt is well within the CFL bound.
+
+    EXPECTED_KEYS includes the four dynamic-Lf CFL keys added in issue #53:
+      lambda_max_Lf, dt_max_CFL_Lf, cfl_margin, cfl_Lf_ok.
     """
 
     EXPECTED_KEYS = {
+        # Base-Laplacian CFL (backward-compatible)
         "lambda_max", "dt_max_CFL", "dt_current", "CFL_ok",
+        # Dynamic L_f CFL (issue #53)
+        "lambda_max_Lf", "dt_max_CFL_Lf", "cfl_margin", "cfl_Lf_ok",
+        # Damping
         "n_underdamped_modes", "frac_underdamped",
+        # Energy
         "modal_energy_per_depth", "energy_amplified",
+        # Spectral entropy
         "spectral_entropy_K",
+        # Density matrices
         "min_eig_rho_plus", "min_eig_rho_minus", "max_frob_signed", "rho_psd_ok",
     }
 

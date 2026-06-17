@@ -234,10 +234,13 @@ class TestV1Unchanged:
     def test_wiring_decoder_v1_forward(self):
         """
         WiringDecoder.forward() must still return (L, delta) with no changes.
+
+        n_edges is derived from lap.edge_index.shape[1] after construction
+        so the test remains valid for any knn_k value (knn_k=3 on 8 nodes
+        gives 8*3=24 directed edges, not 16).
         """
         torch.manual_seed(7)
         n_nodes = 8
-        n_edges = 16
         latent_dim = 8
         hidden_dim = 16
         n_heads = 2
@@ -247,6 +250,9 @@ class TestV1Unchanged:
         lap = DifferentiableLaplacian.from_embeddings(
             E_small, knn_k=3, sigma=1.0, normalised=True, sparse=False
         )
+        # Derive n_edges from the actual graph topology so this test
+        # remains correct for any knn_k or graph size.
+        n_edges = lap.edge_index.shape[1]
 
         dec = WiringDecoder(
             latent_dim=latent_dim,
