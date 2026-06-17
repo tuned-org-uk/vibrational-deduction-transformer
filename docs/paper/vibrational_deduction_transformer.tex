@@ -57,6 +57,7 @@
 % ---- Shorthand for the model name ------------------------------------------
 \newcommand{\VDT}{VDT\xspace}
 \newcommand{\vdt}{Vibrational Wiring Deduction Transformer\xspace}
+\newcommand{\WA}{WiringAutoencoder\xspace}  % predecessor shorthand
 
 % ---- Code style -------------------------------------------------------------
 \lstset{
@@ -97,7 +98,7 @@ We present the \emph{Vibrational Wiring Deduction Transformer} (VDT), a
 fully Bayesian generative model that unifies vibrational graph dynamics,
 probabilistic PCA in a Laplacian eigenbasis (Spectral-PPCA), and spectral
 associative memory into a single trainable architecture.  The predecessor
-Wiring Autoencoder (VDT) used a hard high-frequency energy penalty
+\WA{} used a hard high-frequency energy penalty
 ($J_{\mathrm{freq}}$) and an isotropic Gaussian latent prior.  VDT replaces
 both with principled variational KL terms: (i) a spectral-basis KL over the
 loading matrix $\bS$ weighted by Laplacian eigenvalues, implementing a
@@ -126,7 +127,7 @@ analysis, benchmark metrics, and associative memory construction.
 Graph-structured latent variable models occupy an increasingly important niche
 between classical variational autoencoders (VAEs) and geometric deep learning:
 they can encode both the \emph{content} of nodes and the \emph{relational
-structure} that organises them.  The Wiring Autoencoder~\citep{vdt_v1}
+structure} that organises them.  The \WA{}~\citep{vdt_v1}
 recognised this, using a differentiable graph Laplacian $L(z)$ as an
 intermediate latent object whose spectral properties are regularised by a hard
 frequency penalty $J_{\mathrm{freq}} = \sum_{j>k}\lambda_j(L(z))$.  While
@@ -142,8 +143,8 @@ probabilistic prior, which makes it difficult to:
         manifold.
 \end{enumerate}
 
-The VDT addresses all three limitations by embedding the Wiring
-Autoencoder within the Spectral-PPCA framework~\citep{design_a}, a Bayesian
+The VDT addresses all three limitations by embedding the \WA{}
+within the Spectral-PPCA framework~\citep{design_a}, a Bayesian
 generative model in which the loading matrix
 $\bW = \bU_{1:q}\,\diag(\bomega)\,\bS$ lives explicitly in the Laplacian
 eigenbasis and is endowed with eigenvalue-weighted shrinkage priors.  The VDT
@@ -234,19 +235,19 @@ function collapsed, all modes equally weighted).  This mirrors Brownian
 motion, where the low-entropy state is the non-heated stationary system and
 the high-entropy state is maximal thermal agitation.
 
-\subsection{Wiring Autoencoder (VDT) --- Predecessor}
-\label{sec:vdt_v1}
+\subsection{WiringAutoencoder (Predecessor)}
+\label{sec:wa_v1}
 
-VDT~\citep{vdt_v1} trains a differentiable Laplacian $L(\bz)$ whose topology
-is fixed (kNN + RBF graph) but whose edge weights are learned by a
+The \WA{}~\citep{vdt_v1} trains a differentiable Laplacian $L(\bz)$ whose
+topology is fixed (kNN + RBF graph) but whose edge weights are learned by a
 mixture-of-experts decoder $W_{\mathrm{dec}}:\bz\mapsto\delta_e$.  The
 training objective is
 \begin{equation}
-  \elbo_{\mathrm{VDT}} =
+  \elbo_{\mathrm{WA}} =
     \E_q[\log p(\bx\mid\bz)] -
     \beta\cdot\KL(q(\bz)\|\N(\mathbf{0},\bm{I})) -
     \alpha\cdot J_{\mathrm{freq}}(L(\bz)),
-  \label{eq:vdt_v1}
+  \label{eq:wa_elbo}
 \end{equation}
 where $J_{\mathrm{freq}} = \sum_{j>k}\lambda_j(L(\bz))$ penalises
 high-frequency wiring.  The reconstruction is provided by
@@ -254,7 +255,7 @@ high-frequency wiring.  The reconstruction is provided by
 $K_\tau = \bU_k\exp(-t\bLambda_k)\bU_k^\top$ applied to an embedding table
 $\bE$, with learnable diffusion time $t$.
 
-Three limitations of VDT motivate VDT:
+Three limitations of the \WA{} motivate VDT:
 (a) $J_{\mathrm{freq}}$ is a deterministic penalty with no prior
 interpretation;
 (b) the latent prior is isotropic and ignores graph geometry;
@@ -401,15 +402,15 @@ $p(\omega_k)=\mathrm{Gamma}(1, \tau\lambda_k)$, the closed-form KL is:
 where $\psi$ is the digamma function.  This is summed over all $q$ modes and
 averaged over the batch.
 
-\subsection{Comparison with VDT Predecessor}
+\subsection{Comparison with WiringAutoencoder Predecessor}
 
 \begin{table}[h]
 \centering
-\caption{ELBO comparison: VDT (predecessor) vs VDT.}
+\caption{ELBO comparison: WiringAutoencoder (predecessor) vs VDT.}
 \label{tab:elbo_comparison}
 \begin{tabular}{@{}llll@{}}
 \toprule
-Term & VDT & VDT & Note \\
+Term & WiringAutoencoder & VDT & Note \\
 \midrule
 Reconstruction & $-\|\bx-\hat{\bx}\|^2/2\sigma^2$ & Same & $\sigma$ learnable \\
 Latent KL & $\KL(q(\bz)\|\N(\mathbf{0},\bm{I}))$ & Same (isotropic) & PR\,\#35 decision \\
@@ -456,7 +457,7 @@ computed at runtime.}
 \subsection{VibrationalEncoder}
 \label{sec:encoder}
 
-\texttt{VibrationalEncoder} (\texttt{vdt/encoder.py}) replaces the VDT MLP
+\texttt{VibrationalEncoder} (\texttt{vdt/encoder.py}) replaces the \WA{} MLP
 encoder with a VDT (Vibrational Discrete Transformer) recurrence stack:
 \begin{enumerate}
   \item \textbf{Input projection}: linear layer mapping $(B,D)\to(B,N{\cdot}d)$,
