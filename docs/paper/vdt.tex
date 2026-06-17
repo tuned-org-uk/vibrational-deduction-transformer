@@ -137,6 +137,8 @@ lines of inquiry:
         weights---yielding a proper Bayesian ELBO.
 \end{enumerate}
 
+The paper follows the conceptual flow applied in \cite{chen2026}.
+
 The paper is organised as follows.
 Section~\ref{sec:background} reviews prerequisite material.
 Section~\ref{sec:architecture} presents the full VDT architecture.
@@ -185,7 +187,7 @@ $\boldsymbol{\epsilon}\sim\normal(\mathbf{0},\mathbf{I})$, enables gradient-base
 \subsection{Real Quantum Amplitudes and Signed Interference}
 \label{sec:background:quantum}
 
-Aaronson~\cite{aaronson2013} demonstrates that the observable consequences of
+Aaronson~\cite{aaronson2013} finds plausible that the observable consequences of
 quantum mechanics---interference, entanglement structure, Born-rule probabilities---can
 be derived from the assumption of signed real probability amplitudes, provided
 the time-evolution operator is a \emph{real orthogonal} (rather than complex unitary)
@@ -658,23 +660,7 @@ contribution is the three-term ELBO~\eqref{eq:elbo}, which replaces hard
 spectral penalties with proper variational counterparts while preserving the
 ArrowSpace wiring geometry.
 
-Several directions remain open:
-
-\begin{itemize}
-  \item \textbf{Density-matrix term (issue \#29).}
-        A fourth KL over the density matrix $\boldsymbol{\rho}^+_t$
-        (positive-negative amplitude structure) would complete the quantum
-        analogy but is not yet in the ELBO.
-  \item \textbf{VDT-Diffusion.}
-        Replacing the VAE reparameterisation with a diffusion process over
-        the Laplacian eigenbasis.
-  \item \textbf{Scaling.}
-        Large-scale evaluation on Open Graph Benchmark datasets~\cite{hu2020}.
-  \item \textbf{Interactive visualisation.}
-        Pluot-based~\cite{pluot} interactive exploration of spectral latent
-        space is implemented in
-        \texttt{demos/visualise\_spectral\_demo.py}.
-\end{itemize}
+A Spectral Diffusion improvement on this architecture is work in progress.
 
 % -----------------------------------------------------------------------
 \section*{Acknowledgements}
@@ -684,6 +670,10 @@ The ArrowSpace computational library and the VDT codebase are developed and
 maintained by the tuned-org-uk team.
 The architecture inherits the PPCA-to-VAE progression formalised in
 \emph{The Little Book of Generative AI Foundations}~\cite{chen2026}.
+
+The author acknowledges the use of AI-assisted tools during the preparation of this paper, including Perplexity for literature discovery, OpenAI GPT models for drafting and result analysis, NVIDIA Nemotron for exploratory formal verification analysis, and Claude Sonnet 4.6 for coding support and implementation checks~\cite{perplexity,openai_gpt5,nvidia_nemotron,anthropic_claude46}. All technical claims, interpretations, experiments, and final editorial decisions remain the sole responsibility of the authors.
+
+\newpage
 
 % -----------------------------------------------------------------------
 % Bibliography
@@ -716,10 +706,9 @@ D.\ Moriondo.
 \newblock \url{https://github.com/tuned-org-uk/vibrational-deduction-transfomer}
 
 \bibitem{chen2026}
-T.\ Chen.
-\newblock \emph{The Little Book of Generative AI Foundations}.
-\newblock 2026.
-
+T.~Chen,
+\newblock ``The Little Book of Generative AI Foundations: An Intuitive Mathematical Primer,''
+\newblock {\em arXiv preprint arXiv:2605.29713}, 2026.
 \bibitem{chung1997}
 F.R.K.\ Chung.
 \newblock \emph{Spectral Graph Theory}.
@@ -796,10 +785,24 @@ W.\ Hu et al.
 \newblock Open Graph Benchmark: Datasets for machine learning on graphs.
 \newblock \emph{NeurIPS}, 2020.
 
-\bibitem{pluot}
-M.\ Keller.
-\newblock Pluot: interactive browser-based visualisation.
-\newblock \url{https://github.com/keller-mark/pluot}
+\bibitem{perplexity}
+Perplexity AI (2026).
+\newblock Perplexity.
+\newblock \url{https://www.perplexity.ai}.
+
+\bibitem{openai_gpt5}
+OpenAI (2025).
+\newblock GPT-5.
+
+\bibitem{anthropic_claude46}
+Anthropic (2026).
+\newblock Claude sonnet 4.6.
+\newblock \url{https://www.anthropic.com/claude/sonnet}.
+
+\bibitem{nvidia_nemotron}
+NVIDIA (2026).
+\newblock NVIDIA nemotron AI models.
+\newblock \url{https://developer.nvidia.com/nemotron}.
 
 \end{thebibliography}
 
