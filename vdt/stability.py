@@ -45,6 +45,7 @@ from typing import List, Optional
 import torch
 
 from vdt.spectral import _safe_eigvalsh
+from vdt.vdt import _gershgorin_lambda_max
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +91,27 @@ def stability_diagnostics(
     Runs in O(N^2 * K) for K VDT depth steps (no additional eigensolve
     if eigvals is provided).  Target: <5ms for d=256 on CPU.
 
+    CFL diagnostics
+    ~~~~~~~~~~~~~~~
+    The dict now includes both base-Laplacian and dynamic-L_f CFL bounds
+    so that silent CFL violations (issue #53) can be surfaced in logs:
+
+    - ``lambda_max``     : lambda_max of the provided eigvals (base Laplacian
+                           or L_f depending on what the caller supplies).
+    - ``lambda_max_Lf``  : Gershgorin upper bound on lambda_max(L_f).
+                           Computed fresh from the dynamic L_f regardless
+                           of the eigvals argument.  Always >= lambda_max(L_f).
+    - ``dt_max_CFL``     : sqrt(2 / lambda_max)  -- base bound.
+    - ``dt_max_CFL_Lf``  : sqrt(2 / lambda_max_Lf)  -- tighter L_f bound.
+    - ``cfl_margin``     : lambda_max_Lf / max(lambda_max, 1e-8).  A value
+                           > 1 means L_f has sharpened beyond the base
+                           Laplacian and the base-only CFL check would give
+                           a false negative.
+    - ``CFL_ok``         : dt <= dt_max_CFL  (base bound, kept for backward
+                           compatibility with existing logging pipelines).
+    - ``cfl_Lf_ok``      : dt <= dt_max_CFL_Lf  (tighter dynamic bound).
+                           This is the authoritative stability flag.
+
     Parameters
     ----------
     L_f : Tensor  shape (N, N) or (B, N, N)
@@ -101,7 +123,9 @@ def stability_diagnostics(
     rho_minus_list : list of Tensor  shape (N, N)
         Negative density matrices, one per VDT block.
     eigvals : Tensor  shape (N,) or (B, N) or None
-        Pre-computed eigenvalues of L_f.  Computed internally when None.
+        Pre-computed eigenvalues of the base Laplacian L(I).  Computed
+        internally from L_f when None (note: in that case lambda_max and
+        lambda_max_Lf will coincide up to the Gershgorin over-estimate).
     dt : float
         Current CFL-clamped time step used in training.
     gamma : Tensor  shape (d,)
@@ -110,10 +134,14 @@ def stability_diagnostics(
     Returns
     -------
     dict with keys:
-        lambda_max          float -- largest eigenvalue of L_f
-        dt_max_CFL          float -- safety * sqrt(2 / lambda_max)
+        lambda_max          float -- largest eigenvalue of eigvals (base)
+        lambda_max_Lf       float -- Gershgorin bound on lambda_max(L_f)
+        dt_max_CFL          float -- sqrt(2 / lambda_max)  base bound
+        dt_max_CFL_Lf       float -- sqrt(2 / lambda_max_Lf)  dynamic bound
+        cfl_margin          float -- lambda_max_Lf / lambda_max (>1 means L_f is sharper)
         dt_current          float -- dt passed in
-        CFL_ok              bool  -- dt_current <= dt_max_CFL
+        CFL_ok              bool  -- dt <= dt_max_CFL  (base; backward compat)
+        cfl_Lf_ok           bool  -- dt <= dt_max_CFL_Lf  (authoritative)
         n_underdamped_modes int   -- number of modes with gamma_k < sqrt(lambda_k)
         frac_underdamped    float -- n_underdamped_modes / N
         modal_energy_per_depth  list[float] -- ||Q_k||_F^2 / elements per depth step
@@ -124,7 +152,7 @@ def stability_diagnostics(
         max_frob_signed     float -- max Frobenius norm of (rho_plus - rho_minus)
         rho_psd_ok          bool  -- min_eig_rho_plus >= -1e-5 and min_eig_rho_minus >= -1e-5
     """
-    # -- Eigenvalues of L_f ------------------------------------------------
+    # -- Eigenvalues of the base Laplacian (or L_f if eigvals not provided) --
     L_single = L_f[0] if L_f.dim() == 3 else L_f
     if eigvals is None:
         ev = _safe_eigvalsh(L_single)
@@ -139,9 +167,14 @@ def stability_diagnostics(
     dt_max_cfl = math.sqrt(2.0 / max(lam_max, 1e-8))
     cfl_ok = dt <= dt_max_cfl
 
+    # -- Gershgorin bound on the dynamic L_f (issue #53) ------------------
+    with torch.no_grad():
+        lam_gershgorin = float(_gershgorin_lambda_max(L_single).clamp(min=1e-8).item())
+    dt_max_cfl_Lf = math.sqrt(2.0 / lam_gershgorin)
+    cfl_Lf_ok = dt <= dt_max_cfl_Lf
+    cfl_margin = lam_gershgorin / max(lam_max, 1e-8)
+
     # -- Underdamped modes -------------------------------------------------
-    # Underdamped: gamma_k < sqrt(lambda_k) for each feature k.
-    # We scalar-reduce gamma to a single value for comparison.
     gamma_mean = float(gamma.mean().item())
     sqrt_ev = ev.sqrt()  # (N,)
     n_underdamped = int((sqrt_ev > gamma_mean).sum().item())
@@ -177,15 +210,25 @@ def stability_diagnostics(
     rho_psd_ok = (min_rho_p >= -1e-5) and (min_rho_m >= -1e-5)
 
     return {
+        # CFL -- base Laplacian (backward-compatible keys)
         "lambda_max":             lam_max,
         "dt_max_CFL":             dt_max_cfl,
         "dt_current":             dt,
         "CFL_ok":                 cfl_ok,
+        # CFL -- dynamic L_f (new keys, issue #53)
+        "lambda_max_Lf":          lam_gershgorin,
+        "dt_max_CFL_Lf":          dt_max_cfl_Lf,
+        "cfl_margin":             cfl_margin,
+        "cfl_Lf_ok":              cfl_Lf_ok,
+        # Damping
         "n_underdamped_modes":    n_underdamped,
         "frac_underdamped":       frac_underdamped,
+        # Energy
         "modal_energy_per_depth": energies,
         "energy_amplified":       energy_amplified,
+        # Spectral
         "spectral_entropy_K":     spectral_entropy,
+        # Density
         "min_eig_rho_plus":       min_rho_p,
         "min_eig_rho_minus":      min_rho_m,
         "max_frob_signed":        max_frob_signed,
@@ -236,8 +279,6 @@ def log_preconditioner_stability(
         eta_ok           bool  -- eta < 2 / L_sigma_M (gradient descent step condition)
         convergence_rate float -- (kappa - 1) / (kappa + 1)  (worst-case ratio)
     """
-    # Build diagonal H_prec = sigma * diag(M) + diag(eigvals(L_f))
-    # We approximate using only the L_f diagonal term for efficiency.
     L_single = L_f[0] if L_f.dim() == 3 else L_f
     ev = _safe_eigvalsh(L_single).float().clamp(min=0.0)  # (N,)
 
@@ -261,7 +302,6 @@ def log_preconditioner_stability(
 # pre_training_checks
 # ---------------------------------------------------------------------------
 
-# Six-level stability hierarchy from docs//04-stability.md section 7.
 _CHECKS_ORDER = [
     "graph_connected",
     "cfl_satisfied",
@@ -287,6 +327,11 @@ def pre_training_checks(
     with a pathological Laplacian.  All other failures are collected as
     warning strings and returned to the caller.
 
+    Level 2 (CFL) now uses the Gershgorin bound on the dynamic L_f as well
+    as the base-Laplacian bound, and emits separate warnings for each
+    (issue #53).  This prevents the CFL check from passing when L_f has
+    a larger lambda_max than the base Laplacian.
+
     Connectivity detection
     ----------------------
     The check counts eigenvalues below _ZERO_EIG_TOL (1e-3).  Any Laplacian
@@ -298,10 +343,6 @@ def pre_training_checks(
     - Normalised symmetric Laplacian (L = I - D^{-1/2} A D^{-1/2}): same
       zero-multiplicity property holds; the non-zero eigenvalues shift but
       each component still contributes exactly one zero.
-
-    The old Fiedler-threshold check (ev[1] < 1e-5) only worked for the
-    combinatorial case; for two balanced cliques in the normalised Laplacian
-    the Fiedler value is ~0.67 and was never detected.
 
     Parameters
     ----------
@@ -333,9 +374,6 @@ def pre_training_checks(
     N = int(ev.shape[0])
 
     # Level 1 -- graph connectivity
-    # Count eigenvalues below _ZERO_EIG_TOL.  A connected graph has exactly
-    # one zero eigenvalue (the constant eigenvector); a disconnected graph
-    # has >= 2.  This works for both combinatorial and normalised Laplacians.
     n_zero = int((ev < _ZERO_EIG_TOL).sum().item())
     fiedler = float(ev[1].item()) if N > 1 else float(ev[0].item())
     if n_zero > 1:
@@ -346,15 +384,28 @@ def pre_training_checks(
             "Check kNN construction -- all nodes must be reachable."
         )
 
-    ev = ev.clamp(min=0.0)  # safe to clamp now that connectivity is confirmed
+    ev = ev.clamp(min=0.0)
 
-    # Level 2 -- CFL constraint
-    lam_max = float(ev[-1].item())
-    dt_max = math.sqrt(2.0 / max(lam_max, 1e-8))
-    if dt_init > dt_max:
+    # Level 2 -- CFL constraint, checked against both base and dynamic bounds
+    lam_max_base = float(ev[-1].item())
+    dt_max_base = math.sqrt(2.0 / max(lam_max_base, 1e-8))
+    if dt_init > dt_max_base:
         warnings_out.append(
-            f"CFL violated: dt_init={dt_init:.4f} > dt_max_CFL={dt_max:.4f}. "
+            f"CFL violated (base Laplacian): dt_init={dt_init:.4f} > "
+            f"dt_max_CFL={dt_max_base:.4f}. "
             "Reduce dt_init or increase damping."
+        )
+
+    # Gershgorin bound on the dynamic L_f (issue #53)
+    with torch.no_grad():
+        lam_max_Lf = float(_gershgorin_lambda_max(L_single).clamp(min=1e-8).item())
+    dt_max_Lf = math.sqrt(2.0 / lam_max_Lf)
+    if dt_init > dt_max_Lf:
+        warnings_out.append(
+            f"CFL violated (dynamic L_f Gershgorin bound): dt_init={dt_init:.4f} > "
+            f"dt_max_CFL_Lf={dt_max_Lf:.4f} (lambda_max_Lf={lam_max_Lf:.4f}). "
+            "The base-Laplacian CFL check may have passed but L_f is sharper. "
+            "Ensure VibrationalStateBlock.forward(recompute_cfl=True) (default)."
         )
 
     # Level 3 -- mass matrix conditioning
