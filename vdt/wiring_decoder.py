@@ -4,11 +4,11 @@ Wiring Decoder  --  z  ->  edge weight adjustments  ->  Laplacian L(z).
 Two decoder classes are provided:
 
   WiringDecoder          v1, mixture-of-experts over edge templates (unchanged).
-  SpectralLoadingDecoder , eigenbasis factorisation W = U_q diag(omega) S.
+  SpectralLoadingDecoder  v2, eigenbasis factorisation W = U_q diag(omega) S.
 
 For the v1 architecture see the class docstring of WiringDecoder below.
 
- architecture (SpectralLoadingDecoder)
+v2 architecture (SpectralLoadingDecoder)
 -----------------------------------------
 Maps z (B, q) to a loading matrix W (B, d, q) in the Laplacian eigenbasis,
 then synthesises L(z) (B, N, N) via
@@ -32,7 +32,7 @@ kl_S -> log_var_S -> log_var_S_head -> z.
 
 Config dispatch
 ---------------
-    decoder_type: spectral           -> SpectralLoadingDecoder  ( default)
+    decoder_type: spectral           -> SpectralLoadingDecoder  (v2 default)
     decoder_type: mixture_of_experts -> WiringDecoder           (v1 fallback)
 
 Ref: docs//00-architecture.md
@@ -139,12 +139,12 @@ class WiringDecoder(nn.Module):
 
 
 # ---------------------------------------------------------------------------
-# SpectralLoadingDecoder  ()
+# SpectralLoadingDecoder  (v2)
 # ---------------------------------------------------------------------------
 
 class SpectralLoadingDecoder(nn.Module):
     """
-     decoder: maps z (B, q) to a spectral loading matrix W (B, d, q)
+    v2 decoder: maps z (B, q) to a spectral loading matrix W (B, d, q)
     and then to a differentiable Laplacian L(z) (B, N, N).
 
     The loading matrix is factorised in the Laplacian eigenbasis::
@@ -155,12 +155,12 @@ class SpectralLoadingDecoder(nn.Module):
         W         = U_q @ diag(omega) @ S                   -- (B, d, q)
         L(z)      = from_spectral_loading(W, L_base)
 
-    Concretely, since U_q is (d, q) and diag(omega) @ S is (B, q, q):
+    Concretely, since U_q is (d, q) and diag(omega) @ S is (B, q, q)::
 
         W = U_q.unsqueeze(0) @ (omega.unsqueeze(-1) * S)    # (B, d, q)
 
     L(z) is built by DifferentiableLaplacian.from_spectral_loading, which
-    computes per-batch edge weights as:
+    computes per-batch edge weights as::
 
         w_ij = base_aff_ij * sigmoid( -||W_i - W_j||^2 )
 
@@ -181,9 +181,9 @@ class SpectralLoadingDecoder(nn.Module):
     Near-identity initialisation
     ----------------------------
     _init_weights sets S_net.bias = eye(q).flatten() and S_net.weight = 0,
-    so S_net(z=0) = eye(q) and the decoder starts from a well-conditioned
-    spectral loading matrix.  omega_net is initialised with near-zero weights
-    and zero bias, giving omega ~ exp(0) = 1 at init.
+    so S_net(z=0) = eye(q) for all batch elements at initialisation.
+    omega_net is initialised with near-zero weights and zero bias so
+    initial omega_k = exp(~0) ~ 1 for all modes.
     log_var_S_head is initialised with near-zero weights and zero bias,
     giving log_var_S ~ 0 (var ~ 1) at init, matching the unit-variance prior.
 
@@ -195,21 +195,78 @@ class SpectralLoadingDecoder(nn.Module):
     SpectralLoadingDecoder produces W, omega, S, L_z, log_var_S; the
     ELBO assembly in model.py consumes all five.
 
+    Validation (enforced at __init__)
+    ----------------------------------
+    Three guards run before any module state is allocated:
+
+    1. d <= 0 raises ValueError.
+       d is the graph node count N.  A non-positive value typically means
+       n_nodes was not yet resolved from the laplacian object; it must be
+       a positive integer before constructing this module.
+
+    2. q <= 0 raises ValueError.
+       q is the number of spectral modes.  Must be at least 1.
+
+    3. q > d raises ValueError.
+       The Laplacian of a graph with N nodes has at most N non-zero
+       eigenvalues, so U_q can have at most N columns.  Requesting more
+       spectral modes than graph nodes is geometrically nonsensical and
+       would produce a degenerate loading matrix W and a rank-deficient
+       synthesised Laplacian L(z).
+
     Parameters
     ----------
     q : int
-        Number of latent modes (= latent_dim).
+        Number of latent spectral modes.  Must satisfy 1 <= q <= d.
+        Must match U_q.shape[1] at runtime (enforced in forward()).
     d : int
-        Feature / node dimension.  Must equal N (graph node count) in the
-        standard case so that from_spectral_loading(W, L_base) is valid.
-        An AssertionError is raised at construction when d != N would cause
-        a shape mismatch inside from_spectral_loading.
+        Graph node count N.  The spectral loading matrix W has shape
+        (B, d, q) == (B, N, q) because the loading projects from the
+        q-dimensional spectral basis onto all N graph nodes.
+
+        **This is NOT the feature dimension input_dim or feat_dim.**
+        It must always equal the number of nodes in the graph so that
+        DifferentiableLaplacian.from_spectral_loading(W, L_base) can
+        compute pairwise node distances ||W_i - W_j||^2 and assemble
+        a valid (N, N) Laplacian.  Passing input_dim here produces
+        silently incorrect weight shapes whose mismatch only surfaces
+        during the first forward() call.
+
+        In WiringAutoencoder this parameter is always set to n_nodes::
+
+            self.wiring_decoder = SpectralLoadingDecoder(q=q, d=n_nodes)
     """
 
     def __init__(self, q: int, d: int) -> None:
+        # --- Validate BEFORE allocating any module state -------------------
+        # This ensures misconfigured models fail loudly at construction time
+        # rather than with a cryptic shape mismatch inside forward() or
+        # deep inside DifferentiableLaplacian.from_spectral_loading().
+        if d <= 0:
+            raise ValueError(
+                f"SpectralLoadingDecoder: d must be a positive integer "
+                f"(graph node count N). Got d={d}. "
+                "Do not pass input_dim or feat_dim here -- pass n_nodes. "
+                "If n_nodes is None, resolve it from the laplacian object "
+                "(laplacian.n_nodes) before constructing SpectralLoadingDecoder."
+            )
+        if q <= 0:
+            raise ValueError(
+                f"SpectralLoadingDecoder: q must be a positive integer "
+                f"(number of spectral modes). Got q={q}."
+            )
+        if q > d:
+            raise ValueError(
+                f"SpectralLoadingDecoder: q={q} > d={d} (n_nodes). "
+                "Cannot have more spectral modes than graph nodes -- "
+                "the Laplacian of a graph with N nodes has at most N "
+                "non-zero eigenvalues, so U_q can have at most N columns. "
+                "Reduce q or increase n_nodes."
+            )
+        # -------------------------------------------------------------------
         super().__init__()
         self.q = q
-        self.d = d
+        self.d = d  # == N, the graph node count
 
         # S_net: z (B, q) -> S (B, q, q)  -- posterior mean of spectral loading
         self.S_net = nn.Linear(q, q * q)
@@ -269,9 +326,12 @@ class SpectralLoadingDecoder(nn.Module):
         ----------
         z : Tensor  shape (B, q)
             Latent code from the encoder.
-        U_q : Tensor  shape (d, q)
+        U_q : Tensor  shape (d, q)  i.e. (N, q)
             Leading q eigenvectors of the base Laplacian L_base.
             Frozen (no gradient expected through U_q).
+            Shape must be exactly (self.d, self.q); a ValueError is raised
+            if the shape does not match.  This guards against mismatched
+            n_nodes or q between the model config and the supplied eigenvectors.
         L_base : Tensor  shape (N, N)
             Base graph Laplacian encoding the topology.  Frozen.
 
@@ -292,7 +352,28 @@ class SpectralLoadingDecoder(nn.Module):
             Output of log_var_S_head(z), clamped to [-6, 4] for numerical
             stability.  Must NOT be derived from S -- it is an independent
             function of z alone (fix for issue #52).
+
+        Raises
+        ------
+        ValueError
+            If U_q.shape != (self.d, self.q).  This indicates a mismatch
+            between the n_nodes or q stored at construction and the
+            eigenvector matrix supplied at runtime.
         """
+        # --- Runtime shape guard for U_q ----------------------------------
+        # Catches the case where n_nodes or q changed between construction
+        # and the first forward call (e.g. different dataset, wrong cache).
+        if U_q.shape != (self.d, self.q):
+            raise ValueError(
+                f"SpectralLoadingDecoder.forward: expected U_q shape "
+                f"({self.d}, {self.q}) = (n_nodes={self.d}, q={self.q}), "
+                f"got {tuple(U_q.shape)}. "
+                "Ensure that the eigenvector matrix is computed from the "
+                "same graph and with the same number of spectral modes q "
+                "that were passed to SpectralLoadingDecoder at construction."
+            )
+        # ------------------------------------------------------------------
+
         B, q = z.shape
 
         # -- Spectral coefficients (posterior mean) -----------------------

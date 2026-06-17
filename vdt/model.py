@@ -1,19 +1,29 @@
 """
-Wiring Autoencoder  --   only.
+Wiring Autoencoder  --  model only.
 
 This module provides the single top-level model class::
 
-    WiringAutoencoder   , three-term ELBO (recon + kl_z + kl_S + kl_tau).
+    WiringAutoencoder   -- three-term ELBO (recon + kl_z + kl_S + kl_tau).
 
- architecture (three-term ELBO, issue #27)
+architecture (three-term ELBO, issue #27)
 --------------------------------------------
 Assembles WiringEncoder, SpectralLoadingDecoder, and DiffusionDecoder
-under the three-term variational objective::
+under the three-term variational objective.  The ELBO is *maximised*,
+which is equivalent to *minimising* the following total loss::
 
-    L_VDTv2 = E_q[log p(x|z,W)]
-             - KL( q(z)  || N(0,I)          )   # kl_z  -- isotropic
-             - KL( q(S)  || p(S|I)          )   # kl_S  -- spectral basis
-             - KL( q(w)  || p(w | tau, L)   )   # kl_tau -- mode frequency
+    loss  =  NLL_recon  +  KL_z  +  KL_S  +  KL_tau
+
+where
+
+    NLL_recon  =  -E_q[log p(x|z,W)]   (negative log-likelihood, minimised)
+    KL_z       =   KL( q(z)  || N(0,I)       )   -- isotropic
+    KL_S       =   KL( q(S)  || p(S|I)       )   -- spectral basis
+    KL_tau     =   KL( q(w)  || p(w|tau,L)   )   -- mode frequency
+
+All four terms are non-negative.  Minimising their sum is equivalent to
+maximising the ELBO::
+
+    ELBO  =  E_q[log p(x|z,W)]  -  KL_z  -  KL_S  -  KL_tau
 
 Data flow::
 
@@ -25,7 +35,7 @@ Data flow::
                                   [log_var_S is independent of S -- fix #52]
       --> DiffusionDecoder   uses self.embedding (N, D) as the node table
                              x_hat (B, D)
-      --> three-term ELBO
+      --> total loss
 
 latent_dim vs q
 ---------------
@@ -95,12 +105,20 @@ class WiringAutoencoder(nn.Module):
     Wiring Autoencoder  -- three-term ELBO with spectral mode priors.
 
     Assembles WiringEncoder, SpectralLoadingDecoder, and DiffusionDecoder
-    under the three-term variational objective::
+    under the three-term variational objective.  Training *minimises*::
 
-        L_VDTv2 = E_q[log p(x|z,W)]
-                 - KL( q(z)  || N(0,I)          )   # kl_z  -- isotropic
-                 - KL( q(S)  || p(S|I)          )   # kl_S  -- spectral basis
-                 - KL( q(w)  || p(w|tau,Lambda) )   # kl_tau -- mode frequency
+        loss  =  NLL_recon  +  KL_z  +  KL_S  +  KL_tau
+
+    which is equivalent to *maximising* the ELBO::
+
+        ELBO  =  E_q[log p(x|z,W)]  -  KL_z  -  KL_S  -  KL_tau
+
+    where
+
+        NLL_recon  =  -E_q[log p(x|z,W)]   <- returned by recon_loss(), positive
+        KL_z       =  KL( q(z)  || N(0,I)          )   -- isotropic
+        KL_S       =  KL( q(S)  || p(S|I)          )   -- spectral basis
+        KL_tau     =  KL( q(w)  || p(w|tau,Lambda) )   -- mode frequency
 
     Note: the Laplacian-precision latent KL (Term 2, kl_lap) has been
     removed per PR #35.  L_z is synthesised inside SpectralLoadingDecoder
@@ -147,7 +165,7 @@ class WiringAutoencoder(nn.Module):
           --> DiffusionDecoder
                 uses self.embedding  (N, D) as the node embedding table
                 x_hat    (B, D)
-          --> three-term ELBO
+          --> total loss
 
     Parameters
     ----------
@@ -267,7 +285,7 @@ class WiringAutoencoder(nn.Module):
         embedding_table: Optional[torch.Tensor] = None,
     ) -> dict[str, torch.Tensor]:
         """
-        Single forward pass returning all three-term ELBO components.
+        Single forward pass returning all ELBO components.
 
         Parameters
         ----------
@@ -301,8 +319,9 @@ class WiringAutoencoder(nn.Module):
         Returns
         -------
         dict with exactly 9 keys:
-            loss     -- total ELBO scalar (minimise this)
-            recon    -- Gaussian NLL reconstruction term
+            loss     -- total loss scalar (minimise this; equals negative ELBO up to constants)
+            recon    -- NLL reconstruction term (positive; equals -E_q[log p(x|z,W)] up to the
+                        dropped 0.5*D*log(2*pi) constant; see DiffusionDecoder.recon_loss())
             kl_z     -- isotropic KL  KL(q(z) || N(0,I))
             kl_S     -- spectral basis KL  KL(q(S) || p(S|I))
             kl_tau   -- mode frequency KL  KL(q(w) || p(w|tau,L))
@@ -356,7 +375,10 @@ class WiringAutoencoder(nn.Module):
         )  # (B, D)
 
         # --- ELBO terms ---------------------------------------------------
-        # Term 1: reconstruction  E_q[log p(x|z,W)]
+        # Term 1: NLL reconstruction term  -E_q[log p(x|z,W)]
+        # recon_loss() returns the *negative* log-likelihood (positive scalar).
+        # This is the quantity to minimise; it equals -E_q[log p(x|z,W)] up
+        # to the dropped constant 0.5*D*log(2*pi) -- see DiffusionDecoder.
         recon = self.diffusion_decoder.recon_loss(x, x_hat)
 
         # Term 2: isotropic KL  KL(q(z) || N(0,I))  -- uses full latent_dim z
@@ -375,7 +397,8 @@ class WiringAutoencoder(nn.Module):
         # log_a, log_b are (B, q) -- matching eigvals_q shape (q,).
         kl_tau = tau_mode_kl(log_a, log_b, eigvals_q, tau=self.tau)
 
-        # Total loss (all KL terms are non-negative by construction)
+        # Total loss (all four terms are non-negative by construction).
+        # Minimising this loss is equivalent to maximising the ELBO.
         loss = recon + kl_z + kl_S + kl_tau
 
         return {
