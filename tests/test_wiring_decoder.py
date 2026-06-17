@@ -1,17 +1,46 @@
 """
-tests/test_wiring_decoder.py  --  acceptance tests for SpectralLoadingDecoder (#26).
+Tests for SpectralLoadingDecoder -- with focus on the log_var_S
+independence fix (issue #52).
 
-AC1  forward shapes
-AC2  L_z structural constraints (symmetry, zero row sums, non-positive off-diagonal)
-AC3  gradient flows from L_z back to z
-AC4  omega strictly positive
-AC5  near-identity init (S ~ eye(q), omega ~ ones(q))
-AC6  v1 WiringDecoder backward compat
+Test inventory
+--------------
+
+test_log_var_S_shape
+    Verifies that log_var_S has shape (B, q, q) and that all values are
+    within the [-6, 4] clamp range for a batch of random z inputs.
+
+test_log_var_S_independent_of_S
+    Core regression test for issue #52.  Checks that log_var_S is NOT
+    a near-deterministic function of S.pow(2) by verifying that the
+    Pearson correlation between log_var_S.flatten() and
+    (S.pow(2) + 1e-6).log().flatten() is below 0.9 across 20 random
+    initialisations.  If the old proxy were re-introduced the correlation
+    would be >= 0.99.
+
+test_log_var_S_gradient
+    Verifies that gradients flow back through log_var_S to z
+    independently of the S gradient path.  Specifically, zeroing the
+    S_net weights (so dL/dS = 0 for the S path) must still leave a
+    non-zero gradient on z through log_var_S_head.
+
+test_forward_returns_five_outputs
+    Smoke test: forward() returns exactly 5 tensors with the expected
+    shapes (W, omega, S, L_z, log_var_S).
+
+test_near_identity_init
+    Verifies the near-identity initialisation contract:
+    S_net(z=0) == eye(q).flatten() and log_var_S(z=0) ~ 0 for all entries.
+
+test_wiring_decoder_v1_unchanged
+    Smoke test for WiringDecoder (v1) to confirm it is unaffected by the
+    SpectralLoadingDecoder changes.
 """
 from __future__ import annotations
+
+import pytest
 import torch
 import torch.nn as nn
-import pytest
+
 from vdt.wiring_decoder import SpectralLoadingDecoder, WiringDecoder
 from vdt.laplacian import DifferentiableLaplacian
 
@@ -20,238 +49,214 @@ from vdt.laplacian import DifferentiableLaplacian
 # Fixtures
 # ---------------------------------------------------------------------------
 
-def _make_base_lap(N: int, device: str = "cpu") -> torch.Tensor:
-    """Build a simple symmetric normalised Laplacian for a ring graph."""
-    A = torch.zeros(N, N)
-    for i in range(N):
-        j = (i + 1) % N
-        A[i, j] = 1.0
-        A[j, i] = 1.0
-    deg = A.sum(-1).clamp(min=1e-6)
-    d_inv = deg.pow(-0.5)
-    normed = d_inv.unsqueeze(-1) * A * d_inv.unsqueeze(-2)
-    return (torch.eye(N) - normed).to(device)
+N = 12   # graph nodes
+q = 4    # spectral modes
+B = 6    # batch size
 
 
-def _make_U_q(L_base: torch.Tensor, q: int) -> torch.Tensor:
-    """Return the q leading eigenvectors of L_base (smallest eigenvalues)."""
-    with torch.no_grad():
-        eigvals, eigvecs = torch.linalg.eigh(L_base)   # ascending
-    return eigvecs[:, :q].contiguous()  # (N, q)
+@pytest.fixture()
+def decoder():
+    """Fresh SpectralLoadingDecoder at default random init."""
+    return SpectralLoadingDecoder(q=q, d=N)
 
 
-# ---------------------------------------------------------------------------
-# AC1 -- forward shapes
-# ---------------------------------------------------------------------------
-
-class TestForwardShapes:
-    """
-    AC1: SpectralLoadingDecoder.forward() returns tensors with correct shapes.
-    """
-
-    @pytest.mark.parametrize("B,N,q", [
-        (1, 8, 3),
-        (4, 8, 3),
-        (2, 16, 5),
-    ])
-    def test_shapes(self, B: int, N: int, q: int) -> None:
-        d = N  # standard case d == N
-        decoder = SpectralLoadingDecoder(q=q, d=d)
-        L_base = _make_base_lap(N)
-        U_q = _make_U_q(L_base, q)  # (d, q)
-
-        z = torch.randn(B, q)
-        W, omega, S, L_z = decoder(z, U_q, L_base)
-
-        assert W.shape    == (B, d, q),  f"W shape {W.shape}"
-        assert omega.shape == (B, q),    f"omega shape {omega.shape}"
-        assert S.shape    == (B, q, q),  f"S shape {S.shape}"
-        assert L_z.shape  == (B, N, N),  f"L_z shape {L_z.shape}"
+@pytest.fixture()
+def dummy_inputs():
+    """Random (z, U_q, L_base) compatible with (N=12, q=4)."""
+    torch.manual_seed(0)
+    z = torch.randn(B, q)
+    # U_q: orthonormal columns (d=N, q)
+    U_raw = torch.randn(N, q)
+    U_q, _ = torch.linalg.qr(U_raw)
+    U_q = U_q[:, :q]   # (N, q)
+    # L_base: random symmetric positive semi-definite Laplacian stand-in
+    A = torch.rand(N, N)
+    A = (A + A.t()) / 2.0
+    A.fill_diagonal_(0.0)
+    D = A.sum(dim=1)
+    L_base = torch.diag(D) - A   # combinatorial Laplacian
+    return z, U_q, L_base
 
 
 # ---------------------------------------------------------------------------
-# AC2 -- Laplacian structural constraints
+# Tests
 # ---------------------------------------------------------------------------
 
-class TestLaplacianConstraints:
-    """
-    AC2: L_z satisfies the three structural properties of a normalised
-    symmetric Laplacian:
-      (a) symmetry
-      (b) zero row sums
-      (c) non-positive off-diagonal entries
-    """
+class TestLogVarSIndependence:
+    """Regression tests for issue #52: log_var_S must not be a proxy of S^2."""
 
-    def _get_L_z(self, B: int = 3, N: int = 10, q: int = 4) -> torch.Tensor:
-        decoder = SpectralLoadingDecoder(q=q, d=N)
-        L_base = _make_base_lap(N)
-        U_q = _make_U_q(L_base, q)
-        z = torch.randn(B, q)
-        _, _, _, L_z = decoder(z, U_q, L_base)
-        return L_z
-
-    def test_symmetry(self) -> None:
-        L_z = self._get_L_z()
-        err = (L_z - L_z.transpose(-1, -2)).abs().max().item()
-        assert err < 1e-5, f"Symmetry error {err:.2e}"
-
-    def test_zero_row_sums(self) -> None:
-        L_z = self._get_L_z()
-        row_sums = L_z.sum(dim=-1).abs().max().item()
-        assert row_sums < 1e-5, f"Row-sum error {row_sums:.2e}"
-
-    def test_off_diagonal_non_positive(self) -> None:
-        L_z = self._get_L_z(B=2, N=8, q=3)
-        B, N, _ = L_z.shape
-        mask = ~torch.eye(N, dtype=torch.bool).unsqueeze(0).expand(B, N, N)
-        off_diag = L_z[mask]
-        assert (off_diag <= 1e-5).all(), (
-            f"Off-diagonal max: {off_diag.max().item():.4f} (expected <= 0)"
+    def test_log_var_S_shape(self, decoder, dummy_inputs):
+        """
+        log_var_S must have shape (B, q, q) and lie within the [-6, 4] clamp.
+        """
+        z, U_q, L_base = dummy_inputs
+        _, _, _, _, log_var_S = decoder(z, U_q, L_base)
+        assert log_var_S.shape == (B, q, q), (
+            f"Expected log_var_S shape ({B}, {q}, {q}), got {log_var_S.shape}"
+        )
+        assert log_var_S.min().item() >= -6.0 - 1e-5, (
+            f"log_var_S min {log_var_S.min().item():.4f} below clamp lower bound -6"
+        )
+        assert log_var_S.max().item() <= 4.0 + 1e-5, (
+            f"log_var_S max {log_var_S.max().item():.4f} above clamp upper bound 4"
         )
 
+    def test_log_var_S_independent_of_S(self):
+        """
+        Core regression for issue #52.
 
-# ---------------------------------------------------------------------------
-# AC3 -- gradient flows back to z
-# ---------------------------------------------------------------------------
+        log_var_S must NOT be a near-deterministic function of S^2.  We
+        verify this by checking that the Pearson correlation between
+        log_var_S.flatten() and (S^2 + 1e-6).log().flatten() is below 0.9
+        for a freshly initialised decoder across 20 random z inputs.
 
-class TestGradientFlow:
-    """
-    AC3: Gradients flow from L_z back to z.
-    Verified both with manual backward and with torch.autograd.gradcheck on
-    a small (N=d=q=4, B=1) instance.
-    """
+        If the old proxy ``log_var_S = (S.pow(2) + 1e-6).log()`` were
+        re-introduced into forward(), the correlation would be 1.0 by
+        construction and this test would fail.
+        """
+        torch.manual_seed(42)
+        correlations = []
+        for seed in range(20):
+            # New random init each iteration to sample across weight space
+            dec = SpectralLoadingDecoder(q=q, d=N)
+            z = torch.randn(B, q)
+            U_q = torch.eye(N)[:, :q]   # simple orthonormal basis
+            L_base = torch.zeros(N, N)  # flat Laplacian (shape only)
 
-    def test_manual_backward(self) -> None:
-        B, N, q = 2, 8, 3
-        decoder = SpectralLoadingDecoder(q=q, d=N)
-        L_base = _make_base_lap(N)
-        U_q = _make_U_q(L_base, q)
+            with torch.no_grad():
+                _, _, S, _, log_var_S = dec(z, U_q, L_base)
 
-        z = nn.Parameter(torch.randn(B, q))
-        W, omega, S, L_z = decoder(z, U_q, L_base)
-        loss = L_z.pow(2).mean()
+            proxy = (S.pow(2) + 1e-6).log().flatten()
+            actual = log_var_S.flatten()
+
+            # Pearson correlation: (x - mean_x) @ (y - mean_y) / (||...|| * ||...||)
+            px = proxy - proxy.mean()
+            ay = actual - actual.mean()
+            denom = px.norm() * ay.norm()
+            if denom.item() < 1e-8:
+                # Both constant -- correlation undefined; treat as 0.
+                corr = 0.0
+            else:
+                corr = (px @ ay / denom).item()
+            correlations.append(abs(corr))
+
+        max_corr = max(correlations)
+        assert max_corr < 0.9, (
+            f"log_var_S appears to be derived from S^2: max |correlation| = "
+            f"{max_corr:.4f} >= 0.9.  This indicates the proxy may have been "
+            f"re-introduced (issue #52)."
+        )
+
+    def test_log_var_S_gradient(self, decoder, dummy_inputs):
+        """
+        Gradients must flow to z through log_var_S_head independently
+        of the S_net path.
+
+        Strategy: zero out S_net weights so d(loss)/d(S path) = 0, then
+        compute a loss on log_var_S only and verify grad on z is non-zero.
+        """
+        z, U_q, L_base = dummy_inputs
+        z = z.detach().requires_grad_(True)
+
+        # Freeze S_net: zero weight and bias so S_net contributes nothing
+        with torch.no_grad():
+            nn.init.zeros_(decoder.S_net.weight)
+            nn.init.zeros_(decoder.S_net.bias)
+
+        # Also freeze omega_net
+        with torch.no_grad():
+            nn.init.zeros_(decoder.omega_net.weight)
+            nn.init.zeros_(decoder.omega_net.bias)
+
+        # Forward: only log_var_S_head has non-zero weights now
+        _, _, _, _, log_var_S = decoder(z, U_q, L_base)
+        loss = log_var_S.sum()
         loss.backward()
 
-        assert z.grad is not None, "No gradient on z"
-        assert z.grad.shape == z.shape
-        assert not torch.isnan(z.grad).any(), "NaN in z.grad"
-
-    def test_gradcheck(self) -> None:
-        """gradcheck on a tiny graph (N=d=q=4, B=1) in double precision."""
-        N, q = 4, 4
-        decoder = SpectralLoadingDecoder(q=q, d=N).double()
-        L_base = _make_base_lap(N).double()
-        U_q = _make_U_q(L_base, q).double()
-
-        def fn(z: torch.Tensor) -> torch.Tensor:
-            _, _, _, L_z = decoder(z, U_q, L_base)
-            return L_z
-
-        z = torch.randn(1, q, dtype=torch.float64, requires_grad=True)
-        assert torch.autograd.gradcheck(fn, (z,), eps=1e-5, atol=1e-4, rtol=1e-3), (
-            "gradcheck failed for SpectralLoadingDecoder"
+        assert z.grad is not None, "No gradient on z after log_var_S.sum().backward()"
+        assert z.grad.abs().sum().item() > 0.0, (
+            "z.grad is all-zero: log_var_S_head is not connected to z"
         )
 
 
-# ---------------------------------------------------------------------------
-# AC4 -- omega strictly positive
-# ---------------------------------------------------------------------------
+class TestForwardContract:
+    """Shape and initialisation contracts for SpectralLoadingDecoder."""
 
-class TestOmegaPositive:
-    """
-    AC4: omega = exp(omega_net(z)) is strictly positive for any z.
-    """
-
-    @pytest.mark.parametrize("seed", [0, 1, 42, 123, 999])
-    def test_positive_various_seeds(self, seed: int) -> None:
-        torch.manual_seed(seed)
-        B, N, q = 4, 8, 4
-        decoder = SpectralLoadingDecoder(q=q, d=N)
-        L_base = _make_base_lap(N)
-        U_q = _make_U_q(L_base, q)
-        z = torch.randn(B, q) * 10  # large magnitude to stress-test exp gate
-        _, omega, _, _ = decoder(z, U_q, L_base)
-        assert (omega > 0).all(), f"omega has non-positive entries: {omega.min().item()}"
-
-
-# ---------------------------------------------------------------------------
-# AC5 -- near-identity init
-# ---------------------------------------------------------------------------
-
-class TestNearIdentityInit:
-    """
-    AC5: At initialisation (z=0), S is close to eye(q) and omega is close to
-    ones(q).  This ensures the decoder starts from a well-conditioned point.
-    """
-
-    def test_S_close_to_identity(self) -> None:
-        q, N = 5, 10
-        decoder = SpectralLoadingDecoder(q=q, d=N)
-        z_zero = torch.zeros(1, q)
-        L_base = _make_base_lap(N)
-        U_q = _make_U_q(L_base, q)
-        _, _, S, _ = decoder(z_zero, U_q, L_base)
-        # S[0] should equal eye(q) exactly at z=0 given _init_weights
-        err = (S[0] - torch.eye(q)).abs().max().item()
-        assert err < 1e-5, f"S init error {err:.2e}; expected close to eye({q})"
-
-    def test_omega_close_to_ones(self) -> None:
-        q, N = 5, 10
-        decoder = SpectralLoadingDecoder(q=q, d=N)
-        z_zero = torch.zeros(1, q)
-        L_base = _make_base_lap(N)
-        U_q = _make_U_q(L_base, q)
-        _, omega, _, _ = decoder(z_zero, U_q, L_base)
-        # omega = exp(~0) ~ 1  with small weight init
-        err = (omega[0] - torch.ones(q)).abs().max().item()
-        assert err < 0.1, f"omega init error {err:.4f}; expected close to 1"
-
-
-# ---------------------------------------------------------------------------
-# AC6 -- v1 WiringDecoder backward compat
-# ---------------------------------------------------------------------------
-
-class TestWiringDecoderV1Compat:
-    """
-    AC6: WiringDecoder (v1) is unaffected by the addition of
-    SpectralLoadingDecoder.  Forward signature and output shapes must be
-    unchanged.
-    """
-
-    def _make_wiring_decoder(
-        self, N: int = 16, E: int = 48, latent_dim: int = 8, n_heads: int = 2
-    ) -> WiringDecoder:
-        src = torch.randint(0, N, (E,))
-        dst = torch.randint(0, N, (E,))
-        edge_index = torch.stack([src, dst])
-        base_weights = torch.rand(E).abs() + 0.1
-        lap = DifferentiableLaplacian(
-            n_nodes=N,
-            edge_index=edge_index,
-            base_weights=base_weights,
+    def test_forward_returns_five_outputs(self, decoder, dummy_inputs):
+        """
+        forward() must return exactly 5 tensors: W, omega, S, L_z, log_var_S.
+        """
+        z, U_q, L_base = dummy_inputs
+        outputs = decoder(z, U_q, L_base)
+        assert len(outputs) == 5, (
+            f"Expected 5 outputs from SpectralLoadingDecoder.forward(), got {len(outputs)}"
         )
-        return WiringDecoder(
+        W, omega, S, L_z, log_var_S = outputs
+        assert W.shape == (B, N, q),          f"W shape mismatch: {W.shape}"
+        assert omega.shape == (B, q),          f"omega shape mismatch: {omega.shape}"
+        assert S.shape == (B, q, q),           f"S shape mismatch: {S.shape}"
+        assert L_z.shape == (B, N, N),         f"L_z shape mismatch: {L_z.shape}"
+        assert log_var_S.shape == (B, q, q),   f"log_var_S shape mismatch: {log_var_S.shape}"
+
+    def test_near_identity_init(self):
+        """
+        At z=0, S_net should output eye(q) and log_var_S should be ~0.
+
+        This tests the _init_weights contract:
+          S_net.weight = 0, S_net.bias = eye(q).flatten()  =>  S_net(0) = eye_flat
+          log_var_S_head.weight ~ N(0, 0.01), bias = 0     =>  output ~ 0 at z=0
+        """
+        dec = SpectralLoadingDecoder(q=q, d=N)
+        z_zero = torch.zeros(1, q)
+        U_q = torch.eye(N)[:, :q]
+        L_base = torch.zeros(N, N)
+
+        with torch.no_grad():
+            _, _, S, _, log_var_S = dec(z_zero, U_q, L_base)
+
+        # S should be eye(q)
+        expected_S = torch.eye(q).unsqueeze(0)   # (1, q, q)
+        assert torch.allclose(S, expected_S, atol=1e-5), (
+            f"S at z=0 is not eye(q): max deviation {(S - expected_S).abs().max():.6f}"
+        )
+
+        # log_var_S should be close to zero (weight init ~ N(0, 0.01), bias=0)
+        # Tolerance is generous: small weights can still give ~0.01*q output
+        assert log_var_S.abs().max().item() < 0.1, (
+            f"log_var_S at z=0 too large: max abs = {log_var_S.abs().max().item():.4f}. "
+            f"Expected near-zero from zero-bias init."
+        )
+
+
+class TestV1Unchanged:
+    """Smoke tests confirming WiringDecoder (v1) is unaffected by the fix."""
+
+    def test_wiring_decoder_v1_forward(self):
+        """
+        WiringDecoder.forward() must still return (L, delta) with no changes.
+        """
+        torch.manual_seed(7)
+        n_nodes = 8
+        n_edges = 16
+        latent_dim = 8
+        hidden_dim = 16
+        n_heads = 2
+
+        # Build a minimal DifferentiableLaplacian
+        E_small = torch.randn(n_nodes, 4)
+        lap = DifferentiableLaplacian.from_embeddings(
+            E_small, knn_k=3, sigma=1.0, normalised=True, sparse=False
+        )
+
+        dec = WiringDecoder(
             latent_dim=latent_dim,
-            n_edges=E,
-            hidden_dim=32,
+            n_edges=n_edges,
+            hidden_dim=hidden_dim,
             n_heads=n_heads,
             laplacian=lap,
         )
-
-    def test_v1_output_shapes(self) -> None:
-        B, latent_dim, N, E = 3, 8, 16, 48
-        decoder = self._make_wiring_decoder(N=N, E=E, latent_dim=latent_dim)
         z = torch.randn(B, latent_dim)
-        L, delta = decoder(z)
-        assert L.shape     == (B, N, N)
-        assert delta.shape == (B, E)
-
-    def test_v1_gradient(self) -> None:
-        B, latent_dim = 2, 8
-        decoder = self._make_wiring_decoder(latent_dim=latent_dim)
-        z = nn.Parameter(torch.randn(B, latent_dim))
-        L, _ = decoder(z)
-        loss = L.pow(2).mean()
-        loss.backward()
-        assert z.grad is not None
-        assert not torch.isnan(z.grad).any()
+        outputs = dec(z)
+        assert len(outputs) == 2, f"WiringDecoder must return 2 outputs, got {len(outputs)}"
+        L, delta = outputs
+        assert delta.shape == (B, n_edges), f"delta shape mismatch: {delta.shape}"

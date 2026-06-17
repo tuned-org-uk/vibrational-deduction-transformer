@@ -20,8 +20,9 @@ Data flow::
     x  (B, D),  U_q (N, q),  eigvals_q (q,),  L_f (B, N, N)
       --> WiringEncoder      z (B, latent_dim), mu, log_var, log_a (B, q), log_b (B, q)
       --> z_to_q projection  z_q (B, q)
-      --> SpectralLoadingDecoder  W (B, d, q), omega (B, q), S (B, q, q)
-                                  [L_z is synthesised internally, not returned]
+      --> SpectralLoadingDecoder  W (B, d, q), omega (B, q), S (B, q, q),
+                                  L_z (B, N, N), log_var_S (B, q, q)
+                                  [log_var_S is independent of S -- fix #52]
       --> DiffusionDecoder   uses self.embedding (N, D) as the node table
                              x_hat (B, D)
       --> three-term ELBO
@@ -138,10 +139,11 @@ class WiringAutoencoder(nn.Module):
           --> z_to_q  (linear, latent_dim -> q)
                 z_q  (B, q)
           --> SpectralLoadingDecoder
-                W        (B, feat_dim, q) -- spectral loading matrix
-                omega    (B, q)           -- mode weights
-                S        (B, q, q)        -- rotation matrix
-                [L_z synthesised internally, not returned in output dict]
+                W          (B, feat_dim, q) -- spectral loading matrix
+                omega      (B, q)           -- mode weights
+                S          (B, q, q)        -- spectral coeff matrix (posterior mean)
+                L_z        (B, N, N)        -- synthesised Laplacian
+                log_var_S  (B, q, q)        -- independent posterior log-variance (fix #52)
           --> DiffusionDecoder
                 uses self.embedding  (N, D) as the node embedding table
                 x_hat    (B, D)
@@ -336,9 +338,10 @@ class WiringAutoencoder(nn.Module):
         z_q = self.z_to_q(z)   # (B, q)
 
         # --- Spectral decode (wiring) -------------------------------------
-        # SpectralLoadingDecoder.forward() signature: (z, U_q, L_base)
-        # L_base is the dense base Laplacian from self._laplacian.
-        W, omega, S, L_z = self.wiring_decoder(
+        # SpectralLoadingDecoder.forward() returns 5 values (fix #52):
+        #   W, omega, S, L_z, log_var_S
+        # log_var_S is an independent head output -- NOT derived from S.
+        W, omega, S, L_z, log_var_S = self.wiring_decoder(
             z_q, U_q, self._laplacian.base_laplacian
         )
 
@@ -360,9 +363,12 @@ class WiringAutoencoder(nn.Module):
         kl_z = -0.5 * (1.0 + log_var - mu.pow(2) - log_var.exp()).sum(dim=-1).mean()
 
         # Term 3: spectral basis KL  KL(q(S) || p(S|I))
-        # log_var_S is derived from S as log(S^2 + eps) to stay on the
-        # differentiable path without an extra output head.
-        log_var_S = (S.pow(2) + 1e-6).log()  # (B, q, q)
+        # log_var_S is the independent posterior log-variance from
+        # SpectralLoadingDecoder.log_var_S_head -- not derived from S.
+        # This is the fix for issue #52: the old proxy
+        #   log_var_S = (S.pow(2) + 1e-6).log()
+        # conflated the posterior mean and variance and produced an invalid
+        # KL gradient.  log_var_S now comes from an independent linear head.
         kl_S = spectral_basis_kl(S, log_var_S, eigvals_q, lam_s=self.lam_s)
 
         # Term 4: mode frequency KL  KL(q(w) || p(w|tau,Lambda))
@@ -433,7 +439,8 @@ class WiringAutoencoder(nn.Module):
         z_prior = torch.zeros(1, self.latent_dim, device=device)
         z_q = self.z_to_q(z_prior)  # (1, q)
 
-        W_hat, omega_raw, S, _L_z = self.wiring_decoder(
+        # Unpack 5 values; log_var_S is not needed for the artefact.
+        W_hat, omega_raw, S, _L_z, _log_var_S = self.wiring_decoder(
             z_q, U_q, self._laplacian.base_laplacian
         )
         # W_hat : (1, feat_dim, q)
@@ -490,7 +497,8 @@ class WiringAutoencoder(nn.Module):
         device = next(self.parameters()).device
         z = torch.randn(n_samples, self.latent_dim, device=device)
         z_q = self.z_to_q(z)   # (n_samples, q)
-        W, omega, S, L_z = self.wiring_decoder(
+        # Unpack 5 values; log_var_S is not needed for generation.
+        W, omega, S, L_z, _log_var_S = self.wiring_decoder(
             z_q, U_q, self._laplacian.base_laplacian
         )
         return self.diffusion_decoder(L_z, E, node_idx=node_idx)
