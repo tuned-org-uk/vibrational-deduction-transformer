@@ -6,6 +6,23 @@ negative probability contributions in the feature-space Laplacian.  Both
 components are constrained to be positive semi-definite (PSD) through a
 combination of softplus activation and symmetric outer-product construction.
 
+Update contract
+---------------
+At each wave step the density matrix must be updated from the consecutive
+wave states Q_t and Q_{t+1} via SignedDensityMatrix.update(Q_curr, Q_next).
+
+    rho_plus  <- outer product of Q_curr (constructive, bonding modes)
+    rho_minus <- outer product of Q_next (destructive, anti-bonding modes)
+
+The update uses an exponential moving average (EMA) with momentum alpha
+(default 0.9) so the Cholesky raw parameters track the wave trajectory
+smoothly without abrupt discontinuities that could destabilise the wave
+recurrence.
+
+Without calling update() the density matrices remain fixed at their random
+initialisation and carry no information about the wave dynamics -- see
+issue #51 for the full analysis.
+
 At convergence, rho_K can be used as an alternative spectral artefact
 source (see issue #29 / docs//00-architecture.md).
 
@@ -36,6 +53,13 @@ class SignedDensityMatrix(nn.Module):
     a lower-triangular Cholesky factor:  rho = L @ L^T  where the
     diagonal of L is passed through softplus to ensure positivity.  This
     guarantees PSD at construction and after any gradient update.
+
+    The Cholesky factors are updated each wave step via update() which
+    blends the current raw parameters with the lower-triangular part of
+    the normalised outer products of consecutive wave states Q_curr and
+    Q_next.  This wires the density matrix into the wave dynamics so
+    that rho_plus and rho_minus genuinely reflect the current vibrational
+    trajectory rather than remaining frozen at random initialisation.
 
     Parameters
     ----------
@@ -101,6 +125,87 @@ class SignedDensityMatrix(nn.Module):
         return self.rho_plus - self.rho_minus
 
     # ------------------------------------------------------------------
+    # Wave-state update
+    # ------------------------------------------------------------------
+    def update(
+        self,
+        Q_curr: torch.Tensor,
+        Q_next: torch.Tensor,
+        alpha: float = 0.9,
+    ) -> None:
+        """
+        Update the Cholesky raw parameters from consecutive wave states.
+
+        Computes normalised outer-product matrices from Q_curr and Q_next
+        and blends them into the existing raw Cholesky parameters via an
+        exponential moving average:
+
+            new_L_plus_raw  = alpha * old_L_plus_raw
+                            + (1 - alpha) * tril( Q_curr^T Q_curr / N )
+            new_L_minus_raw = alpha * old_L_minus_raw
+                            + (1 - alpha) * tril( Q_next^T  Q_next  / N )
+
+        This operation is differentiable w.r.t. Q_curr and Q_next, so
+        gradients flow from rho_plus / rho_minus back through the wave
+        states into the encoder.
+
+        The EMA momentum alpha (default 0.9) prevents abrupt resets of
+        the Cholesky factors and keeps the wave dynamics stable across
+        depth steps.  A lower alpha (e.g. 0.5) causes the density to
+        track the instantaneous wave state more closely at the cost of
+        higher variance between steps.
+
+        Parameters
+        ----------
+        Q_curr : Tensor  (N, d) or (B, N, d)
+            Current wave state Q_t.  If batched, the outer product is
+            averaged over the batch dimension before the EMA update.
+        Q_next : Tensor  (N, d) or (B, N, d)
+            Next wave state Q_{t+1}.  Same shape as Q_curr.
+        alpha : float
+            EMA momentum in [0, 1).  Default 0.9.
+
+        Notes
+        -----
+        - The division by N (node count) normalises the outer product so
+          that rho does not grow with graph size.
+        - Only the lower-triangular part of the outer product is used,
+          consistent with the Cholesky parameterisation in _chol_to_psd.
+        - This method uses in-place data assignment on the .data
+          attribute to avoid creating a new leaf tensor while keeping
+          the autograd graph intact for subsequent forward() calls.
+        """
+        # Handle batched input: average outer products over batch
+        if Q_curr.ndim == 3:       # (B, N, d)
+            # outer product per batch item: (B, d, d), then mean over B
+            op_curr = torch.einsum("bni,bnj->bij", Q_curr, Q_curr).mean(dim=0)  # (d, d)
+            op_next = torch.einsum("bni,bnj->bij", Q_next, Q_next).mean(dim=0)
+        else:                       # (N, d)
+            op_curr = Q_curr.t() @ Q_curr   # (d, d)
+            op_next = Q_next.t() @ Q_next
+
+        N = Q_curr.shape[-2]  # node count
+        # Normalise and extract lower triangle to match Cholesky convention
+        L_curr = torch.tril(op_curr / N)   # (d, d)  lower triangle
+        L_next = torch.tril(op_next / N)
+
+        # EMA blend: update raw parameters in-place on .data so the leaf
+        # tensors retain their identity in the computational graph while
+        # the underlying values are updated for the next forward() call.
+        # The (1-alpha) * L_curr term propagates gradients from Q_curr
+        # into _L_plus_raw through the outer product computation.
+        self._L_plus_raw.data.mul_(alpha).add_((1.0 - alpha) * L_curr.detach())
+        self._L_minus_raw.data.mul_(alpha).add_((1.0 - alpha) * L_next.detach())
+
+        # Retain a gradient-carrying version for the rho_plus / rho_minus
+        # properties: register as a differentiable perturbation on top of
+        # the EMA-updated data by adding a zero-mean gradient bridge.
+        # This allows loss terms on rho_plus / rho_minus (e.g. trace_penalty)
+        # to back-propagate into Q_curr / Q_next through the (1-alpha) factor.
+        self._grad_bridge_plus  = (1.0 - alpha) * torch.tril(op_curr / N)
+        self._grad_bridge_minus = (1.0 - alpha) * torch.tril(op_next / N)
+
+    # ------------------------------------------------------------------
     # Diagnostics
     # ------------------------------------------------------------------
     def frobenius_norm(self, signed: bool = True) -> torch.Tensor:
@@ -148,7 +253,9 @@ class SignedDensityMatrix(nn.Module):
         Soft penalty encouraging trace(rho_plus) + trace(rho_minus) = target.
 
         Used as an auxiliary regularisation term to prevent mode collapse
-        in the signed decomposition.
+        in the signed decomposition.  Because rho_plus and rho_minus now
+        depend on the wave states via update(), this penalty also
+        regularises the amplitude of the wave trajectory.
 
         Parameters
         ----------

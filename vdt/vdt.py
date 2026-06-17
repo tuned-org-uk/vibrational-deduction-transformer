@@ -15,6 +15,18 @@ where:
   B_t    -- (N, d) external forcing from the transformer mixing block
   dt     -- scalar time step, CFL-clamped each forward pass
 
+Density update contract
+-----------------------
+After each wave step the block calls
+
+    block.density.update(Q_curr, Q_tp1, alpha=density_momentum)
+
+so that rho_plus and rho_minus track the consecutive wave states
+(Q_curr -> bonding / constructive modes, Q_tp1 -> anti-bonding /
+destructive modes).  Without this call the density matrices would
+remain frozen at random initialisation and carry no wave information.
+See issue #51 and vdt/density.py for the full update derivation.
+
 The module accumulates per-step density matrices (rho_plus, rho_minus)
 from vdt/density.py, making the signed spectral energy available
 downstream for the variational Gamma KL term (#24).
@@ -54,6 +66,17 @@ class VibrationalStateBlock(nn.Module):
                   - gamma * (Q_t - Q_{t-1})
                   + dt^2 * B_t
 
+    After computing Q_{t+1} the block updates the SignedDensityMatrix:
+
+        self.density.update(Q_t, Q_{t+1}, alpha=density_momentum)
+
+    so that rho_plus captures the outer-product structure of the current
+    state (constructive / bonding modes) and rho_minus captures the
+    outer-product structure of the next state (destructive / anti-bonding
+    modes).  This wires the density matrices into the wave dynamics and
+    ensures they carry genuine spectral information rather than remaining
+    frozen at random initialisation (issue #51).
+
     CFL constraint: dt = min(exp(log_dt), dt_max_cfl) is enforced at
     every forward call so the wave update remains stable.
 
@@ -67,6 +90,11 @@ class VibrationalStateBlock(nn.Module):
         Number of attention heads in the transformer mixing block.
     dropout : float
         Dropout applied inside the mixing block.
+    density_momentum : float
+        EMA momentum alpha in [0, 1) for SignedDensityMatrix.update().
+        Default 0.9.  Lower values cause the density to track the
+        instantaneous wave state more closely at the cost of higher
+        variance between depth steps.
     """
 
     def __init__(
@@ -75,10 +103,12 @@ class VibrationalStateBlock(nn.Module):
         feat_dim: int,
         n_heads: int = 4,
         dropout: float = 0.1,
+        density_momentum: float = 0.9,
     ) -> None:
         super().__init__()
         self.n_nodes  = n_nodes
         self.feat_dim = feat_dim
+        self.density_momentum = density_momentum
 
         # Learnable log-time-step: dt = softplus(log_dt) in practice we
         # exponentiate so dt > 0.  Init near dt=0.1.
@@ -88,6 +118,7 @@ class VibrationalStateBlock(nn.Module):
         self._gamma_raw = nn.Parameter(torch.zeros(feat_dim))
 
         # Per-step density matrix (n_nodes x n_nodes) accumulates energy.
+        # Updated each forward pass from (Q_curr, Q_next) via density.update().
         self.density = SignedDensityMatrix(n=n_nodes)
 
         # Transformer mixing: MHA + FFN on (N, d) treated as a sequence
@@ -119,6 +150,15 @@ class VibrationalStateBlock(nn.Module):
         Return CFL-clamped time step as a scalar tensor.
 
         dt = min( exp(log_dt), dt_max_cfl(lap) )
+
+        Warning
+        -------
+        dt_max_cfl is computed from the frozen base Laplacian L(I), not
+        from the dynamic feature-space Laplacian L_f passed to forward().
+        If L_f has a larger lambda_max than the base Laplacian (common
+        early in training), the true CFL constraint may be silently
+        violated.  See issue #53 for the full fix using the Gershgorin
+        bound on L_f.
         """
         dt_free   = self.log_dt.exp()
         dt_max    = torch.tensor(
@@ -137,7 +177,7 @@ class VibrationalStateBlock(nn.Module):
         lap:   DifferentiableLaplacian,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Execute one wave-step.
+        Execute one wave-step and update the density matrix.
 
         Parameters
         ----------
@@ -149,8 +189,19 @@ class VibrationalStateBlock(nn.Module):
         Returns
         -------
         Q_tp1      : Tensor  -- next state, same shape as Q_t
-        rho_plus   : Tensor  (n_nodes, n_nodes)  PSD
-        rho_minus  : Tensor  (n_nodes, n_nodes)  PSD
+        rho_plus   : Tensor  (n_nodes, n_nodes)  PSD  -- constructive modes
+        rho_minus  : Tensor  (n_nodes, n_nodes)  PSD  -- destructive modes
+
+        Notes
+        -----
+        The density matrix is updated in-place after Q_tp1 is computed:
+
+            self.density.update(Q_t, Q_tp1, alpha=self.density_momentum)
+
+        rho_plus and rho_minus are therefore computed from the wave states
+        of this step, not from random initialisation.  The EMA momentum
+        (density_momentum) controls how quickly the density tracks changes
+        in the wave trajectory across depth steps.
         """
         unbatched = Q_t.ndim == 2
         if unbatched:
@@ -169,12 +220,18 @@ class VibrationalStateBlock(nn.Module):
         dt2 = dt * dt
 
         # -- Wave update -------------------------------------------------
-        # Laplacian term: Q_t @ L_f^T  -- (B, N, d)
+        # Laplacian term: L_f @ Q_t  -- (B, N, d)
         L_term   = torch.bmm(L_f, Q_t)           # (B, N, N) x (B, N, d) -> (B, N, d)
         # Damping term: gamma (d,) broadcast over (B, N, d)
         damp     = self.gamma.unsqueeze(0).unsqueeze(0) * (Q_t - Q_tm1)
 
         Q_tp1 = 2.0 * Q_t - Q_tm1 - dt2 * L_term - damp + dt2 * B_t
+
+        # -- Density update: wire rho_plus / rho_minus to the wave states -
+        # Q_t   -> rho_plus  (constructive / bonding mode outer product)
+        # Q_tp1 -> rho_minus (destructive / anti-bonding mode outer product)
+        # The EMA momentum self.density_momentum controls the tracking speed.
+        self.density.update(Q_t, Q_tp1, alpha=self.density_momentum)
 
         if unbatched:
             Q_tp1 = Q_tp1.squeeze(0)
@@ -194,6 +251,15 @@ class VDT(nn.Module):
     output of the previous block as Q_t and the zero-init Q_{t-1}.
     A final modal projection compresses the output to a latent vector.
 
+    Density matrices
+    ----------------
+    Each block maintains a SignedDensityMatrix updated from its own
+    consecutive wave states (Q_curr, Q_next) via density.update().
+    The rho_plus_list and rho_minus_list returned by forward() therefore
+    contain K density matrices that track the vibrational energy at each
+    depth, with rho_plus[k] reflecting constructive modes at layer k and
+    rho_minus[k] reflecting destructive modes.
+
     Parameters
     ----------
     n_nodes : int
@@ -209,6 +275,9 @@ class VDT(nn.Module):
         Attention heads inside each VibrationalStateBlock.
     dropout : float
         Dropout inside each VibrationalStateBlock.
+    density_momentum : float
+        EMA momentum forwarded to SignedDensityMatrix.update() in each
+        block.  Default 0.9.  See VibrationalStateBlock for details.
 
     Notes
     -----
@@ -227,6 +296,7 @@ class VDT(nn.Module):
         m_modes:   Optional[int] = None,
         n_heads:   int  = 4,
         dropout:   float = 0.1,
+        density_momentum: float = 0.9,
     ) -> None:
         super().__init__()
         self.n_nodes  = n_nodes
@@ -240,6 +310,7 @@ class VDT(nn.Module):
                 feat_dim=feat_dim,
                 n_heads=n_heads,
                 dropout=dropout,
+                density_momentum=density_momentum,
             )
             for _ in range(n_layers)
         ])
@@ -259,6 +330,11 @@ class VDT(nn.Module):
         Run K vibrational steps and return the final state plus
         all intermediate states and density matrices.
 
+        Each block's density matrix is updated from its wave states before
+        rho_plus / rho_minus are appended to the output lists, so the
+        returned density matrices reflect the actual wave trajectory at
+        each depth rather than random initialisations.
+
         Parameters
         ----------
         X0      : initial node-feature matrix  (N, d) or (B, N, d)
@@ -271,7 +347,8 @@ class VDT(nn.Module):
         Q_K   : Tensor -- final state after K blocks
         Q_states : List[Tensor] -- [X0, Q_1, ..., Q_K]  length K+1
         (rho_plus_list, rho_minus_list) : Tuple[List, List]
-                  -- one (n_nodes, n_nodes) PSD tensor per block
+                  -- one (n_nodes, n_nodes) PSD tensor per block,
+                     updated from wave states (Q_curr, Q_next) at each depth.
         """
         Q_prev  = torch.zeros_like(X0)
         Q_curr  = X0
