@@ -25,7 +25,7 @@ torch.manual_seed(7)
 
 B      = 4
 D_IN   = 32
-Q      = 8       # latent_dim
+Q      = 8       # spectral mode count AND latent_dim (equal for simplicity)
 N      = 16      # n_nodes (small for fast test)
 FEAT   = 16      # feat_dim
 
@@ -38,6 +38,7 @@ def _make_encoder(**kwargs) -> WiringEncoder:
     defaults = dict(
         input_dim=D_IN,
         latent_dim=Q,
+        q=Q,          # <-- spectral mode count; required by WiringEncoder.__init__
         n_nodes=N,
         feat_dim=FEAT,
         n_layers=2,
@@ -201,4 +202,3 @@ class TestKlGradCheck:
             return kl_isotropic(mu, lv)
 
         assert torch.autograd.gradcheck(fn, (log_var,), eps=1e-5, atol=1e-4)
-

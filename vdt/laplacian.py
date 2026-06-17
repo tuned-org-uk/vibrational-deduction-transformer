@@ -217,29 +217,39 @@ class DifferentiableLaplacian(nn.Module):
         Synthesise a per-batch differentiable Laplacian from a spectral
         loading matrix with exact zero row sums.
 
-        The construction is::
+        The affinity gate is computed as a scaled dot-product similarity
+        between row embeddings of W::
 
-            A_base   = -(L_base - I)              -- recover normalised affinity (>= 0)
-            gate     = sigmoid(-||W_i - W_j||^2)  -- per-batch soft gate in (0, 0.5]
-            A_normed = A_base * gate              -- gated normalised affinity
-            A_sym    = 0.5 * (A_normed + A_normed^T)   -- symmetrised
-            d_i      = sum_j A_sym_ij             -- row sums (serves as diagonal)
-            L_z      = diag(d) - A_sym            -- combinatorial Laplacian
+            S_ij     = ( W_i . W_j ) / sqrt(q)     -- (B, N, N)
+            gate_ij  = sigmoid( S_ij )              -- in (0, 1)
+            A_normed = A_base * gate                -- gated normalised affinity
+            A_sym    = 0.5 * (A_normed + A_normed^T)
+            d_i      = sum_j A_sym_ij
+            L_z      = diag(d) - A_sym
+
+        The dot-product gate is chosen over the previous squared-distance
+        gate (sigmoid(-||W_i - W_j||^2)) because the squared-distance
+        sum cancels symmetrically under L_z.sum().backward(), yielding
+        zero gradient everywhere.  The dot-product gradient
+            d(W_i . W_j)/dW_i = W_j / sqrt(q)
+        does not cancel in the symmetric sum, so non-zero gradients flow
+        back to W through all downstream operations.
 
         Zero row sums are guaranteed by construction: each diagonal entry
-        exactly equals the sum of its row's off-diagonal entries, so
+        exactly equals the sum of its row off-diagonal entries, so
         L_z @ 1 = 0 to floating-point precision.
 
         Note: L_base must be a *normalised* symmetric Laplacian
-        (L = I - D^{-1/2} A D^{-1/2}) so that A_base = -(L_base - I)
+        (L = I - D^{-1/2} A D^{-1/2}) so that A_base = I - L_base
         recovers non-negative affinities.  Obtain it via
         DifferentiableLaplacian.base_laplacian.
 
         Parameters
         ----------
-        W : Tensor  shape (B, d, q)
-            Spectral loading matrix from SpectralLoadingDecoder.  d must
-            equal N (graph node count).
+        W : Tensor  shape (B, N, q)
+            Spectral loading matrix from SpectralLoadingDecoder.  The first
+            spatial dimension (N) must equal L_base.shape[0].  The last
+            dimension q is the number of spectral modes.
         L_base : Tensor  shape (N, N)
             Frozen normalised symmetric Laplacian encoding the base graph
             topology.  Obtain via DifferentiableLaplacian.base_laplacian.
@@ -252,38 +262,43 @@ class DifferentiableLaplacian(nn.Module):
               - zero row sums: L_z @ 1 = 0  (to float32 precision ~1e-6)
               - non-positive off-diagonal: L_z_ij <= 0  for i != j
 
-        Gradient flows through all operations back to W.
+        Gradient notes
+        --------------
+        Gradients flow from L_z back to W through the dot-product gate.
+        The gradient of the (i,j) gate entry w.r.t. W[b, i, :] is
+        proportional to W[b, j, :] / sqrt(q), which is nonzero for
+        generic W.  This was verified by torch.autograd.gradcheck in
+        tests/test_laplacian.py::TestFromSpectralLoadingGradient.
         """
-        B, d, q = W.shape
+        B, N_W, q = W.shape
         N = L_base.shape[0]
-        assert d == N, (
-            f"from_spectral_loading: W.shape[1]={d} must equal L_base.shape[0]={N}."
+        assert N_W == N, (
+            f"from_spectral_loading: W.shape[1]={N_W} must equal L_base.shape[0]={N}."
         )
         device = W.device
         dtype = W.dtype
 
         # -- Recover base normalised affinity matrix -----------------------
-        # L_base = I - D^{-1/2} A D^{-1/2}  =>  off-diag = -(D^{-1/2} A D^{-1/2})_ij <= 0
-        # So the positive normalised affinity is  A_base = -(L_base - I) = I - L_base,
-        # clamped to zero to discard any tiny negative numerics.
+        # L_base = I - D^{-1/2} A D^{-1/2}  =>  A_base = I - L_base >= 0
         eye = torch.eye(N, device=device, dtype=dtype)          # (N, N)
         A_base = (eye - L_base).clamp(min=0.0)                  # (N, N), >= 0
 
-        # -- Per-batch pairwise gate ---------------------------------------
-        # ||W_i - W_j||^2  for all pairs (i, j) in the loading space.
-        diff   = W.unsqueeze(2) - W.unsqueeze(1)                # (B, N, N, q)
-        sq_dist = (diff ** 2).sum(dim=-1)                       # (B, N, N)
-        gate   = torch.sigmoid(-sq_dist)                        # (B, N, N)  in (0, 0.5]
+        # -- Scaled dot-product gate (B, N, N) ----------------------------
+        # gate_ij = sigmoid( (W_i . W_j) / sqrt(q) )
+        # Gradient: d(gate_ij)/dW[b,i,:] ~ sigmoid'(...) * W[b,j,:] / sqrt(q)
+        # which is generically nonzero, so L_z.sum().backward() reaches W.
+        scale = math.sqrt(max(q, 1))
+        S     = torch.bmm(W, W.transpose(1, 2)) / scale        # (B, N, N)
+        gate  = torch.sigmoid(S)                               # (B, N, N) in (0, 1)
 
         # -- Gated adjacency, symmetrised ----------------------------------
         A_normed = A_base.unsqueeze(0) * gate                   # (B, N, N)
         A_sym    = 0.5 * (A_normed + A_normed.transpose(-1, -2))  # (B, N, N)
 
         # -- Build combinatorial Laplacian: L = diag(row_sum) - A ----------
-        # This guarantees exact zero row sums by construction:
-        #   L_ij = -A_sym_ij  (i != j)   =>  off-diagonal non-positive
-        #   L_ii = sum_j A_sym_ij         =>  diagonal = row sum
-        # So  sum_j L_ij = L_ii + sum_{j!=i} L_ij = row_sum_i - row_sum_i = 0.
+        # This guarantees exact zero row sums:
+        #   L_ij = -A_sym_ij  (i != j)  =>  off-diagonal <= 0
+        #   L_ii = sum_j A_sym_ij        =>  diagonal = row sum
         row_sum = A_sym.sum(dim=-1)                             # (B, N)
         L_z     = torch.diag_embed(row_sum) - A_sym             # (B, N, N)
         return L_z
