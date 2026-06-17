@@ -29,11 +29,12 @@ sharpens high-frequency modes early in training (issue #53).
 The block computes the CFL bound from L_f using the Gershgorin circle
 theorem (O(N^2), no eigendecomposition):
 
-    lambda_max(L_f) <= max_i sum_j |L_f[i,j]|   (Gershgorin row bound)
+    lambda_max(L_f) <= max_i  sum_j |L_f[i, j]|   (Gershgorin row bound)
 
-This bound is always >= lambda_max so the resulting dt_max is always a
-valid (conservative) CFL limit.  The base-Laplacian bound from
-lap.dt_max_cfl() is also computed; the stricter of the two is used.
+This bound is always >= the true lambda_max so the resulting dt_max is always a
+valid (conservative) CFL limit.  For a graph Laplacian the bound
+equals twice the maximum weighted degree, which is typically within a
+factor of 2-4 of the true spectral radius.
 
 Set recompute_cfl=False in forward() to fall back to the frozen base
 bound when O(N^2) overhead is unacceptable (e.g. very large graphs
@@ -50,6 +51,15 @@ so that rho_plus and rho_minus track the consecutive wave states
 destructive modes).  Without this call the density matrices would
 remain frozen at random initialisation and carry no wave information.
 See issue #51 and vdt/density.py for the full update derivation.
+
+Density matrix dimensionality
+-----------------------------
+The SignedDensityMatrix is parameterised in **feature space** (d x d),
+not in node space (N x N).  The outer products Q^T Q produced by
+consecutive wave states have shape (d, d), so rho_plus and rho_minus
+are always (feat_dim, feat_dim) PSD matrices.  This is independent of
+the graph size N and allows the density to represent covariance across
+feature channels rather than across nodes.
 
 The module accumulates per-step density matrices (rho_plus, rho_minus)
 from vdt/density.py, making the signed spectral energy available
@@ -149,12 +159,23 @@ class VibrationalStateBlock(nn.Module):
     ensures they carry genuine spectral information rather than remaining
     frozen at random initialisation (issue #51).
 
+    Density matrix dimensionality
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    The SignedDensityMatrix is parameterised in **feature space**: its
+    Cholesky factors have shape (feat_dim, feat_dim), NOT (n_nodes, n_nodes).
+    The update() method forms outer products Q^T Q of shape (d, d) where
+    d = feat_dim, so the density represents covariance across feature
+    channels.  rho_plus and rho_minus returned by forward() therefore have
+    shape (feat_dim, feat_dim).
+
     Parameters
     ----------
     n_nodes : int
-        Number of graph nodes N.
+        Number of graph nodes N.  Used for the transformer mixing block
+        (sequence length) but NOT for the density matrix dimension.
     feat_dim : int
-        Feature dimension d (per-node channels).
+        Feature dimension d (per-node channels).  Determines both the
+        transformer embed_dim and the density matrix size (d x d).
     n_heads : int
         Number of attention heads in the transformer mixing block.
     dropout : float
@@ -186,9 +207,11 @@ class VibrationalStateBlock(nn.Module):
         # Per-feature damping raw parameter; gamma = softplus(raw) > 0.
         self._gamma_raw = nn.Parameter(torch.zeros(feat_dim))
 
-        # Per-step density matrix (n_nodes x n_nodes) accumulates energy.
-        # Updated each forward pass from (Q_curr, Q_next) via density.update().
-        self.density = SignedDensityMatrix(n=n_nodes)
+        # Density matrix lives in FEATURE space (d x d), not node space
+        # (N x N).  update() feeds it outer products Q^T Q of shape (d, d)
+        # so n must be feat_dim.  Using n_nodes here caused a shape mismatch
+        # whenever N != d (issue #54).
+        self.density = SignedDensityMatrix(n=feat_dim)
 
         # Transformer mixing: MHA + FFN on (N, d) treated as a sequence
         # of N tokens each of dimension d.
@@ -329,8 +352,8 @@ class VibrationalStateBlock(nn.Module):
         Returns
         -------
         Q_tp1      : Tensor  -- next state, same shape as Q_t
-        rho_plus   : Tensor  (n_nodes, n_nodes)  PSD  -- constructive modes
-        rho_minus  : Tensor  (n_nodes, n_nodes)  PSD  -- destructive modes
+        rho_plus   : Tensor  (feat_dim, feat_dim)  PSD  -- constructive modes
+        rho_minus  : Tensor  (feat_dim, feat_dim)  PSD  -- destructive modes
 
         Notes
         -----
@@ -342,6 +365,10 @@ class VibrationalStateBlock(nn.Module):
         of this step, not from random initialisation.  The EMA momentum
         (density_momentum) controls how quickly the density tracks changes
         in the wave trajectory across depth steps.
+
+        Both rho_plus and rho_minus have shape (feat_dim, feat_dim) -- the
+        density matrix lives in feature space (d x d), not node space
+        (N x N).  See the class docstring for the dimensionality rationale.
         """
         unbatched = Q_t.ndim == 2
         if unbatched:
@@ -406,10 +433,14 @@ class VDT(nn.Module):
     ~~~~~~~~~~~~~~~~
     Each block maintains a SignedDensityMatrix updated from its own
     consecutive wave states (Q_curr, Q_next) via density.update().
-    The rho_plus_list and rho_minus_list returned by forward() therefore
-    contain K density matrices that track the vibrational energy at each
-    depth, with rho_plus[k] reflecting constructive modes at layer k and
-    rho_minus[k] reflecting destructive modes (issue #51).
+    The rho_plus_list and rho_minus_list returned by forward() contain
+    K density matrices of shape (feat_dim, feat_dim) -- one per depth.
+    rho_plus[k] reflects constructive (bonding) modes at layer k;
+    rho_minus[k] reflects destructive (anti-bonding) modes (issue #51).
+
+    The density lives in feature space (d x d), not node space (N x N),
+    because the EMA update is built from outer products Q^T Q of shape
+    (d, d).  This is consistent across all graph sizes N.
 
     Parameters
     ----------
@@ -417,6 +448,7 @@ class VDT(nn.Module):
         Number of graph nodes N.
     feat_dim : int
         Per-node feature dimension d.  Input X0 must be (N, d).
+        Also determines the size of the density matrix: (d x d).
     n_layers : int
         Number of stacked VibrationalStateBlocks K.
     m_modes : int
@@ -504,8 +536,9 @@ class VDT(nn.Module):
         Q_K   : Tensor -- final state after K blocks
         Q_states : List[Tensor] -- [X0, Q_1, ..., Q_K]  length K+1
         (rho_plus_list, rho_minus_list) : Tuple[List, List]
-                  -- one (n_nodes, n_nodes) PSD tensor per block,
-                     updated from wave states (Q_curr, Q_next) at each depth.
+                  -- K tensors of shape (feat_dim, feat_dim) PSD,
+                     one per block, updated from wave states (Q_curr,
+                     Q_next) at each depth.  Shape is (d, d) NOT (N, N).
         """
         Q_prev  = torch.zeros_like(X0)
         Q_curr  = X0

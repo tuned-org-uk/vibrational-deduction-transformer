@@ -1,10 +1,22 @@
 """
-Signed density matrix for the  vibrational architecture.
+Signed density matrix for the vibrational architecture.
 
 The signed density matrix rho = rho_plus - rho_minus models positive and
 negative probability contributions in the feature-space Laplacian.  Both
 components are constrained to be positive semi-definite (PSD) through a
 combination of softplus activation and symmetric outer-product construction.
+
+Dimensionality
+--------------
+The density matrix lives in **feature space**: its Cholesky factors have
+shape (d, d) where d = feat_dim, NOT the graph node count N.  This is
+because the update() method forms outer products Q^T Q of shape (d, d)
+from the consecutive wave states Q_curr and Q_next (each of shape
+(N, d) or (B, N, d)).  Parameterising the density in node space (N x N)
+would cause a shape mismatch in update() whenever N != d.
+
+The constructor parameter n therefore refers to the feature dimension d.
+Callers must pass n=feat_dim, not n=n_nodes.
 
 Update contract
 ---------------
@@ -24,7 +36,7 @@ initialisation and carry no information about the wave dynamics -- see
 issue #51 for the full analysis.
 
 At convergence, rho_K can be used as an alternative spectral artefact
-source (see issue #29 / docs//00-architecture.md).
+source (see issue #29 / docs/00-architecture.md).
 
 Reference
 ---------
@@ -61,17 +73,33 @@ class SignedDensityMatrix(nn.Module):
     that rho_plus and rho_minus genuinely reflect the current vibrational
     trajectory rather than remaining frozen at random initialisation.
 
+    Dimensionality
+    ~~~~~~~~~~~~~~
+    The parameter n is the **feature dimension d**, not the graph node
+    count N.  update() receives wave states of shape (N, d) or (B, N, d)
+    and forms outer products Q^T Q of shape (d, d).  The raw Cholesky
+    parameters _L_plus_raw and _L_minus_raw are therefore (d, d) matrices.
+
+    Passing n = n_nodes when n_nodes != feat_dim will cause a shape
+    mismatch RuntimeError in update() at the EMA add_ call.  Always
+    construct with n = feat_dim::
+
+        self.density = SignedDensityMatrix(n=feat_dim)  # correct
+        self.density = SignedDensityMatrix(n=n_nodes)   # wrong if N != d
+
     Parameters
     ----------
     n : int
-        Dimension of the density matrix (matches graph node count N).
+        Feature dimension d.  Determines the size of the (d x d) Cholesky
+        factors.  Must equal the last dimension of the wave state tensors
+        passed to update().
     eps : float
         Small constant added to the softplus diagonal to ensure strict PD.
 
     Attributes
     ----------
-    rho_plus  : Tensor  (n, n)  PSD
-    rho_minus : Tensor  (n, n)  PSD
+    rho_plus  : Tensor  (n, n)  PSD  -- constructive modes
+    rho_minus : Tensor  (n, n)  PSD  -- destructive modes
     rho       : Tensor  (n, n)  signed (not necessarily PSD)
     """
 
@@ -106,21 +134,21 @@ class SignedDensityMatrix(nn.Module):
 
     @property
     def rho_plus(self) -> torch.Tensor:
-        """Positive PSD component.  Shape (n, n)."""
+        """Positive PSD component.  Shape (n, n) = (feat_dim, feat_dim)."""
         return self._chol_to_psd(self._L_plus_raw)
 
     @property
     def rho_minus(self) -> torch.Tensor:
-        """Negative PSD component.  Shape (n, n)."""
+        """Negative PSD component.  Shape (n, n) = (feat_dim, feat_dim)."""
         return self._chol_to_psd(self._L_minus_raw)
 
     @property
     def rho(self) -> torch.Tensor:
         """
-        Signed density matrix  rho = rho_plus - rho_minus.  Shape (n, n).
-
-        Not guaranteed to be PSD.  Use rho_plus and rho_minus individually
-        when a PSD argument is required (e.g. as input to an eigensolver).
+        Signed density matrix  rho = rho_plus - rho_minus.
+        Shape (n, n) = (feat_dim, feat_dim).  Not guaranteed to be PSD.
+        Use rho_plus and rho_minus individually when a PSD argument is
+        required (e.g. as input to an eigensolver).
         """
         return self.rho_plus - self.rho_minus
 
@@ -145,6 +173,11 @@ class SignedDensityMatrix(nn.Module):
             new_L_minus_raw = alpha * old_L_minus_raw
                             + (1 - alpha) * tril( Q_next^T  Q_next  / N )
 
+        Both outer products have shape (d, d) where d = feat_dim = self.n.
+        The raw parameters _L_plus_raw and _L_minus_raw also have shape
+        (d, d), so the add_ call is shape-safe as long as the module was
+        constructed with n = feat_dim (see class docstring).
+
         This operation is differentiable w.r.t. Q_curr and Q_next, so
         gradients flow from rho_plus / rho_minus back through the wave
         states into the encoder.
@@ -158,8 +191,9 @@ class SignedDensityMatrix(nn.Module):
         Parameters
         ----------
         Q_curr : Tensor  (N, d) or (B, N, d)
-            Current wave state Q_t.  If batched, the outer product is
-            averaged over the batch dimension before the EMA update.
+            Current wave state Q_t.  d must equal self.n (feat_dim).
+            If batched, the outer product is averaged over the batch
+            dimension before the EMA update.
         Q_next : Tensor  (N, d) or (B, N, d)
             Next wave state Q_{t+1}.  Same shape as Q_curr.
         alpha : float
@@ -174,6 +208,9 @@ class SignedDensityMatrix(nn.Module):
         - This method uses in-place data assignment on the .data
           attribute to avoid creating a new leaf tensor while keeping
           the autograd graph intact for subsequent forward() calls.
+        - Shape contract: Q_curr.shape[-1] must equal self.n.  If this
+          does not hold the add_ call will raise a RuntimeError.  Check
+          that SignedDensityMatrix was constructed with n=feat_dim.
         """
         # Handle batched input: average outer products over batch
         if Q_curr.ndim == 3:       # (B, N, d)
@@ -184,7 +221,7 @@ class SignedDensityMatrix(nn.Module):
             op_curr = Q_curr.t() @ Q_curr   # (d, d)
             op_next = Q_next.t() @ Q_next
 
-        N = Q_curr.shape[-2]  # node count
+        N = Q_curr.shape[-2]  # node count (for normalisation only)
         # Normalise and extract lower triangle to match Cholesky convention
         L_curr = torch.tril(op_curr / N)   # (d, d)  lower triangle
         L_next = torch.tril(op_next / N)
@@ -234,7 +271,7 @@ class SignedDensityMatrix(nn.Module):
         Minimum eigenvalue of rho_plus and rho_minus.
 
         Both should be >= 0 (PSD) at any point during training.  These
-        values are logged by the  stability diagnostics (issue #19).
+        values are logged by the stability diagnostics (issue #19).
 
         Returns
         -------
