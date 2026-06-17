@@ -1,4 +1,4 @@
-# `docs/` — Vibrational Deduction Transformer: Spectral-PPCA Architecture
+# `docs/` -- Vibrational Deduction Transformer: Spectral-PPCA Architecture
 
 This directory contains the theoretical and architectural documentation for the
 **Vibrational Deduction Transformer (VDT)**, which integrates three structural
@@ -14,16 +14,15 @@ report (Moriondo, 2026) unless stated otherwise.
 
 ## Architecture Overview
 
-| Component | Description | File |
+| Component | Before VDT | After VDT |
 |---|---|---|
-| Isotropic latent prior `N(0,I)` | Laplacian-precision prior `N(0,(I+betaLs)^-1)` | `00-architecture.md` |
-| Hard `J_freq` spectral penalty | Variational tau-mode KL over mode weights omega | `00-architecture.md` |
-| Unconstrained MoE wiring decoder | Spectral-basis loading decoder `W = U_{1:q} diag(omega) S` | `00-architecture.md` |
-| Single fixed ELBO | Four-term ELBO with three KL terms | `00-architecture.md` |
-| No post-training export | Spectral artefact extraction + associative memory | `00-architecture.md` |
-| Six option tracks | Six option tracks with full VDT compatibility | `03-branching.md` |
-| Stability hierarchy | Extended with two VDT-specific diagnostics | `04-stability.md` |
-| No code reference | Full module-level code for all VDT changes | `05-Code.md` |
+| Isotropic latent prior `N(0,I)` | Standard VAE isotropic prior | Retained as isotropic `N(0,I)` -- Laplacian-precision KL removed in PR #35 |
+| Hard `J_freq` spectral penalty | `alpha * J_freq(L(z))` | Replaced by variational tau-mode KL over mode weights omega |
+| Unconstrained MoE wiring decoder | `WiringDecoder` (v1, MoE) | `SpectralLoadingDecoder` -- `W = U_{1:q} diag(omega) S` |
+| Single fixed ELBO | `recon + beta*KL` | Four-term ELBO: `recon + kl_z + kl_S + kl_tau` |
+| No post-training export | -- | Spectral artefact extraction + `SpectralAssociativeMemory` |
+| Six option tracks | -- | Six option tracks with full VDT compatibility (see `03-branching.md`) |
+| Stability hierarchy | Original 4-level | Extended with two VDT-specific diagnostics (see `04-stability.md`) |
 
 ---
 
@@ -37,8 +36,8 @@ ArrowSpace index `I`:
 |---|---|---|
 | PCA | Spectral Laplacian `Lf = Df - Wf` | Same; now also the eigenbasis for `W` |
 | Autoencoder | Wiring AE (`J_freq` loss) | Spectral-basis loading AE |
-| PPCA | Probabilistic graph wiring (`p(z)=N(0,Lm^-1)`) | Implemented: Laplacian-precision KL replaces `N(0,I)` KL |
-| VAE + ELBO | `recon + beta*KL + alpha*J_freq` | `recon - KL_Lap(z) - KL_S - KL_tau` |
+| PPCA | Probabilistic graph wiring | Implemented: spectral-basis and tau-mode KLs |
+| VAE + ELBO | `recon + beta*KL + alpha*J_freq` | `recon + kl_z + kl_S + kl_tau` |
 | Bayesian evidence | Not present | ELBO Bayes factor over ArrowSpace indices |
 | Associative memory | Not present | Spectral artefact -> pre-built Hopfield memory |
 | Transformer memory | Random init | `SpectralAssociativeMemory` from artefact |
@@ -66,8 +65,8 @@ ArrowSpace index `I`:
          |                             |                           |
   +------+------+             +--------+-------+        +---------+--------+
   |  W = U_{1:q}|             |  p(z) =        |        |  p(omega|tau,L): |
-  |  diag(omega)|             |  N(0,(I+betaLs)|        |  Exp(tau*lk) pr. |
-  |  S eigenbas.|             |  Dirichlet KL  |        |  tau-mode KL     |
+  |  diag(omega)|             |  N(0, I)       |        |  Exp(tau*lk) pr. |
+  |  S eigenbas.|             |  isotropic KL  |        |  tau-mode KL     |
   +------+------+             +--------+-------+        +---------+--------+
          |                             |                           |
          +-----------------------------+---------------------------+
@@ -77,9 +76,9 @@ ArrowSpace index `I`:
                |                             |
                |  ELBO =                     |
                |    recon                    |
-               |  - KL_Lap(z)               |
-               |  - KL_S (spectral basis)    |
-               |  - KL_tau (mode weights)    |
+               |  - kl_z  (isotropic)        |
+               |  - kl_S  (spectral basis)   |
+               |  - kl_tau (mode weights)    |
                +------------+----------------+
                             |
                +------------+----------------+
@@ -115,8 +114,8 @@ step with a graph-spectral analogue:
 |---|---|---|
 | PCA | Spectral Laplacian `Lf` | Same + eigenbasis for `W` |
 | Autoencoder | Wiring AE (`J_freq` loss) | `SpectralLoadingDecoder` |
-| PPCA | Modal prior `N(0, Lm^-1)` | Implemented in KL terms |
-| VAE + ELBO | `recon + beta*KL + alpha*J_freq` | Three-term spectral ELBO |
+| PPCA | Modal prior `N(0, Lm^-1)` | Spectral-basis and tau-mode KLs |
+| VAE + ELBO | `recon + beta*KL + alpha*J_freq` | `recon + kl_z + kl_S + kl_tau` |
 | Associative memory | Absent | `SpectralAssociativeMemory` |
 
 ---
@@ -134,7 +133,7 @@ L_VDT = E_q[log p(x|z,W)]
 ```
 
 - **Spectral-basis KL**: penalises the loading matrix `S` using eigenvalue-weighted
-  Gaussian shrinkage — high-frequency eigenmodes (large `lk`) are penalised
+  Gaussian shrinkage -- high-frequency eigenmodes (large `lk`) are penalised
   exponentially more, implementing a *spectral Occam's razor*.
 - **Tau-mode KL**: replaces the hard penalty by placing an Exponential prior over
   mode weights `w_k`, with heavy support on low-frequency modes and a closed-form
@@ -146,19 +145,28 @@ L_VDT = E_q[log p(x|z,W)]
 
 ### `WiringEncoder` (`encoder.py`)
 Wraps the `VDT` vibrational recurrence (discrete damped wave equation) and adds a
-`ModeWeightHead` — a linear layer outputting variational Gamma parameters `(log_a, log_b)`
+`ModeWeightHead` -- a linear layer outputting variational Gamma parameters `(log_a, log_b)`
 for each spectral mode. It uses **standard isotropic KL** for the latent `z`
 (the Laplacian-precision KL path was removed in PR #35).
 
 ### `SpectralLoadingDecoder` (`wiring_decoder.py`)
-Replaces `WiringDecoder` as the current default. Maps `z (B, q)` to a loading matrix
-`W = U_q @ diag(w) @ S` in the Laplacian eigenbasis. Edge weights are synthesised via
+Replaces `WiringDecoder` as the current default. Maps `z (B, q)` to five outputs:
+`(W, omega, S, L_z, log_var_S)` where `W = U_q @ diag(omega) @ S`.
+
+- **`log_var_S`** is produced by an independent `log_var_S_head: Linear(q, q*q)`
+  that receives `z` directly and is NOT derived from `S`. This is required for a
+  valid Gaussian reparameterisation in the spectral-basis KL (fix #52).
+- Construction-time validation (fix #55) rejects `d <= 0`, `q <= 0`, and `q > d`
+  before allocating any module state. A runtime guard checks `U_q.shape == (d, q)`.
+
+Edge weights are synthesised via
 `DifferentiableLaplacian.from_spectral_loading(W, L_base)`, fully differentiable
 back to `z`.
 
 ### `WiringAutoencoder` (`model.py`)
 Top-level assembly of encoder, spectral decoder, and diffusion decoder. Its `forward()`
-returns a 9-key dict: `{loss, recon, kl_z, kl_S, kl_tau, x_hat, z, mu, log_var}`.
+returns a **9-key dict**: `{loss, recon, kl_z, kl_S, kl_tau, x_hat, z, mu, log_var}`
+(`L_z` was removed from the return dict in PR #35).
 After training, `extract_spectral_artefact()` packages the mean loading matrix `W_hat`,
 posterior mode weights `omega_hat`, and the associative memory matrix `S_I`.
 
@@ -193,13 +201,13 @@ The system separates offline spectral learning from online inference:
 
 The docs define six branching implementation options:
 
-- **Option 1** — Deterministic AE with `SpectralLoadingDecoder` (ablation:
+- **Option 1** -- Deterministic AE with `SpectralLoadingDecoder` (ablation:
   `J_freq` hard vs tau-mode soft penalty)
-- **Option 3** — Latent diffusion with per-mode spectral noise schedule
+- **Option 3** -- Latent diffusion with per-mode spectral noise schedule
   (`a_tau^(k) = exp(-tau * lk * tau_step)`)
-- **Option 4** — Variational Laplace AE (no MC sampling; Laplace posterior +
+- **Option 4** -- Variational Laplace AE (no MC sampling; Laplace posterior +
   spectral-basis/tau-mode KLs)
-- **Option 6** — Vibrational classifier/reasoner with `SpectralAssociativeMemory`
+- **Option 6** -- Vibrational classifier/reasoner with `SpectralAssociativeMemory`
   key-matrix init and depth-supervised CE loss
 
 Recommended implementation sequence: **6 -> 1 -> 4 -> 3**.
@@ -232,13 +240,13 @@ during training.
 
 Seven active metrics are tracked by `evaluate()`:
 
-- `kl_S` — spectral basis KL
-- `kl_tau` — tau-mode frequency KL
-- `active_modes` — count of modes with `E[w_k] > 0.01`
-- `memory_snr` — retrieval SNR via key orthogonality
-- `elbo_bayes_factor` — `exp(L(I1) - L(I2))` for ArrowSpace index comparison
-- `linear_probe_acc` — logistic regression on frozen `mu`
-- `spectral_entropy H(L)` — diversity of generated wirings
+- `kl_S` -- spectral basis KL
+- `kl_tau` -- tau-mode frequency KL
+- `active_modes` -- count of modes with `E[w_k] > 0.01`
+- `memory_snr` -- retrieval SNR via key orthogonality
+- `elbo_bayes_factor` -- `exp(L(I1) - L(I2))` for ArrowSpace index comparison
+- `linear_probe_acc` -- logistic regression on frozen `mu`
+- `spectral_entropy H(L)` -- diversity of generated wirings
 
 ---
 
@@ -251,29 +259,35 @@ Seven active metrics are tracked by `evaluate()`:
 | `01-references.md` | Bibliography and related work |
 | `03-branching.md` | Six algorithm tracks |
 | `04-stability.md` | Stability hierarchy with VDT-specific diagnostics |
-| `05-Code.md` | Complete module-level code |
 
 ---
 
 ## Recommended Implementation Sequence
 
-1. **Swap `kl_loss`** in `WiringEncoder` to use the modal prior `N(0, Lambda_m^-1)` —
-   one-line change, immediately makes the latent prior match the concept table.
+The following sequence reflects the current state of the codebase after PR #35.
+Completed items are marked; remaining items are in priority order.
 
-2. **Replace `J_freq` hard penalty** with `tau_mode_kl` — soft variational KL
-   over mode weights. Keep `alpha*J_freq` as ablation flag in config.
+1. **[Done -- PR #35] Latent KL uses isotropic `N(0,I)`.**
+   The Laplacian-precision path `N(0,(I+beta*Ls)^-1)` was evaluated and removed.
+   `kl_z` in `WiringEncoder` is the standard isotropic KL.
 
-3. **Introduce `SpectralLoadingDecoder`** as a config-controlled drop-in for
-   `WiringDecoder`. Validate reconstruction parity before making it default.
+2. **[Done -- issue #52] Replace `J_freq` hard penalty with `tau_mode_kl`.**
+   The variational Gamma/Exponential KL over mode weights is active.
+   `alpha*J_freq` is retained as an ablation flag in config.
 
-4. **Add sample-graph Laplacian KL** in the encoder forward pass (stop-gradient
-   on `Ls` construction). Monitor latent smoothness KL convergence per epoch.
+3. **[Done -- issue #52] `log_var_S` produced by independent head.**
+   The old proxy `log(S^2 + eps)` was removed from `model.py`.
+   `SpectralLoadingDecoder` now has a dedicated `log_var_S_head`.
 
-5. **Add `extract_spectral_artefact()`** and `SpectralAssociativeMemory`.
+4. **[Done -- issue #55] Construction-time validation for `SpectralLoadingDecoder`.**
+   `ValueError` guards for `d <= 0`, `q <= 0`, `q > d`, and `U_q` shape
+   fire before any module state is allocated.
+
+5. **Add `extract_spectral_artefact()` and `SpectralAssociativeMemory`.**
    Test retrieval SNR on a toy associative recall benchmark.
 
-6. **Integrate `SpectralAssociativeMemory`** into VDT / transformer as FFN
-   initialiser. Run Option 6 evaluation protocol with memory enabled vs disabled.
+6. **Integrate `SpectralAssociativeMemory` into VDT / transformer as FFN
+   initialiser.** Run Option 6 evaluation protocol with memory enabled vs disabled.
 
 ---
 
@@ -281,14 +295,12 @@ Seven active metrics are tracked by `evaluate()`:
 
 All six tracks remain grounded in the VDT paper backbone:
 
-- **Part I (Foundations)**: `Lf`, `M`, `R_M`, preconditioned GD — underpin
-  Options 1, 2, 4, 6. `Lambda_m` eigenvalues parametrise the latent prior and
-  spectral-basis KL.
-- **Part II (Architecture)**: `Phi_L` wave update and `rho_t` density matrix —
-  encoder backbone for all six options. `rho_t` is the source of a
-  reasoning-grounded associative prior for Option 6.
+- **Part I (Foundations)**: `Lf`, `M`, `R_M`, preconditioned GD -- underpin
+  Options 1, 2, 4, 6. `Lambda_m` eigenvalues parametrise the spectral-basis KL.
+- **Part II (Architecture)**: `Phi_L` wave update and `rho_t` density matrix --
+  encoder backbone for all six options. `rho_t` update from wave state is an
+  open item (issue #29); density matrix is currently a stability diagnostic only.
 - **Section 9 (Density Matrix)**: `rho_t = rho_t^+ - rho_t^-` is the starting
-  point for the probabilistic reinterpretation in Options 3 and 4, unified under
-  the Spectral-PPCA ELBO.
+  point for the probabilistic reinterpretation in Options 3 and 4.
 - **Section 11 (Experiments)**: LDT-mirrored benchmarks include a memory-enabled
   vs memory-disabled ablation for the associative memory component.

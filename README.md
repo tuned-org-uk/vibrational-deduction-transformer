@@ -65,32 +65,39 @@ Input x (B, D)                   Embedding table E (N, D)
     |
     v
 +----------------------------------+
-|  WiringEncoder                 |
+|  WiringEncoder                   |
 |  MLP + lambda-fingerprint        |
-|  -> (z, mu, logS, log_a, log_b) |
+|  -> (z, mu, log_var, log_a, log_b) |
 +----------------------------------+
     |
-  (z, mu, logS)  <- reparameterise
-  (log_a, log_b) -> ModeWeightHead -> q(omega)
-    |
-    v
-+----------------------------------+
-| SpectralLoadingDecoder           |
-|  z, U_{1:q}  ->  W, omega, S    |
-|  W = U_{1:q} diag(omega) S      |
-+----------------------------------+
-    |
+  (z, mu, log_var)  <- reparameterise
+  (log_a, log_b)    -> ModeWeightHead -> q(omega)
+    |                     |
+    v                     v kl_z ---------------------------+
++------------------------------------------+               |
+| SpectralLoadingDecoder                   |               |
+|  z, U_{1:q}  ->  W, omega, S, log_var_S  |               |
+|  W = U_{1:q} diag(omega) S               |               |
+|  log_var_S from independent head         |               |
++------------------------------------------+               |
+    |                          |                            |
+    |                     log_var_S, S --> kl_S ------------+
+    |                                                       |
   W  ->  DifferentiableLaplacian.from_spectral_loading(W, L_base)
-    |
-  L(z)  (B, N, N)
-    |
-    v
-+--------------------+      +------------+
-|  DiffusionDecoder  | <--- |     E      |
-|  TauModeDiffusion  |      +------------+
-+--------------------+
-    |
-  x_hat (B, D)  -->  VDT ELBO loss (recon + kl_z + kl_S + kl_tau)
+    |                                                       |
+  L(z)  (B, N, N)                                          |
+    |                                                       |
+    v                                                       |
++--------------------+      +------------+                 |
+|  DiffusionDecoder  | <--- |     E      |                 |
+|  TauModeDiffusion  |      +------------+                 |
++--------------------+                                     |
+    |                                                       |
+  x_hat (B, D)  -->  recon loss -------------------------->+
+                      kl_tau (from log_a, log_b) --------->+
+                                                            |
+                                          VDT ELBO loss <--+
+                             (recon + kl_z + kl_S + kl_tau)
 ```
 
 Post-training, `extract_spectral_artefact()` builds:
@@ -110,9 +117,9 @@ feed-forward / cross-attention value matrices.
 | Module | Role |
 |--------|------|
 | `vdt/encoder.py` | `WiringEncoder` -- amortised posterior with lambda-fingerprint; `ModeWeightHead` outputs `(log_a, log_b)` for tau-mode prior |
-| `vdt/wiring_decoder.py` | `SpectralLoadingDecoder` -- `z, U_q -> W = U_q diag(omega) S -> L(z)` |
+| `vdt/wiring_decoder.py` | `SpectralLoadingDecoder` -- `z, U_q -> (W, omega, S, L_z, log_var_S)`; `W = U_q diag(omega) S`; `log_var_S` from independent head (fix #52) |
 | `vdt/diffusion_decoder.py` | `L(z), E -> x_hat` via tau-mode diffusion + MLP refinement |
-| `vdt/model.py` | `WiringAutoencoder` -- three-term ELBO + `extract_spectral_artefact()` |
+| `vdt/model.py` | `WiringAutoencoder` -- three-term ELBO; `forward()` returns 9-key dict `{loss, recon, kl_z, kl_S, kl_tau, x_hat, z, mu, log_var}`; `extract_spectral_artefact()` |
 | `vdt/laplacian.py` | Differentiable Laplacian builder; `from_spectral_loading(W, L_base)` |
 | `vdt/spectral.py` | `spectral_basis_kl`, `tau_mode_kl`, `laplacian_precision_kl`, `build_knn_laplacian` |
 | `vdt/spectral_memory.py` | `SpectralAssociativeMemory` -- Hopfield memory pre-built from `A(I)`; delta-rule online updates |
