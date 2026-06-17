@@ -13,7 +13,7 @@
 \contentsline {subsection}{\numberline {4.1}Term 1: Reconstruction}{5}{subsection.4.1}%
 \contentsline {subsection}{\numberline {4.2}Term 2: Isotropic Latent KL}{5}{subsection.4.2}%
 \contentsline {subsection}{\numberline {4.3}Term 3: Spectral-Basis KL}{6}{subsection.4.3}%
-\contentsline {subsection}{\numberline {4.4}Term 4: Tau-Mode Frequency KL}{6}{subsection.4.4}%
+\contentsline {subsection}{\numberline {4.4}Term 4: taumode Frequency KL}{6}{subsection.4.4}%
 \contentsline {subsection}{\numberline {4.5}Comparison with the Base Wiring AE}{6}{subsection.4.5}%
 \contentsline {section}{\numberline {5}Spectral Artefact and Associative Memory}{6}{section.5}%
 \contentsline {subsection}{\numberline {5.1}Phase 1: Spectral Artefact Extraction}{6}{subsection.5.1}%

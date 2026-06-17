@@ -74,9 +74,9 @@ The VDT decoder maps a stochastic latent code $\mathbf{z}$ to a
 where $\Umat_{1:q}$ are the $q$ lowest-frequency eigenvectors of a frozen
 ArrowSpace graph-Laplacian index $\Lmat(\mathcal{I})$, $\Smat$ is a learnable
 coefficient matrix in that eigenbasis, and $\boldsymbol{\omega}$ are mode weights
-drawn from a tau-mode variational prior.
+drawn from a taumode variational prior.
 This loading matrix parametrises a differentiable Laplacian $\Lmat(\mathbf{z})$
-over which a heat-kernel \emph{tau-mode diffusion} decoder reconstructs the input.
+over which a heat-kernel \emph{taumode diffusion} decoder reconstructs the input.
 The objective is a three-term Evidence Lower Bound (ELBO) comprising a
 Gaussian reconstruction term, an isotropic latent KL, an eigenvalue-weighted
 spectral-basis KL penalising high-frequency loadings (spectral Occam's razor),
@@ -84,10 +84,6 @@ and a Gamma-vs-Exponential mode-frequency KL for spectral band selection.
 After training, the model emits a \emph{spectral artefact}
 $\mathcal{A}(\mathcal{I})=\{\hat{\Wmat}, \hat{\boldsymbol{\omega}}, \Smat_{\mathrm{mem}}\}$
 that initialises a Hopfield-type associative memory for a downstream transformer.
-Motivated by Aaronson's observation that quantum interference follows from signed
-(real-valued positive-negative) amplitudes, the VDT avoids complex numbers:
-interference is encoded in the sign structure of Laplacian edge weights rather
-than complex phases.
 Benchmarks on CORA, PubMed, and synthetic spring-network graphs demonstrate
 entropy-controlled spectral graph generation and strong linear-probe accuracy
 of frozen latent representations.
@@ -371,7 +367,7 @@ The VDT objective is the negative ELBO:
     \underbrace{-\E{\log p(\mathbf{x}|\mathbf{z},\Wmat)}}_{\text{NLL recon}}
     + \underbrace{\KL{q(\mathbf{z})}{\normal(\mathbf{0},\mathbf{I})}}_{\text{latent KL}}
     + \underbrace{\KL{q(\Smat)}{p(\Smat|\mathcal{I})}}_{\text{spectral basis KL}}
-    + \underbrace{\KL{q(\boldsymbol{\omega})}{p(\boldsymbol{\omega}|\tau,\boldsymbol{\Lambda})}}_{\text{tau-mode KL}}}
+    + \underbrace{\KL{q(\boldsymbol{\omega})}{p(\boldsymbol{\omega}|\tau,\boldsymbol{\Lambda})}}_{\text{taumode KL}}}
   \label{eq:elbo}
 \end{equation}
 
@@ -423,7 +419,7 @@ Large eigenvalues penalise high-frequency components more strongly---a
 $q(\Smat)=\normal(\Smat_0,\,\mathrm{diag}(\exp(\log\boldsymbol{\sigma}^2_{\Smat})))$.
 The KL is closed-form under the Gaussian-Gaussian conjugacy.
 
-\subsection{Term 4: Tau-Mode Frequency KL}
+\subsection{Term 4: taumode Frequency KL}
 \label{sec:elbo:kltau}
 
 Mode weights $\omega_k>0$ receive an exponential prior indexed by frequency:
@@ -606,7 +602,7 @@ We evaluate on three benchmarks:
     Reconstruction MSE & $\|\mathbf{x}-\hat{\mathbf{x}}\|^2$ & Wiring path fidelity \\
     Latent KL & $\mathrm{KL}_z$ & Isotropic regularisation \\
     Spectral basis KL & $\mathrm{KL}_S$ & Alignment with index $\mathcal{I}$ \\
-    Tau-mode KL & $\mathrm{KL}_\tau$ & Frequency band selection \\
+    taumode KL & $\mathrm{KL}_\tau$ & Frequency band selection \\
     Active modes & $N_{\mathrm{active}}$ & Modes with $\E{\omega_k}>0.01$ \\
     Memory SNR & $d_k / N_{\text{stored}}$ & Hopfield retrieval quality \\
     ELBO Bayes factor & $\exp(\mathcal{L}(\mathcal{I}_1)-\mathcal{L}(\mathcal{I}_2))$ & Index comparison \\
