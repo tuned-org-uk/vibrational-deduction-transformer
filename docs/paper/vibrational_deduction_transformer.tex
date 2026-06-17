@@ -98,7 +98,7 @@ We present the \emph{Vibrational Wiring Deduction Transformer} (VDT), a
 fully Bayesian generative model that unifies vibrational graph dynamics,
 probabilistic PCA in a Laplacian eigenbasis (Spectral-PPCA), and spectral
 associative memory into a single trainable architecture.  The predecessor
-\WA{} used a hard high-frequency energy penalty
+WAE used a hard high-frequency energy penalty
 ($J_{\mathrm{freq}}$) and an isotropic Gaussian latent prior.  VDT replaces
 both with principled variational KL terms: (i) a spectral-basis KL over the
 loading matrix $\bS$ weighted by Laplacian eigenvalues, implementing a
@@ -127,7 +127,7 @@ analysis, benchmark metrics, and associative memory construction.
 Graph-structured latent variable models occupy an increasingly important niche
 between classical variational autoencoders (VAEs) and geometric deep learning:
 they can encode both the \emph{content} of nodes and the \emph{relational
-structure} that organises them.  The \WA{}~\citep{vdt_v1}
+structure} that organises them.  The WAE
 recognised this, using a differentiable graph Laplacian $L(z)$ as an
 intermediate latent object whose spectral properties are regularised by a hard
 frequency penalty $J_{\mathrm{freq}} = \sum_{j>k}\lambda_j(L(z))$.  While
@@ -143,7 +143,7 @@ probabilistic prior, which makes it difficult to:
         manifold.
 \end{enumerate}
 
-The VDT addresses all three limitations by embedding the \WA{}
+The VDT addresses all three limitations by embedding the WAE
 within the Spectral-PPCA framework~\citep{design_a}, a Bayesian
 generative model in which the loading matrix
 $\bW = \bU_{1:q}\,\diag(\bomega)\,\bS$ lives explicitly in the Laplacian
@@ -238,7 +238,7 @@ the high-entropy state is maximal thermal agitation.
 \subsection{WiringAutoencoder (Predecessor)}
 \label{sec:wa_v1}
 
-The \WA{}~\citep{vdt_v1} trains a differentiable Laplacian $L(\bz)$ whose
+The WAE trains a differentiable Laplacian $L(\bz)$ whose
 topology is fixed (kNN + RBF graph) but whose edge weights are learned by a
 mixture-of-experts decoder $W_{\mathrm{dec}}:\bz\mapsto\delta_e$.  The
 training objective is
@@ -255,7 +255,7 @@ high-frequency wiring.  The reconstruction is provided by
 $K_\tau = \bU_k\exp(-t\bLambda_k)\bU_k^\top$ applied to an embedding table
 $\bE$, with learnable diffusion time $t$.
 
-Three limitations of the \WA{} motivate VDT:
+Three limitations of the WAE motivate VDT:
 (a) $J_{\mathrm{freq}}$ is a deterministic penalty with no prior
 interpretation;
 (b) the latent prior is isotropic and ignores graph geometry;
@@ -457,7 +457,7 @@ computed at runtime.}
 \subsection{VibrationalEncoder}
 \label{sec:encoder}
 
-\texttt{VibrationalEncoder} (\texttt{vdt/encoder.py}) replaces the \WA{} MLP
+\texttt{VibrationalEncoder} (\texttt{vdt/encoder.py}) replaces the WAE MLP
 encoder with a VDT (Vibrational Discrete Transformer) recurrence stack:
 \begin{enumerate}
   \item \textbf{Input projection}: linear layer mapping $(B,D)\to(B,N{\cdot}d)$,
