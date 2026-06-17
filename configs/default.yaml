@@ -1,24 +1,34 @@
-# Wiring Autoencoder — default hyperparameters
-# For Apple Silicon (MPS) use configs/mps.yaml which overrides the memory levers.
+# Wiring Autoencoder -- default hyperparameters (v2 model API)
+# For Apple Silicon (MPS) use configs/mps.yaml which overrides memory levers.
+#
+# Changes from the stale v1 config (issue #62):
+#   - Replaced stale v1 model keys (n_wiring_heads, beta, alpha,
+#     use_lambda_features) with the v2 keys (q, lam_s, tau, n_layers,
+#     n_heads, dropout) that WiringAutoencoder.from_config() actually reads.
+#   - Added density_loss_weight under training: placeholder for the
+#     vdt/density.py wiring work (issue #62, point 3).
 
 model:
-  latent_dim: 32          # dim(z)
-  hidden_dim: 256         # encoder / decoder hidden width
-  n_wiring_heads: 4       # mixture heads for the wiring decoder
-  tau_modes: 8            # eigenvectors kept in tau-mode diffusion (was 16; halves eigvec RAM)
-  beta: 1.0               # KL weight in ELBO
-  alpha: 0.1              # J_freq spectral regulariser weight
-  use_lambda_features: true  # enrich encoder input with ArrowSpace lambda fingerprint
+  version: 2              # canonical v2 path in from_config()
+  latent_dim: 32          # dim(z) -- VAE reparameterisation space
+  hidden_dim: 256         # encoder / decoder hidden channel width
+  q: 16                   # number of spectral modes (SpectralLoadingDecoder + KL priors)
+  tau_modes: 16           # eigenvectors kept in TauModeDiffusion (== q is recommended)
+  lam_s: 0.01             # weight for kl_S (spectral basis KL term)
+  tau: 0.5                # diffusion time scale for kl_tau (mode frequency KL term)
+  n_layers: 4             # VDT blocks inside WiringEncoder
+  n_heads: 4              # attention heads per VDT block
+  dropout: 0.1            # dropout probability inside WiringEncoder
 
 graph:
   knn_k: 15               # base kNN graph degree
   sigma: 0.5              # RBF kernel bandwidth
   normalised: true        # use normalised Laplacian
-  sparse: true            # use sparse COO Laplacian — avoids materialising (B,N,N) on MPS
+  sparse: true            # use sparse COO Laplacian -- avoids materialising (B,N,N) on MPS
 
 training:
   epochs: 200
-  batch_size: 32          # was 256; 32 keeps peak L(z) buffer ~0.9 GB on Cora
+  batch_size: 32          # 32 keeps peak L(z) buffer ~0.9 GB on Cora
   mps_batch_size: 16      # overrides batch_size when device=mps (set automatically in train.py)
   lr: 3.0e-4
   weight_decay: 1.0e-5
@@ -27,6 +37,7 @@ training:
   grad_clip: 1.0
   seed: 42
   device: auto            # auto | cpu | cuda | mps
+  density_loss_weight: 1.0  # weight for density-matrix loss from vdt/density.py (issue #62)
 
 dataset:
   name: cora              # cora | pubmed | mnist | custom
