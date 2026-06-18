@@ -7,6 +7,10 @@
 #     n_heads, dropout) that WiringAutoencoder.from_config() actually reads.
 #   - Added density_loss_weight under training: placeholder for the
 #     vdt/density.py wiring work (issue #62, point 3).
+#
+# Stability mitigations (issue #68):
+#   - Added a_min, q_min, nu under training: to configure the two
+#     mode-weight collapse mitigations described in Section 5.2.
 
 model:
   version: 2              # canonical v2 path in from_config()
@@ -38,6 +42,14 @@ training:
   seed: 42
   device: auto            # auto | cpu | cuda | mps
   density_loss_weight: 1.0  # weight for density-matrix loss from vdt/density.py (issue #62)
+  # -- Stability mitigations (issue #68) ------------------------------------
+  a_min: 0.1   # floor for Gamma shape a = exp(log_a) in tau_mode_kl;
+               # prevents full shape collapse.  Set to 0.0 to disable.
+  q_min: 4     # minimum number of active spectral modes required;
+               # active_mode_penalty fires when N_active < q_min.
+               # Set to 0 to disable the penalty entirely.
+  nu: 1.0      # Lagrange weight for the active-mode penalty term;
+               # added to total ELBO loss.  Set to 0.0 to disable.
 
 dataset:
   name: cora              # cora | pubmed | mnist | custom
