@@ -446,21 +446,55 @@ The standard VAE isotropic KL~\cite{kingma2013}:
 \subsection{Term 3: Spectral-Basis KL}
 \label{sec:elbo:kls}
 
-The loading matrix $\Smat\in\R^{q\times q}$ carries a Gaussian prior shaped by
-the frozen eigenvalues:
+The coefficient matrix $\Smat\in\R^{q\times q}$ receives a
+\emph{row-independent} Gaussian prior in which each entry $S_{kj}$ is
+penalised by the $k$-th eigenvalue of the frozen Laplacian index:
 
 \begin{equation}
-  p(\Smat|\mathcal{I}) \;\propto\;
-  \exp\!\left(-\frac{\lambda_S}{2}\,\mathrm{tr}\!\left(\Smat\T\boldsymbol{\Lambda}_{1:q}\Smat\right)\right),
+  p(S_{kj} \mid \mathcal{I})
+  \;=\; \normal\!\left(0,\;\frac{1}{\lambda_S\,\lambda_k}\right)
+  \qquad \forall\; k \in [q],\; j \in [q].
   \label{eq:priorS}
 \end{equation}
 
-where $\lambda_S > 0$ is a regularisation hyperparameter and
-$\boldsymbol{\Lambda}_{1:q} = \mathrm{diag}(\lambda_1,\ldots,\lambda_q)$.
-Large eigenvalues penalise high-frequency components more strongly---a
-\emph{spectral Occam's razor}.  The posterior is
-$q(\Smat)=\normal(\Smat_0,\,\mathrm{diag}(\exp(\log\boldsymbol{\sigma}^2_{\Smat})))$.
-The KL is closed-form under the Gaussian-Gaussian conjugacy.
+Because the prior factorises over both indices, the joint log-density
+can be written as the \emph{trace form}:
+
+\begin{equation}
+  \log p(\Smat\mid\mathcal{I})
+  \;\propto\;
+  -\frac{\lambda_S}{2}\,\mathrm{tr}\!\left(\Smat\T\boldsymbol{\Lambda}_{1:q}\Smat\right)
+  \;=\;
+  -\frac{\lambda_S}{2}\sum_{k=1}^{q}\lambda_k\,\|\Smat_k\|^2,
+  \label{eq:priorS-trace}
+\end{equation}
+
+where $\boldsymbol{\Lambda}_{1:q}=\mathrm{diag}(\lambda_1,\ldots,\lambda_q)$
+and $\Smat_k\in\R^q$ is the $k$-th row of $\Smat$.
+Large eigenvalues penalise the corresponding rows of $\Smat$ more
+strongly---a \emph{spectral Occam's razor}: high-frequency components
+of the loading matrix are shrunk towards zero.
+
+The variational posterior is
+$q(\Smat)=\normal\!\left(\Smat_0,\,\mathrm{diag}(\exp(\log\boldsymbol{\sigma}^2_{\Smat}))\right)$,
+where $\Smat_0$ and $\log\boldsymbol{\sigma}^2_{\Smat}$ are \emph{independent}
+outputs of \texttt{SpectralLoadingDecoder} (fix~\#52).
+Under Gaussian--Gaussian conjugacy the KL is closed-form.
+
+\begin{remark}\label{rem:prior-independence}
+The prior in Eq.~\eqref{eq:priorS} is \emph{row-independent with identity
+column precision} ($\boldsymbol{\Lambda}_{\text{col}} = \mathbf{I}$).
+A full \emph{matrix-normal} prior would have the form
+$\log p(\Smat)\propto -\tfrac{1}{2}\,\mathrm{tr}(\Smat\T\boldsymbol{\Lambda}_{\text{row}}\Smat\boldsymbol{\Lambda}_{\text{col}})$
+with two separate precision matrices.
+When $\boldsymbol{\Lambda}_{\text{col}} = \mathbf{I}$ this reduces exactly to
+Eq.~\eqref{eq:priorS-trace}.
+The implementation in \texttt{vdt/spectral.py::spectral\_basis\_kl} broadcasts
+the precision vector \texttt{prec = lambda\_S * eigvals\_q} over the column
+axis of $\Smat$, which is the direct computational realisation of
+Eq.~\eqref{eq:priorS}: one scalar precision per row $k$, shared across
+all $q$ columns $j$.
+\end{remark}
 
 \subsection{Term 4: taumode Frequency KL}
 \label{sec:elbo:kltau}
