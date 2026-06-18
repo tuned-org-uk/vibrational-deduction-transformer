@@ -43,6 +43,22 @@ Two mitigations prevent mode-weight collapse during training:
     q_min=0 to disable.  The penalty is NOT returned as a separate key
     in the output dict -- it is absorbed into 'loss'.
 
+MassMatrix and L_f construction (issue #74)
+--------------------------------------------
+The feature-space Laplacian L_f passed to WiringEncoder is built once
+from the cached eigendecomposition and a MassMatrix with mass_clip applied
+to prevent the lambda=1 singularity from dominating the preconditioner.
+
+from_config() now reads model.mass_clip from the YAML config and stores it
+as self.mass_clip.  The public helper build_L_f() encapsulates the
+one-time construction so train.py can call it once after the spectral
+pre-computation block::
+
+    L_f = model.build_L_f(full_eigvals, full_eigvecs)
+
+This avoids the per-step O(N^2 q) outer-product fallback inside forward()
+and ensures mass_clip is applied before any forward pass.
+
 Data flow::
 
     x  (B, D),  U_q (N, q),  eigvals_q (q,),  L_f (B, N, N)
@@ -103,7 +119,7 @@ from typing import Optional, Any, Tuple
 
 from .encoder import WiringEncoder
 from .diffusion_decoder import DiffusionDecoder
-from .laplacian import DifferentiableLaplacian
+from .laplacian import DifferentiableLaplacian, MassMatrix
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +172,19 @@ class WiringAutoencoder(nn.Module):
         ``nu`` (default 1.0).  Set nu=0 or q_min=0 to disable.
         The penalty is folded into 'loss' and is NOT returned as a
         separate key in the output dict.
+
+    MassMatrix and L_f (issue #74)
+    --------------------------------
+    ``mass_clip`` is stored on the model and forwarded to ``MassMatrix``
+    whenever build_L_f() is called.  This prevents the lambda=1
+    singularity from dominating the Tikhonov preconditioner.
+    Call build_L_f() once in train.py after spectral pre-computation::
+
+        L_f = model.build_L_f(full_eigvals, full_eigvecs)
+
+    and pass the result to every train_one_epoch / eval_epoch call.
+    This avoids the per-step fallback inside forward() (which reconstructs
+    L_f from U_q and eigvals_q without mass_clip each time).
 
     Note: the Laplacian-precision latent KL (Term 2, kl_lap) has been
     removed per PR #35.  L_z is synthesised inside SpectralLoadingDecoder
@@ -248,6 +277,12 @@ class WiringAutoencoder(nn.Module):
     nu : float
         Lagrange multiplier weight for the active-mode penalty.  Default 1.0.
         Set to 0.0 to disable.
+    mass_clip : float
+        Maximum allowed value for any entry of MassMatrix.M_diag.  Passed
+        to MassMatrix whenever build_L_f() is called (issue #74).  Prevents
+        the lambda=1 singularity from dominating the preconditioner.
+        Default 1e3.  Use 1e4 for sparse graphs.  Set to 1e6 to recover
+        the pre-#74 (unclipped) behaviour.
     """
 
     def __init__(
@@ -267,6 +302,7 @@ class WiringAutoencoder(nn.Module):
         a_min: float = 0.1,
         q_min: int = 4,
         nu: float = 1.0,
+        mass_clip: float = 1e3,
     ) -> None:
         super().__init__()
         self.q = q
@@ -277,6 +313,7 @@ class WiringAutoencoder(nn.Module):
         self.a_min = a_min
         self.q_min = q_min
         self.nu = nu
+        self.mass_clip = mass_clip
 
         # Resolve n_nodes from the laplacian when not supplied explicitly.
         if n_nodes is None:
@@ -326,6 +363,64 @@ class WiringAutoencoder(nn.Module):
         self._laplacian = laplacian
 
     # ------------------------------------------------------------------
+    # build_L_f  (issue #74)
+    # ------------------------------------------------------------------
+
+    @torch.no_grad()
+    def build_L_f(
+        self,
+        full_eigvals: torch.Tensor,
+        full_eigvecs: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Build the feature-space Laplacian L_f once from the full
+        eigendecomposition, applying MassMatrix clipping before
+        reconstruction.
+
+        This should be called once in train.py after the spectral
+        pre-computation block and the result passed to every
+        train_one_epoch / eval_epoch call::
+
+            L_f = model.build_L_f(full_eigvals, full_eigvecs)  # (N, N)
+
+        Internally this builds MassMatrix(full_eigvals, tau=self.tau,
+        mass_clip=self.mass_clip) to obtain clipped diagonal weights
+        M_diag, then reconstructs::
+
+            L_f = U diag(M_diag * eigvals) U^T
+
+        so that the passed L_f already encodes the mass-weighted spectral
+        structure.  Modes near the lambda=1 singularity are damped by
+        mass_clip instead of dominating the encoder attention.
+
+        Parameters
+        ----------
+        full_eigvals : torch.Tensor
+            Shape (N,) -- full eigenvalue spectrum of the base Laplacian.
+        full_eigvecs : torch.Tensor
+            Shape (N, N) -- corresponding eigenvectors (columns).
+
+        Returns
+        -------
+        torch.Tensor  shape (N, N)
+            Mass-weighted feature-space Laplacian, ready to be passed
+            as L_f to forward() / train_one_epoch / eval_epoch.
+            The caller should move it to the training device after this
+            call if needed:  L_f = model.build_L_f(...).to(device)
+        """
+        mass = MassMatrix(
+            full_eigvals,
+            tau=self.tau,
+            mass_clip=self.mass_clip,
+        )
+        # Weight eigenvalues by the clipped mass diagonal, then reconstruct
+        # L_f = U diag(M * lambda) U^T.  This is a (N, N) dense matrix;
+        # it is computed once and cached by the caller.
+        weighted_eigvals = mass.M_diag * full_eigvals   # (N,)
+        L_f = full_eigvecs @ torch.diag(weighted_eigvals) @ full_eigvecs.t()   # (N, N)
+        return L_f
+
+    # ------------------------------------------------------------------
     # forward
     # ------------------------------------------------------------------
 
@@ -363,8 +458,10 @@ class WiringAutoencoder(nn.Module):
             DiffusionDecoder.  Avoids an O(N^3) eigensolver at each step.
         L_f : torch.Tensor or None
             Feature-space Laplacian (B, N, N) or (N, N) for WiringEncoder.
-            When None, a uniform Laplacian is synthesised from U_q and
-            eigvals_q on the fly.
+            Strongly recommended: build once via model.build_L_f() (issue
+            #74) so that MassMatrix clipping is applied before any forward
+            pass.  When None, a uniform Laplacian is synthesised from U_q
+            and eigvals_q on the fly (no mass_clip applied).
         embedding_table : torch.Tensor or None
             Full node embedding table of shape (N, D) to pass to
             DiffusionDecoder instead of the stored self.embedding buffer.
@@ -393,7 +490,10 @@ class WiringAutoencoder(nn.Module):
 
         # Build a feature-space Laplacian from the spectral basis when the
         # caller does not supply one explicitly.
-        # L_f = U_q diag(eigvals_q) U_q^T  expanded to (B, N, N).
+        # Preferred path: caller calls model.build_L_f(full_eigvals, full_eigvecs)
+        # once before training (issue #74) and passes L_f here every step.
+        # Fallback (no mass_clip applied):
+        #   L_f = U_q diag(eigvals_q) U_q^T  expanded to (B, N, N).
         if L_f is None:
             L_f_base = U_q @ torch.diag(eigvals_q) @ U_q.t()   # (N, N)
             L_f = L_f_base.unsqueeze(0).expand(B, -1, -1)       # (B, N, N)
@@ -618,6 +718,14 @@ def from_config(
         a version 2 build -- this path exists only so old config files do not
         break; it does not produce a different model class.
 
+    mass_clip (issue #74)
+        model.mass_clip is read and forwarded to WiringAutoencoder.__init__
+        so that build_L_f() applies the correct clipping when called from
+        train.py.  Defaults to 1e3 when absent, which is safe for
+        normalised Laplacians.  Old configs without this key will behave
+        identically to the new default (1e3), which is a tighter clip than
+        the pre-#74 silent default of 1e6.
+
      YAML config example (v2)::
 
         model:
@@ -630,6 +738,7 @@ def from_config(
           tau_modes: 16
           n_layers: 4
           n_heads: 4
+          mass_clip: 1000.0    # issue #74
         training:
           a_min: 0.1     # Gamma shape floor (issue #68)
           q_min: 4       # min active modes (issue #68)
@@ -688,6 +797,8 @@ def from_config(
         a_min=float(tc.get("a_min", 0.1)),
         q_min=int(tc.get("q_min", 4)),
         nu=float(tc.get("nu", 1.0)),
+        # MassMatrix clipping (issue #74)
+        mass_clip=float(mc.get("mass_clip", 1e3)),
     )
     # Initialise the embedding buffer with the supplied table.
     model.embedding.data.copy_(E)
