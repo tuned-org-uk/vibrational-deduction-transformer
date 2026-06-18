@@ -11,6 +11,9 @@ Covers all acceptance criteria:
   AC5 -- SignedDensityMatrix passes PSD tests at init and after random updates.
   AC6 -- CFL helpers correct; existing DifferentiableLaplacian forward paths
          continue to pass.
+  AC7 -- Dense/sparse path equivalence: _dense_laplacian and _sparse_laplacian
+         return identical matrices for the same input, including self-loop
+         graphs (issue #57).
 
 Run with:
     pytest tests/test_laplacian.py -v
@@ -447,3 +450,128 @@ class TestForwardCompat:
         node_idx = torch.randint(0, N, (B,))
         rows = lap(delta, node_idx=node_idx)
         assert rows.shape == (B, N)
+
+
+# ---------------------------------------------------------------------------
+# AC7 -- Dense/sparse path equivalence (issue #57)
+# ---------------------------------------------------------------------------
+
+def _make_lap_from_edges(
+    n: int,
+    src: list,
+    dst: list,
+    normalised: bool = False,
+) -> DifferentiableLaplacian:
+    """Helper: build a DifferentiableLaplacian directly from edge lists."""
+    edge_index = torch.tensor([src, dst], dtype=torch.long)
+    base_weights = torch.ones(len(src), dtype=torch.float32)
+    return DifferentiableLaplacian(
+        n_nodes=n,
+        edge_index=edge_index,
+        base_weights=base_weights,
+        normalised=normalised,
+        sparse=False,
+    )
+
+
+@pytest.fixture
+def path_graph_lap():
+    """5-node path graph with unit weights, both edge directions."""
+    # Edges: 0-1, 1-2, 2-3, 3-4 in both directions
+    src = [0, 1, 1, 2, 2, 3, 3, 4]
+    dst = [1, 0, 2, 1, 3, 2, 4, 3]
+    return _make_lap_from_edges(5, src, dst, normalised=False)
+
+
+@pytest.fixture
+def self_loop_lap():
+    """3-node complete graph with one self-loop on node 0."""
+    src = [0, 0, 1, 1, 2, 2, 0]
+    dst = [1, 2, 0, 2, 0, 1, 0]   # last entry is the self-loop
+    return _make_lap_from_edges(3, src, dst, normalised=False)
+
+
+class TestDenseSparseEquivalence:
+    """
+    AC7: _dense_laplacian and _sparse_laplacian must return identical
+    matrices (atol=1e-6) for the same input.  Tests cover a plain path
+    graph (no self-loops) and a graph that contains a self-loop, which
+    previously caused a weight-doubling bug in the sparse path (issue #57).
+    """
+
+    def _get_both(self, lap_fixture, batch_size: int = 2):
+        """Run both paths with zero delta and return (L_dense, L_sparse)."""
+        E = lap_fixture.edge_index.shape[1]
+        N = lap_fixture.n_nodes
+        src, dst = lap_fixture.edge_index[0], lap_fixture.edge_index[1]
+        device = lap_fixture.base_weights.device
+        dtype  = lap_fixture.base_weights.dtype
+
+        # Compute effective weights (base_weights * sigmoid(0) = 0.5 * base_weights)
+        delta = torch.zeros(batch_size, E)
+        w = lap_fixture.base_weights.unsqueeze(0) * torch.sigmoid(delta)  # (B, E)
+
+        L_dense  = lap_fixture._dense_laplacian(
+            w, N, batch_size, src, dst, device, dtype, batched=True
+        )  # (B, N, N)
+
+        L_sparse = lap_fixture._sparse_laplacian(
+            w, N, batch_size, src, dst, device, dtype
+        )  # (B, N, N)
+
+        return L_dense, L_sparse
+
+    def test_agree_path_graph(self, path_graph_lap):
+        """Dense and sparse paths agree on a 5-node path graph (no self-loops)."""
+        L_dense, L_sparse = self._get_both(path_graph_lap)
+        torch.testing.assert_close(
+            L_dense, L_sparse, atol=1e-6, rtol=1e-5,
+            msg="Dense and sparse Laplacian paths returned different matrices on path graph.",
+        )
+
+    def test_agree_self_loop(self, self_loop_lap):
+        """
+        Dense and sparse paths agree on a graph with a self-loop.
+
+        This test specifically guards against the weight-doubling bug
+        described in issue #57: without the self-loop mask fix, the
+        sparse path adds self-loop weight twice (once in the src->dst
+        direction and once via the symmetric dst->src copy), producing
+        A[i,i] = 2*w instead of w and therefore L != L_dense.
+        """
+        L_dense, L_sparse = self._get_both(self_loop_lap)
+        torch.testing.assert_close(
+            L_dense, L_sparse, atol=1e-6, rtol=1e-5,
+            msg="Dense and sparse Laplacian paths disagree on self-loop graph.",
+        )
+
+    def test_row_sums_zero_path_graph(self, path_graph_lap):
+        """L @ 1 = 0 (fundamental Laplacian property) for both paths."""
+        E = path_graph_lap.edge_index.shape[1]
+        N = path_graph_lap.n_nodes
+        src, dst = path_graph_lap.edge_index[0], path_graph_lap.edge_index[1]
+        device = path_graph_lap.base_weights.device
+        dtype  = path_graph_lap.base_weights.dtype
+
+        delta = torch.zeros(1, E)
+        w = path_graph_lap.base_weights.unsqueeze(0) * torch.sigmoid(delta)
+
+        for name, fn in [
+            ("_dense_laplacian",
+             lambda: path_graph_lap._dense_laplacian(
+                 w, N, 1, src, dst, device, dtype, batched=True
+             )[0]),
+            ("_sparse_laplacian",
+             lambda: path_graph_lap._sparse_laplacian(
+                 w, N, 1, src, dst, device, dtype
+             )[0]),
+        ]:
+            L = fn()
+            row_sums = L.sum(dim=-1)
+            torch.testing.assert_close(
+                row_sums,
+                torch.zeros(N, dtype=dtype),
+                atol=1e-6,
+                rtol=0.0,
+                msg=f"{name}: Laplacian rows do not sum to zero.",
+            )
