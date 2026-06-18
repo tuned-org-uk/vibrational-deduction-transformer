@@ -40,7 +40,8 @@ Two mitigations prevent mode-weight collapse during training:
     delta) returns nu * relu(q_min - N_active) where N_active is the
     mean batch count of modes with E[omega_k] > delta.  The penalty is
     added to the total loss after the four ELBO terms.  Set nu=0 or
-    q_min=0 to disable.
+    q_min=0 to disable.  The penalty is NOT returned as a separate key
+    in the output dict -- it is absorbed into 'loss'.
 
 Data flow::
 
@@ -138,6 +139,7 @@ class WiringAutoencoder(nn.Module):
         KL_S       =  KL( q(S)  || p(S|I)          )   -- spectral basis
         KL_tau     =  KL( q(w)  || p(w|tau,Lambda) )   -- mode frequency
         penalty    =  nu * relu(q_min - N_active)       -- active-mode floor
+                      (absorbed into 'loss'; not a separate output key)
 
     Stability mitigations (issue #68)
     -----------------------------------
@@ -152,6 +154,8 @@ class WiringAutoencoder(nn.Module):
         the mean batch count of modes whose expected value E[omega_k]
         exceeds delta.  Configured via ``q_min`` (default 4) and
         ``nu`` (default 1.0).  Set nu=0 or q_min=0 to disable.
+        The penalty is folded into 'loss' and is NOT returned as a
+        separate key in the output dict.
 
     Note: the Laplacian-precision latent KL (Term 2, kl_lap) has been
     removed per PR #35.  L_z is synthesised inside SpectralLoadingDecoder
@@ -369,16 +373,17 @@ class WiringAutoencoder(nn.Module):
 
         Returns
         -------
-        dict with exactly 10 keys:
+        dict with exactly 9 keys:
             loss     -- total loss scalar (minimise this; equals negative ELBO
-                        plus the active-mode penalty, up to constants)
+                        plus the active-mode penalty, up to constants).
+                        Computed as recon + kl_z + kl_S + kl_tau + penalty,
+                        but penalty is NOT returned as a separate key.
             recon    -- NLL reconstruction term (positive; equals
                         -E_q[log p(x|z,W)] up to the dropped
                         0.5*D*log(2*pi) constant)
             kl_z     -- isotropic KL  KL(q(z) || N(0,I))
             kl_S     -- spectral basis KL  KL(q(S) || p(S|I))
             kl_tau   -- mode frequency KL  KL(q(w) || p(w|tau,L))
-            penalty  -- active-mode penalty  nu*relu(q_min - N_active)
             x_hat    -- (B, D) reconstructed embeddings
             z        -- (B, latent_dim) latent samples
             mu       -- (B, latent_dim) posterior means
@@ -454,6 +459,7 @@ class WiringAutoencoder(nn.Module):
 
         # Active-mode penalty (issue #68): nu * relu(q_min - N_active).
         # Zero when nu=0 or q_min=0 (see active_mode_penalty docstring).
+        # Folded into 'loss' only -- not returned as a separate output key.
         penalty = active_mode_penalty(log_a, log_b, q_min=self.q_min, nu=self.nu)
 
         # Total loss (all four KL terms are non-negative by construction).
@@ -466,7 +472,6 @@ class WiringAutoencoder(nn.Module):
             "kl_z": kl_z,
             "kl_S": kl_S,
             "kl_tau": kl_tau,
-            "penalty": penalty,
             "x_hat": x_hat,
             "z": z,
             "mu": mu,
