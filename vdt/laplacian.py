@@ -137,6 +137,22 @@ class DifferentiableLaplacian(nn.Module):
         base_weights (no edge delta applied).  Computed lazily on first
         access and cached as a plain tensor.  Use this to supply L_base
         to SpectralLoadingDecoder.forward() and from_spectral_loading().
+
+    Notes
+    -----
+    Path equivalence contract
+    ~~~~~~~~~~~~~~~~~~~~~~~~~
+    _dense_laplacian and _sparse_laplacian are required to return
+    numerically identical matrices (atol=1e-6) for the same input.
+    This contract is verified by tests/test_laplacian.py (issue #57).
+
+    Self-loop handling
+    ~~~~~~~~~~~~~~~~~~
+    For an edge (i, i) the dense path executes A[b, i, i] += w[b, e]
+    exactly once.  The sparse path must guard against doubling: only
+    non-loop edges are symmetrised (src, dst) + (dst, src); self-loop
+    edges (src == dst) are inserted as-is.  This is enforced in
+    _sparse_laplacian via a self-loop mask.
     """
 
     def __init__(
@@ -489,15 +505,44 @@ class DifferentiableLaplacian(nn.Module):
         allocation is O(E) not O(N^2).  Each element is densified only
         after the Laplacian transform, keeping the dense block to (N, N)
         per element rather than (B, N, N) simultaneously.
+
+        Path equivalence contract
+        ~~~~~~~~~~~~~~~~~~~~~~~~~
+        This method must return matrices numerically identical (atol=1e-6)
+        to those produced by _dense_laplacian for the same input.
+        Verified by tests/test_laplacian.py::TestDenseSparseEquivalence
+        (issue #57).
+
+        Self-loop handling
+        ~~~~~~~~~~~~~~~~~~
+        The dense path performs  A[b, i, i] += w[b, e]  exactly once for
+        each self-loop edge e = (i, i).  To match this, the sparse path
+        must NOT symmetrise self-loop edges: only non-loop edges receive
+        the (src, dst) + (dst, src) duplication.  Self-loop edges are
+        inserted as-is.
         """
+        # Precompute the self-loop mask once (shared across all batch elements)
+        loop_mask = (src == dst)          # bool tensor, shape (E,)
+        non_loop  = ~loop_mask
+
         Ls = []
         for b in range(B):
-            wb = w[b]
-            idx_r = torch.cat([src, dst])
-            idx_c = torch.cat([dst, src])
-            vals = torch.cat([wb, wb])
-            indices = torch.stack([idx_r, idx_c])
+            wb = w[b]  # (E,)
 
+            # Non-loop edges: add both directed copies (src->dst and dst->src)
+            nl_src = src[non_loop]
+            nl_dst = dst[non_loop]
+            nl_w   = wb[non_loop]
+
+            # Self-loop edges: add exactly once
+            sl_idx = src[loop_mask]   # == dst[loop_mask] by definition
+            sl_w   = wb[loop_mask]
+
+            idx_r = torch.cat([nl_src, nl_dst, sl_idx])
+            idx_c = torch.cat([nl_dst, nl_src, sl_idx])
+            vals  = torch.cat([nl_w,   nl_w,   sl_w])
+
+            indices = torch.stack([idx_r, idx_c])
             A_sp = torch.sparse_coo_tensor(
                 indices, vals, (N, N), device=device, dtype=dtype
             ).coalesce()
