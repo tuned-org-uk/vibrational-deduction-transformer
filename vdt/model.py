@@ -3,15 +3,16 @@ Wiring Autoencoder  --  model only.
 
 This module provides the single top-level model class::
 
-    WiringAutoencoder   -- three-term ELBO (recon + kl_z + kl_S + kl_tau).
+    WiringAutoencoder   -- four-term ELBO (recon + kl_z + kl_S + kl_tau)
+                          with optional active-mode penalty.
 
-architecture (three-term ELBO, issue #27)
+architecture (four-term ELBO, issue #27)
 --------------------------------------------
 Assembles WiringEncoder, SpectralLoadingDecoder, and DiffusionDecoder
-under the three-term variational objective.  The ELBO is *maximised*,
+under the four-term variational objective.  The ELBO is *maximised*,
 which is equivalent to *minimising* the following total loss::
 
-    loss  =  NLL_recon  +  KL_z  +  KL_S  +  KL_tau
+    loss  =  NLL_recon  +  KL_z  +  KL_S  +  KL_tau  [+  penalty]
 
 where
 
@@ -19,11 +20,27 @@ where
     KL_z       =   KL( q(z)  || N(0,I)       )   -- isotropic
     KL_S       =   KL( q(S)  || p(S|I)       )   -- spectral basis
     KL_tau     =   KL( q(w)  || p(w|tau,L)   )   -- mode frequency
+    penalty    =   nu * relu(q_min - N_active)    -- active-mode floor (issue #68)
 
-All four terms are non-negative.  Minimising their sum is equivalent to
+All four KL terms are non-negative.  Minimising their sum is equivalent to
 maximising the ELBO::
 
     ELBO  =  E_q[log p(x|z,W)]  -  KL_z  -  KL_S  -  KL_tau
+
+Stability mitigations (issue #68)
+-----------------------------------
+Two mitigations prevent mode-weight collapse during training:
+
+1.  Shape-parameter floor: tau_mode_kl receives a_min (default 0.1) and
+    clamps exp(log_a) to min=a_min before lgamma/digamma.  Gradient still
+    flows through log_a; only the forward value seen by the special
+    functions is floored.
+
+2.  Active-mode penalty: active_mode_penalty(log_a, log_b, q_min, nu,
+    delta) returns nu * relu(q_min - N_active) where N_active is the
+    mean batch count of modes with E[omega_k] > delta.  The penalty is
+    added to the total loss after the four ELBO terms.  Set nu=0 or
+    q_min=0 to disable.
 
 Data flow::
 
@@ -93,21 +110,22 @@ from .laplacian import DifferentiableLaplacian
 # ---------------------------------------------------------------------------
 
 from .wiring_decoder import SpectralLoadingDecoder
-from .spectral import spectral_basis_kl, tau_mode_kl
+from .spectral import spectral_basis_kl, tau_mode_kl, active_mode_penalty
 
 
 # ---------------------------------------------------------------------------
-# WiringAutoencoder  ( -- three-term ELBO, issue #27)
+# WiringAutoencoder  ( -- four-term ELBO, issue #27)
 # ---------------------------------------------------------------------------
 
 class WiringAutoencoder(nn.Module):
     """
-    Wiring Autoencoder  -- three-term ELBO with spectral mode priors.
+    Wiring Autoencoder  -- four-term ELBO with spectral mode priors
+    and optional active-mode stability penalty (issue #68).
 
     Assembles WiringEncoder, SpectralLoadingDecoder, and DiffusionDecoder
-    under the three-term variational objective.  Training *minimises*::
+    under the four-term variational objective.  Training *minimises*::
 
-        loss  =  NLL_recon  +  KL_z  +  KL_S  +  KL_tau
+        loss  =  NLL_recon  +  KL_z  +  KL_S  +  KL_tau  [+  penalty]
 
     which is equivalent to *maximising* the ELBO::
 
@@ -119,6 +137,21 @@ class WiringAutoencoder(nn.Module):
         KL_z       =  KL( q(z)  || N(0,I)          )   -- isotropic
         KL_S       =  KL( q(S)  || p(S|I)          )   -- spectral basis
         KL_tau     =  KL( q(w)  || p(w|tau,Lambda) )   -- mode frequency
+        penalty    =  nu * relu(q_min - N_active)       -- active-mode floor
+
+    Stability mitigations (issue #68)
+    -----------------------------------
+    Two mitigations prevent mode-weight collapse:
+
+    1.  Shape-parameter floor -- tau_mode_kl clamps a = exp(log_a) to
+        min=a_min before lgamma/digamma.  Configured via ``a_min``
+        (default 0.1).
+
+    2.  Active-mode penalty -- active_mode_penalty adds
+        nu * relu(q_min - N_active) to the total loss, where N_active is
+        the mean batch count of modes whose expected value E[omega_k]
+        exceeds delta.  Configured via ``q_min`` (default 4) and
+        ``nu`` (default 1.0).  Set nu=0 or q_min=0 to disable.
 
     Note: the Laplacian-precision latent KL (Term 2, kl_lap) has been
     removed per PR #35.  L_z is synthesised inside SpectralLoadingDecoder
@@ -199,6 +232,18 @@ class WiringAutoencoder(nn.Module):
         Attention heads per VDT block.  Default 4.
     dropout : float
         Dropout probability inside WiringEncoder.  Default 0.1.
+    a_min : float
+        Floor for the Gamma shape parameter a = exp(log_a) used inside
+        tau_mode_kl.  Prevents full collapse to a near-zero spike.
+        Default 0.1.  Set to 0.0 to disable.
+    q_min : int
+        Minimum number of active spectral modes required.  When the mean
+        batch count of modes with E[omega_k] > delta falls below q_min,
+        the active-mode penalty (nu * relu(q_min - N_active)) is added to
+        the total loss.  Default 4.  Set to 0 to disable.
+    nu : float
+        Lagrange multiplier weight for the active-mode penalty.  Default 1.0.
+        Set to 0.0 to disable.
     """
 
     def __init__(
@@ -215,6 +260,9 @@ class WiringAutoencoder(nn.Module):
         n_layers: int = 4,
         n_heads: int = 4,
         dropout: float = 0.1,
+        a_min: float = 0.1,
+        q_min: int = 4,
+        nu: float = 1.0,
     ) -> None:
         super().__init__()
         self.q = q
@@ -222,6 +270,9 @@ class WiringAutoencoder(nn.Module):
         self.lam_s = lam_s
         self.tau = tau
         self.tau_modes = tau_modes
+        self.a_min = a_min
+        self.q_min = q_min
+        self.nu = nu
 
         # Resolve n_nodes from the laplacian when not supplied explicitly.
         if n_nodes is None:
@@ -318,13 +369,16 @@ class WiringAutoencoder(nn.Module):
 
         Returns
         -------
-        dict with exactly 9 keys:
-            loss     -- total loss scalar (minimise this; equals negative ELBO up to constants)
-            recon    -- NLL reconstruction term (positive; equals -E_q[log p(x|z,W)] up to the
-                        dropped 0.5*D*log(2*pi) constant; see DiffusionDecoder.recon_loss())
+        dict with exactly 10 keys:
+            loss     -- total loss scalar (minimise this; equals negative ELBO
+                        plus the active-mode penalty, up to constants)
+            recon    -- NLL reconstruction term (positive; equals
+                        -E_q[log p(x|z,W)] up to the dropped
+                        0.5*D*log(2*pi) constant)
             kl_z     -- isotropic KL  KL(q(z) || N(0,I))
             kl_S     -- spectral basis KL  KL(q(S) || p(S|I))
             kl_tau   -- mode frequency KL  KL(q(w) || p(w|tau,L))
+            penalty  -- active-mode penalty  nu*relu(q_min - N_active)
             x_hat    -- (B, D) reconstructed embeddings
             z        -- (B, latent_dim) latent samples
             mu       -- (B, latent_dim) posterior means
@@ -395,11 +449,16 @@ class WiringAutoencoder(nn.Module):
 
         # Term 4: mode frequency KL  KL(q(w) || p(w|tau,Lambda))
         # log_a, log_b are (B, q) -- matching eigvals_q shape (q,).
-        kl_tau = tau_mode_kl(log_a, log_b, eigvals_q, tau=self.tau)
+        # a_min clamps exp(log_a) >= a_min before lgamma/digamma (issue #68).
+        kl_tau = tau_mode_kl(log_a, log_b, eigvals_q, tau=self.tau, a_min=self.a_min)
 
-        # Total loss (all four terms are non-negative by construction).
+        # Active-mode penalty (issue #68): nu * relu(q_min - N_active).
+        # Zero when nu=0 or q_min=0 (see active_mode_penalty docstring).
+        penalty = active_mode_penalty(log_a, log_b, q_min=self.q_min, nu=self.nu)
+
+        # Total loss (all four KL terms are non-negative by construction).
         # Minimising this loss is equivalent to maximising the ELBO.
-        loss = recon + kl_z + kl_S + kl_tau
+        loss = recon + kl_z + kl_S + kl_tau + penalty
 
         return {
             "loss": loss,
@@ -407,6 +466,7 @@ class WiringAutoencoder(nn.Module):
             "kl_z": kl_z,
             "kl_S": kl_S,
             "kl_tau": kl_tau,
+            "penalty": penalty,
             "x_hat": x_hat,
             "z": z,
             "mu": mu,
@@ -565,6 +625,10 @@ def from_config(
           tau_modes: 16
           n_layers: 4
           n_heads: 4
+        training:
+          a_min: 0.1     # Gamma shape floor (issue #68)
+          q_min: 4       # min active modes (issue #68)
+          nu: 1.0        # active-mode penalty weight (issue #68)
         graph:
           knn_k: 15
           sigma: 0.5
@@ -584,6 +648,7 @@ def from_config(
     WiringAutoencoder
     """
     mc = cfg["model"]
+    tc = cfg.get("training", {})
     # version key is accepted but has no dispatch effect -- both v1 and v2
     # configs build the same WiringAutoencoder instance.
     _ = int(mc.get("version", 1))
@@ -614,6 +679,10 @@ def from_config(
         n_layers=mc.get("n_layers", 4),
         n_heads=mc.get("n_heads", 4),
         dropout=mc.get("dropout", 0.1),
+        # Stability mitigations (issue #68)
+        a_min=float(tc.get("a_min", 0.1)),
+        q_min=int(tc.get("q_min", 4)),
+        nu=float(tc.get("nu", 1.0)),
     )
     # Initialise the embedding buffer with the supplied table.
     model.embedding.data.copy_(E)
