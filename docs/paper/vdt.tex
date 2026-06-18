@@ -77,7 +77,7 @@ coefficient matrix in that eigenbasis, and $\boldsymbol{\omega}$ are mode weight
 drawn from a taumode variational prior.
 This loading matrix parametrises a differentiable Laplacian $\Lmat(\mathbf{z})$
 over which a heat-kernel \emph{taumode diffusion} decoder reconstructs the input.
-The objective is a three-term Evidence Lower Bound (ELBO) comprising a
+The objective is a four-term Evidence Lower Bound (ELBO) comprising a
 Gaussian reconstruction term, an isotropic latent KL, an eigenvalue-weighted
 spectral-basis KL penalising high-frequency loadings (spectral Occam's razor),
 and a Gamma-vs-Exponential mode-frequency KL for spectral band selection.
@@ -142,7 +142,7 @@ The paper follows the conceptual flow applied in \cite{chen2026}.
 The paper is organised as follows.
 Section~\ref{sec:background} reviews prerequisite material.
 Section~\ref{sec:architecture} presents the full VDT architecture.
-Section~\ref{sec:elbo} derives the three-term ELBO.
+Section~\ref{sec:elbo} derives the four-term ELBO.
 Section~\ref{sec:memory} describes the spectral artefact and associative memory.
 Section~\ref{sec:stability} covers the stability analysis.
 Section~\ref{sec:experiments} reports empirical results.
@@ -356,7 +356,7 @@ positive-semi-definite operator---the real-valued analogue of a quantum
 channel~\cite{aaronson2013,belkin2003}.
 
 % -----------------------------------------------------------------------
-\section{The Three-Term ELBO}
+\section{The Four-Term ELBO}
 \label{sec:elbo}
 % -----------------------------------------------------------------------
 
@@ -678,7 +678,7 @@ structure of signed-amplitude interference as a computational primitive.
 The VDT establishes a formal connection between three bodies of theory:
 Rayleigh's vibrational mechanics, Aaronson's real-amplitude quantum
 probabilities, and Bayesian graph-spectral learning.  The central
-contribution is the three-term ELBO~\eqref{eq:elbo}, which replaces hard
+contribution is the four-term ELBO~\eqref{eq:elbo}, which replaces hard
 spectral penalties with proper variational counterparts while preserving the
 ArrowSpace wiring geometry.
 
