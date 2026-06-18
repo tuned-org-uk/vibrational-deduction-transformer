@@ -37,7 +37,7 @@ Level 1 -- Graph geometry: lambda_max(L_f), CFL condition
 Level 2 -- Wave update per mode: gamma_k > 0, underdamped/overdamped classification
 Level 3 -- Recurrent VDT dynamics: E_t monotone, H_spectral stable
 Level 4 -- Density matrix: rho+_t PSD, ||rho_t||_F bounded
-Level 5 -- Optimiser: kappa(P_{sigma,M}) << kappa(L_f), eta < 2/L_{sigma,M}, linear convergence
+Level 5 -- Optimiser: kappa(P_{sigma,M}) << kappa(Lf), eta < 2/L_{sigma,M}, linear convergence
 ```
 
 Fix lower-level instabilities before diagnosing higher-level ones.
@@ -112,6 +112,10 @@ the KL gradient. Both `spectral_basis_kl` and `tau_mode_kl` should apply this fl
 - [ ] Set `a_min >= 0.1` in `ModeWeightHead` config.
 - [ ] Set `q_min >= max(2, q // 4)` in config.
 - [ ] Apply eigenvalue floor `clamp(min=1e-3)` in all KL computations.
+- [ ] If using a normalised symmetric Laplacian with spectral density near
+  `lambda = 1` (regular graphs, k-NN graphs on uniform point clouds),
+  construct `MassMatrix` with `mass_clip=1e3` to avoid spurious
+  conditioning warnings and preconditioner instability (see Section 7).
 
 ### During training (per-epoch diagnostics)
 
@@ -121,6 +125,7 @@ the KL gradient. Both `spectral_basis_kl` and `tau_mode_kl` should apply this fl
 | `KL_S` (spectral basis) | Decreasing | Spike or oscillation |
 | `tau-mode KL` | Stable decrease | Sudden spike |
 | `N_active` | >= `q_min` | Drops below `q_min` |
+| `log_var` (encoder) | In (-10, 4) without saturation | RuntimeWarning from WiringEncoder |
 
 ### Post-training
 
@@ -151,3 +156,87 @@ Level 1 -- Graph geometry
                                                     +-- N_active >= q_min
                                                          +-- ||W_hat||_F non-degenerate
 ```
+
+---
+
+## 6. log_var Clamping in WiringEncoder
+
+The posterior log-variance produced by `WiringEncoder` is clamped to `[-10, 4]`
+before the reparameterisation step. The physical meaning of the bounds is:
+
+| Bound | log_var value | sigma = exp(0.5 * log_var) | Interpretation |
+|---|---|---|---|
+| Lower | -10 | ~0.007 | Very narrow posterior; near-deterministic encoder |
+| Upper |  4  | ~7.4   | Very wide posterior; near-uninformative encoder |
+
+**Lower bound -10** prevents numerical underflow in `exp(0.5 * log_var)` and
+stops the posterior from collapsing to a point mass (which would make the KL
+term diverge to `-inf`).
+
+**Upper bound 4** prevents KL explosion. The bound is deliberately generous
+to allow the encoder to maintain high uncertainty during early training. If
+`kl_z` consistently exceeds `100 * latent_dim` during training, tighten
+this bound to `2.0` (sigma ~2.7).
+
+`WiringEncoder.forward()` emits a `RuntimeWarning` whenever the raw
+`log_var_head` output hits either bound before clamping. Persistent
+saturation warnings indicate the head may need a learning-rate adjustment
+or gradient clipping.
+
+---
+
+## 7. MassMatrix Singularity at lambda = 1
+
+For a **normalised symmetric Laplacian** `L_sym = I - D^{-1/2} A D^{-1/2}`,
+eigenvalues lie in `[0, 2]`. The Rayleigh-damping mass:
+
+```
+M_ii = 1 / (1 - lambda_i^tau)
+```
+
+diverges at `lambda = 1` for all `tau`, because `lambda = 1` is the mode at
+its natural frequency where kinetic and potential energy are in equipartition.
+
+In practice, `eps` (default `1e-6`) prevents exact division by zero but
+leaves `M_ii ~ 1/eps = 10^6` near `lambda = 1`. This causes:
+
+- The conditioning ratio in `pre_training_checks` level 3 to exceed 100 and
+  emit a spurious warning for any graph with significant spectral density
+  near `lambda = 1`. This is common for **regular graphs** and **k-NN graphs
+  on uniform point clouds**.
+- Numerical instability in the Tikhonov preconditioner
+  `H_prec = sigma * M_diag * I + L_f` inside `log_preconditioner_stability`.
+- The time step `dt` to be dominated by the mass spike rather than the true
+  spectral structure of the graph.
+
+### Recommended fix: use mass_clip
+
+Construct `MassMatrix` with a finite `mass_clip` to clamp the singularity:
+
+```python
+# Moderate graphs (k-NN, citation networks)
+mass = MassMatrix(eigvals, tau=0.5, mass_clip=1e3)
+
+# Sparse graphs where the singularity is rarely excited
+mass = MassMatrix(eigvals, tau=0.5, mass_clip=1e4)
+```
+
+This clamps `M_diag` entries to at most `mass_clip`, preventing spurious
+conditioning warnings and preconditioner instability without materially
+affecting modes far from `lambda = 1`.
+
+### How to tell if the warning is genuine
+
+| Scenario | Action |
+|---|---|
+| Graph is regular or k-NN on uniform data | Set `mass_clip=1e3`; warning is caused by the singularity |
+| Graph is sparse with irregular degree distribution | Investigate the Laplacian; genuine ill-conditioning |
+| Conditioning ratio >> 1e4 even after setting mass_clip=1e3 | Genuine issue; check kNN construction |
+
+### Interaction with pre_training_checks level 3
+
+`pre_training_checks` checks the conditioning ratio of the `M_diag` passed
+by the caller. If `MassMatrix` was constructed without `mass_clip` and the
+graph has density near `lambda = 1`, the ratio will exceed 100 even for
+well-behaved graphs. The warning message now explicitly notes this and
+recommends `mass_clip=1e3`.
