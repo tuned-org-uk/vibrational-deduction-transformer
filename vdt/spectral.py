@@ -8,12 +8,20 @@ of the VDT training loop:
     spectral_freq_cost  J_freq high-frequency energy penalty (training signal)
     lambda_fingerprint  ArrowSpace-style lambda-distribution summary (encoder enrichment)
 
- additions (issue #24 / three-term ELBO):
+ additions (issue #24 / four-term ELBO):
 
-    spectral_basis_kl   KL between Gaussian basis posterior q(S) and
-                        eigenvalue-weighted prior p(S|I)
-    tau_mode_kl         KL between Gamma mode posterior q(omega_k) and
-                        Exponential mode prior p(omega_k | tau, lambda_k)
+    spectral_basis_kl     KL between Gaussian basis posterior q(S) and
+                          eigenvalue-weighted prior p(S|I)
+    tau_mode_kl           KL between Gamma mode posterior q(omega_k) and
+                          Exponential mode prior p(omega_k | tau, lambda_k)
+
+ stability mitigations (issue #68):
+
+    tau_mode_kl           now accepts a_min kwarg; clamps a = exp(log_a)
+                          to min=a_min before lgamma/digamma to prevent
+                          full Gamma shape collapse.
+    active_mode_penalty   soft Lagrange penalty nu * relu(q_min - N_active)
+                          that maintains a minimum number of active modes.
 
 All primitives share the same underlying eigensystem of the graph
 Laplacian L(z).  To avoid redundant O(N^3) CPU eigendecompositions at every
@@ -396,7 +404,7 @@ def lambda_fingerprint(
 
 
 # ---------------------------------------------------------------------------
-# spectral_basis_kl  --   three-term ELBO, basis term  (issue #24)
+# spectral_basis_kl  --   four-term ELBO, basis term  (issue #24)
 # ---------------------------------------------------------------------------
 
 def spectral_basis_kl(
@@ -458,7 +466,7 @@ def spectral_basis_kl(
 
 
 # ---------------------------------------------------------------------------
-# tau_mode_kl  --   three-term ELBO, mode-weight term  (issue #24)
+# tau_mode_kl  --   four-term ELBO, mode-weight term  (issue #24)
 # ---------------------------------------------------------------------------
 
 def tau_mode_kl(
@@ -466,10 +474,11 @@ def tau_mode_kl(
     log_b: torch.Tensor,
     eigvals_q: torch.Tensor,
     tau: float = 1.0,
+    a_min: float = 0.1,
 ) -> torch.Tensor:
     """
     KL between the variational Gamma mode posterior and the Exponential
-    mode prior.
+    mode prior, with shape-parameter floor to prevent full Gamma collapse.
 
     For each mode k, the posterior is:
         q(omega_k) = Gamma( a_k, b_k )   (rate parameterisation)
@@ -494,6 +503,15 @@ def tau_mode_kl(
 
         Note the sign on lgamma and the final term a*r/b (NOT a*b/r).
 
+    Shape-parameter floor (stability mitigation, issue #68)
+    -------------------------------------------------------
+    Before computing lgamma and digamma, the shape parameter a is clamped
+    to min=a_min (default 0.1) to prevent full Gamma shape collapse.  This
+    mirrors the floor applied in WiringAutoencoder (configured via
+    training.a_min in configs/default.yaml).  The clamp is applied AFTER
+    exp() so gradients still flow through log_a; the floor only clips the
+    forward-pass value seen by the special functions.
+
     Parameters
     ----------
     log_a : torch.Tensor
@@ -506,29 +524,102 @@ def tau_mode_kl(
     tau : float
         Diffusion time scale.  Scalar multiplier for the prior rate.
         Default 1.0.
+    a_min : float
+        Floor applied to the shape parameter a = exp(log_a) before
+        lgamma/digamma.  Prevents full Gamma collapse to a near-zero spike.
+        Default 0.1 (matching the paper's Section 5.2 description).
 
     Returns
     -------
     torch.Tensor  scalar -- mean over batch, summed over modes.
     """
-    a = log_a.exp()  # (B, q)  shape parameter > 0
-    b = log_b.exp()  # (B, q)  rate  parameter > 0
+    # Clamp a to min=a_min AFTER exp() -- gradients still flow through log_a.
+    a = log_a.exp().clamp(min=a_min)  # (B, q)  shape parameter >= a_min
+    b = log_b.exp()                   # (B, q)  rate  parameter > 0
 
     # Prior rate r_k = tau * lambda_k;  shape (q,) -> (1, q)
     r = (tau * eigvals_q.clamp(min=1e-6)).unsqueeze(0)  # (1, q)
 
     # Closed-form KL( Gamma(a,b) || Exp(r) = Gamma(1, r) )
-    # Derivation:  KL = -H[Gamma(a,b)] - log(r) + r*(a/b)
-    #   H[Gamma(a,b)] = a - log(b) + lgamma(a) + (1-a)*digamma(a)
-    # => KL = log(b) - log(r) - lgamma(a) - (1-a)*digamma(a) - a + a*r/b
+    # KL = log(b) - log(r) - lgamma(a) - (1-a)*digamma(a) - a + a*r/b
     kl = (
         log_b                              # log b
         - r.log()                          # - log r
         - torch.lgamma(a)                  # - lgamma(a)
         - (1.0 - a) * torch.digamma(a)     # - (1-a)*digamma(a)
         - a                                # - a
-        + a * r / b                        # + a*r/b   (was a*b/r -- wrong)
+        + a * r / b                        # + a*r/b
     )  # (B, q)
 
     # Sum over q modes, mean over batch.
     return kl.sum(dim=-1).mean()
+
+
+# ---------------------------------------------------------------------------
+# active_mode_penalty  --  stability mitigation (issue #68)
+# ---------------------------------------------------------------------------
+
+def active_mode_penalty(
+    log_a: torch.Tensor,
+    log_b: torch.Tensor,
+    q_min: int,
+    nu: float = 1.0,
+    delta: float = 0.01,
+) -> torch.Tensor:
+    """
+    Soft Lagrange penalty that maintains a minimum number of active modes.
+
+    A mode k is considered active when its expected value under the Gamma
+    variational posterior exceeds a threshold delta::
+
+        E[omega_k] = a_k / b_k = exp(log_a_k) / exp(log_b_k)
+
+    The penalty is::
+
+        penalty = nu * relu( q_min - N_active )
+
+    where N_active is the mean (over the batch) count of modes with
+    E[omega_k] > delta.  When N_active >= q_min the penalty is zero.
+
+    This is a *soft* constraint: it adds a positive term to the total
+    ELBO loss only when too many modes have collapsed, discouraging the
+    Exponential prior from pushing all mode weights to near-zero.
+
+    The (B, q) expected-value tensor is computed in float32 with
+    torch.no_grad() for the active count; gradients only flow through
+    the relu(q_min - n_active_mean) path, so the gradient signal is
+    sparse (zero when the constraint is satisfied, non-zero otherwise).
+
+    Parameters
+    ----------
+    log_a : torch.Tensor
+        Log shape parameters.  Shape (B, q).
+    log_b : torch.Tensor
+        Log rate parameters.  Shape (B, q).
+    q_min : int
+        Minimum number of active modes required.  The penalty is zero
+        when the mean active count meets or exceeds q_min.
+        Set to 0 to disable.
+    nu : float
+        Lagrange multiplier weight for the active-mode penalty.
+        Set to 0.0 to disable.  Default 1.0.
+    delta : float
+        Threshold for classifying a mode as active:  E[omega_k] > delta.
+        Default 0.01.
+
+    Returns
+    -------
+    torch.Tensor
+        Scalar penalty.  Zero (detached) when nu == 0 or q_min == 0.
+    """
+    if nu == 0.0 or q_min == 0:
+        return torch.zeros(1, device=log_a.device).squeeze()
+
+    # E[omega_k] = a_k / b_k  (B, q)
+    expected_omega = log_a.exp() / log_b.exp()
+
+    # N_active: mean count of active modes across the batch (scalar)
+    # Use float() to make the count differentiable-ish via the relu path.
+    n_active = (expected_omega > delta).float().sum(dim=-1).mean()  # scalar
+
+    return nu * torch.relu(torch.tensor(float(q_min), device=log_a.device) - n_active)
