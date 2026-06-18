@@ -401,7 +401,7 @@ applied inside \texttt{TauModeDiffusion} or in
 \texttt{WiringAutoencoder.forward()} after the diffusion step.
 The heat kernel $\mathbf{K}_\tau$ is a real symmetric
 positive-semi-definite operator---the real-valued analogue of a quantum
-channel~\cite{aaronson2013,belkin2003}.
+channel~\cite{aaronson2013,belkin2003,einstein1905}.
 
 % -----------------------------------------------------------------------
 \section{The Four-Term ELBO}
@@ -604,7 +604,7 @@ retrieval SNR by construction.
 \subsection{Entropy-Controlled Generation}
 \label{sec:memory:generation}
 
-The spectral entropy of the generated Laplacian:
+The spectral entropy of the generated Laplacian~\cite{jaynes1957}:
 
 \begin{equation}
   H(\Lmat(\mathbf{z})) = -\sum_{k=1}^{N}\bar{\lambda}_k\log\bar{\lambda}_k,
@@ -690,6 +690,8 @@ We evaluate on three benchmarks:
   \item \textbf{PubMed}~\cite{kipf2016}: 19717 nodes, 44338 edges, 3 classes.
   \item \textbf{Synthetic spring networks}: 400 randomly generated spring
         graphs with controllable spectral entropy.
+  \item \textbf{Open Graph Benchmark (OGB)}~\cite{hu2020}: standardised
+        large-scale graph datasets used for held-out evaluation.
 \end{itemize}
 
 \subsection{Evaluation Metrics}
@@ -746,6 +748,13 @@ variational compression to sequence models.  The VDT shares the ELBO
 philosophy but applies spectral-structural priors rather than capacity
 constraints on a fixed-dimension latent.
 
+\paragraph{Beta-VAE and disentanglement.}
+Higgins et al.~\cite{higgins2017} introduce $\beta$-VAE, showing that
+stronger KL regularisation encourages disentangled latent representations.
+The VDT's eigenvalue-weighted spectral-basis KL can be seen as an
+anisotropic generalisation of this pressure, tuning the regularisation
+strength independently per spectral frequency band.
+
 \paragraph{Real quantum mechanics.}
 Renou et al.~\cite{renou2021} and McKague et al.~\cite{mckague2009} provide
 experimental and theoretical grounding for real-valued quantum theories.
@@ -797,17 +806,16 @@ S.\ Aaronson.
 \newblock \url{https://scottaaronson.com/democritus/lec9.html}
 
 \bibitem{moriondo2026arrowspace}
-D.\ Moriondo.
+L.\ Moriondo.
 \newblock ArrowSpace: Graph Wiring and the Differentiable Laplacian.
 \newblock Technical report, tuned-org-uk, 2026.
 \newblock \url{https://github.com/tuned-org-uk/pyarrowspace}
 
 \bibitem{moriondo2026vdt}
-D.\ Moriondo.
+L.\ Moriondo.
 \newblock Vibrational Deduction Transformer (VDT): Spectral-PPCA Wiring
   Autoencoder with Associative Memory.
-\newblock \emph{arXiv preprint}, 2026.
-\newblock \url{https://github.com/tuned-org-uk/vibrational-deduction-transfomer}
+\newblock \emph{arXiv preprint (in preparation)}, 2026.
 
 \bibitem{chen2026}
 T.~Chen,
