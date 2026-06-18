@@ -431,15 +431,37 @@ Mode weights $\omega_k>0$ receive an exponential prior indexed by frequency:
 
 giving heavy support on low-frequency modes (small $\lambda_k$).
 The variational posterior is a Gamma: $q(\omega_k)=\mathrm{Gamma}(a_k,b_k)$.
-The KL between a Gamma and an Exponential is closed-form:
+The KL between a Gamma posterior and an Exponential prior is closed-form.
+Setting $r = \tau\lambda_k$ (prior rate), the derivation proceeds as:
+\begin{align*}
+  \mathrm{KL}\bigl(\mathrm{Gamma}(a,b)\,\|\,\mathrm{Exp}(r)\bigr)
+  &= \mathbb{E}_q[\log q(\omega) - \log p(\omega)] \\
+  &= -H[\mathrm{Gamma}(a,b)] - \log r + r\,\mathbb{E}_q[\omega]
+\end{align*}
+where the Gamma entropy is
+$H[\mathrm{Gamma}(a,b)] = a - \log b + \ln\Gamma(a) + (1-a)\psi(a)$
+and $\mathbb{E}_q[\omega] = a/b$.  Substituting and simplifying gives:
 
 \begin{equation}
   \KL{\mathrm{Gamma}(a,b)}{\mathrm{Exp}(r)}
-  = \log b - \log r + \ln\Gamma(a) + (1-a)\psi(a) + \frac{a}{b}r,
+  = \log b - \log r - \ln\Gamma(a) - (1-a)\psi(a) - a + \frac{a\,r}{b},
   \label{eq:kltau}
 \end{equation}
 
-where $\psi$ is the digamma function.  No Monte Carlo sampling is required.
+where $\psi$ is the digamma function and $r = \tau\lambda_k$.
+No Monte Carlo sampling is required.
+The implementation in \texttt{vdt/spectral.py::tau\_mode\_kl} follows
+Eq.~\eqref{eq:kltau} exactly; note the \emph{negative} sign on
+$\ln\Gamma(a)$ and the additional $-a$ term, both of which arise from
+expanding the Gamma entropy.
+
+\begin{remark}
+A common sign error writes $+\ln\Gamma(a)$ instead of $-\ln\Gamma(a)$.
+The correct sign follows immediately from the entropy expansion:
+$H = a - \log b + \ln\Gamma(a) + (1-a)\psi(a)$, which enters the KL
+with a \emph{negative} prefactor ($\mathrm{KL} = -H + \ldots$), flipping
+all signs, including the sign on $\ln\Gamma(a)$.
+\end{remark}
 
 \subsection{Comparison with the Base Wiring AE}
 \label{sec:elbo:comparison}
