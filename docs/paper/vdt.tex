@@ -123,10 +123,11 @@ lines of inquiry:
         of quantum probability---interference, entanglement structure,
         the Born rule---are recoverable from signed real amplitudes without
         complex numbers, provided the update rule is unitary.
-        The VDT implements this insight: edge weights in $\Lmat(\mathbf{z})$
-        can be negative (via the spectral loading parametrisation), producing
-        destructive interference in the heat kernel without any complex
-        arithmetic.
+        The VDT implements this insight: the entries of the loading matrix
+        $\Wmat$ can be positive or negative, modulating the relative
+        magnitude of Laplacian eigenvector contributions and producing
+        constructive or destructive interference in the heat kernel through
+        the eigenvector structure of $\Lmat(\mathbf{z})$.
 
   \item \textbf{ArrowSpace / Graph Wiring.}
         The ArrowSpace computational framework~\cite{moriondo2026arrowspace}
@@ -198,10 +199,15 @@ matrix.  The key insight is:
   quantum-like interference without complex numbers.'' \cite{aaronson2013}
 \end{quote}
 
-The VDT operationalises this: the loading matrix $\Wmat$ has real-valued entries
-that can be positive or negative, encoding interference in the Laplacian edge
-structure.  The heat kernel $\mathbf{K}_\tau = \Umat\,\exp(-t\boldsymbol{\Lambda})\,\Umat\T$ is
-a real symmetric positive-definite matrix and acts as the ``real unitary channel''.
+The VDT operationalises this at the level of the \emph{loading matrix}:
+entries of $\Wmat \in \R^{d \times q}$ can be positive or negative,
+modulating the relative magnitude and sign of each eigenvector's contribution
+to the row embeddings of $\Lmat(\mathbf{z})$.  Edge weights themselves remain
+strictly positive (Section~\ref{sec:architecture:laplacian}); the signed
+character of $\Wmat$ instead reshapes the eigenvector decomposition of
+$\Lmat(\mathbf{z})$, inducing constructive or destructive interference in the
+heat kernel $\mathbf{K}_\tau = \Umat\,\exp(-t\boldsymbol{\Lambda})\,\Umat\T$
+through the geometry of the learned eigenvectors.
 
 % -----------------------------------------------------------------------
 \section{Architecture}
@@ -337,12 +343,23 @@ The loading matrix $\Wmat$ is converted to a graph Laplacian by:
 \end{equation}
 
 where $\sigma$ is the logistic sigmoid and $w_{ij}^{\text{base}}$ is a frozen
-base-graph weight.  The construction is fully differentiable through $\Wmat$.
-Negative edge weights are permitted by this parametrisation whenever the
-spectral loading produces $\|\Wmat_i-\Wmat_j\|^2 < 0$ after sigmoid, which
-corresponds to anti-correlated spectral directions and encodes
-\emph{destructive interference} in the heat kernel---the real-amplitude
-counterpart of complex phase cancellation.
+base-graph weight.  Since $\|\Wmat_i - \Wmat_j\|^2 \geq 0$ by definition,
+$\sigma(-\|\Wmat_i - \Wmat_j\|^2) \in (0, 0.5]$, so all edge weights are
+\emph{strictly positive} and lie in $(0,\, w_{ij}^{\text{base}}/2]$.
+The construction remains fully differentiable through $\Wmat$.
+
+Quantum-like interference in the heat kernel does not arise here from
+negative edge weights.  Instead, it arises from the \emph{signed structure
+of $\Wmat$}: because the entries of $\Wmat = \Umat_{1:q}\,\mathrm{diag}(\boldsymbol{\omega})\,\Smat$
+can be positive or negative, rows $\Wmat_i$ and $\Wmat_j$ may be
+positively or negatively correlated in the eigenvector subspace.
+These signed correlations reshape the eigenvector decomposition of
+$\Lmat(\mathbf{z})$: modes whose eigenvectors align with anti-correlated
+row pairs carry larger Laplacian eigenvalues and are exponentially
+suppressed in the heat kernel $\mathbf{K}_\tau = \Umat\,\exp(-t\boldsymbol{\Lambda})\,\Umat\T$,
+producing constructive or destructive-like interference in the diffusion
+pathways between nodes---the real-amplitude counterpart of complex phase
+cancellation~\cite{aaronson2013}.
 
 \subsection{DiffusionDecoder (TauModeDiffusion)}
 \label{sec:architecture:diffusion}
