@@ -218,43 +218,50 @@ Figure~\ref{fig:arch} summarises the data flow.
 \begin{figure}[ht]
   \centering
   \begin{verbatim}
-Input x (B, D)              Embedding table E (N, D)
-    |                                |
-    +--[lambda-fingerprint L(I)]-----+
+Input x (B, D)         Frozen: U_q (N, q),  eigvals_q (q,)
+    |                              |
+    +---[fingerprint from eigvals_q, derived internally]---+
     |
     v
-+----------------------------+
-| WiringEncoder              |
-|  MLP + lambda-fingerprint  |
-|  --> z, mu, log_var,       |
-|      log_a, log_b          |
-+----------------------------+
-    |                  |
-  (z, mu, log_var) <-- reparameterise
-  (log_a, log_b)   --> ModeWeightHead --> q(omega)
++----------------------------------+
+| WiringEncoder                    |
+|  MLP + eigenvalue fingerprint    |
+|  --> mu, log_var                 |
+|      [reparameterise --> z]      |
+|  --> log_a, log_b                |
+|      [ModeWeightHead --> q(w)]   |
++----------------------------------+
     |
   z_to_q: z (B, latent_dim) --> z_q (B, q)
     |
     v
-+------------------------------------------+
-| SpectralLoadingDecoder                   |
-|  z_q, U_{1:q} --> W, omega, S, log_var_S |
-|  W = U_{1:q} diag(omega) S               |
-+------------------------------------------+
-    |                   |
-  W --> DifferentiableLaplacian --> L(z)    kl_S
-    |
-    v
-+------------------+     +---------+
-| DiffusionDecoder | <-- |    E    |
-| TauModeDiffusion |     +---------+
-+------------------+
-    |
-  x_hat (B, D) --> recon + kl_tau + kl_z + kl_S = loss
++------------------------------------------------+
+| SpectralLoadingDecoder                         |
+|  inputs:  z_q,  U_q,  L_base                  |
+|  outputs: W,  omega,  S,  log_var_S,  L_z     |
+|  W = U_q @ diag(omega) @ S   (B, N, q)        |
++------------------------------------------------+
+         |            |              |
+         W       (S, log_var_S)  (log_a, log_b)
+         |            |              |
+      L_z (B,N,N)   kl_S          kl_tau
+         |
+  TauModeDiffusion(L_z, E, node_idx)
+         |
+      x_hat --> recon_loss
+
+loss = recon + kl_z + kl_S + kl_tau
   \end{verbatim}
-  \caption{VDT data flow. The index $\mathcal{I}$ enters only through the frozen
-    eigenpair $(\Umat_{1:q}, \boldsymbol{\Lambda}_{1:q})$; no Laplacian is
-    evaluated at training time.}
+  \caption{VDT v2 data flow (forward signature:
+    \texttt{(x, U\_q, eigvals\_q, node\_idx, spectral\_cache)}).
+    The index $\mathcal{I}$ enters only through the frozen eigenpair
+    $(\Umat_q, \boldsymbol{\lambda}_q)$ precomputed once before training;
+    no Laplacian eigendecomposition is performed at training time.
+    The eigenvalue fingerprint is derived \emph{internally} by
+    \texttt{WiringEncoder} from \texttt{eigvals\_q}.
+    \texttt{log\_var\_S} is a separate output of
+    \texttt{SpectralLoadingDecoder} required for the $\mathrm{KL}_S$
+    computation (fix~\#52).}
   \label{fig:arch}
 \end{figure}
 
