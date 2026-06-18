@@ -4,9 +4,11 @@ Spectral utilities for the Wiring Autoencoder.
 This module implements the three spectral primitives that sit at the heart
 of the VDT training loop:
 
-    TauModeDiffusion    differentiable truncated spectral diffusion decoder
-    spectral_freq_cost  J_freq high-frequency energy penalty (training signal)
-    lambda_fingerprint  ArrowSpace-style lambda-distribution summary (encoder enrichment)
+    TauModeDiffusion         differentiable truncated spectral diffusion decoder
+    spectral_freq_cost       J_freq high-frequency energy penalty (training signal)
+    lambda_fingerprint_soft  differentiable Gaussian KDE fingerprint (training signal)
+    lambda_fingerprint_hard  hard histogram fingerprint (monitoring / logging only)
+    lambda_fingerprint       backwards-compat alias for lambda_fingerprint_hard
 
  additions (issue #24 / four-term ELBO):
 
@@ -22,6 +24,18 @@ of the VDT training loop:
                           full Gamma shape collapse.
     active_mode_penalty   soft Lagrange penalty nu * relu(q_min - N_active)
                           that maintains a minimum number of active modes.
+
+ soft fingerprint (issue #56):
+
+    lambda_fingerprint_soft  Gaussian KDE soft-histogram replacing the
+                             non-differentiable torch.histc loop.
+                             Fully batched, stays on input device, and is
+                             differentiable w.r.t. eigvals so it can be
+                             used as a true training signal rather than
+                             a monitoring metric.
+    lambda_fingerprint_hard  Renamed original hard-histogram function.
+                             Non-differentiable; use for logging only.
+    lambda_fingerprint       Backwards-compat alias -> lambda_fingerprint_hard.
 
 All primitives share the same underlying eigensystem of the graph
 Laplacian L(z).  To avoid redundant O(N^3) CPU eigendecompositions at every
@@ -310,6 +324,15 @@ def spectral_freq_cost(
 
         J_freq = mean_b [ sum_{j > tau_modes} lambda_j( L_b ) ]
 
+    Note
+    ----
+    When building a spectral entropy training signal from the eigenvalue
+    distribution, prefer lambda_fingerprint_soft() over this function.
+    lambda_fingerprint_soft() returns a normalised KDE histogram that is
+    differentiable w.r.t. eigvals and can be used directly in the ELBO
+    as a spectral diversity penalty.  spectral_freq_cost() penalises total
+    high-frequency energy, not distribution shape.
+
     Parameters
     ----------
     L : torch.Tensor
@@ -346,21 +369,121 @@ def spectral_freq_cost(
 
 
 # ---------------------------------------------------------------------------
-# lambda-fingerprint  --  ArrowSpace-style spectral feature
+# lambda-fingerprint  --  differentiable soft-histogram (issue #56)
 # ---------------------------------------------------------------------------
 
-def lambda_fingerprint(
+def lambda_fingerprint_soft(
+    eigvals: torch.Tensor,
+    n_bins: int = 32,
+    lam_max: float = 2.0,
+    bandwidth: float = 0.05,
+) -> torch.Tensor:
+    """
+    Differentiable soft-histogram fingerprint of the eigenvalue distribution.
+
+    Uses Gaussian kernel density estimation centred on uniformly-spaced bin
+    centres in [0, lam_max].  The function is fully batched, stays on the
+    input device, and is differentiable w.r.t. eigvals so it can be used as
+    a genuine training signal (e.g. a spectral entropy penalty) rather than
+    a monitoring-only diagnostic.
+
+    Compared to lambda_fingerprint_hard (the original torch.histc
+    implementation):
+
+    - Device-consistent: no .cpu() call; result lives on eigvals.device.
+    - Differentiable: gradients flow back through eigvals.
+    - Batchable: a single vectorised computation over the batch dimension.
+    - JIT-compilable: no Python-level loops or .cpu() calls.
+
+    Algorithm
+    ---------
+    For each eigenvalue lambda_i and each bin centre c_j the soft
+    assignment weight is::
+
+        w_{i,j} = exp( -0.5 * ((lambda_i - c_j) / bandwidth)^2 )
+
+    The histogram for batch element b is then::
+
+        h_j = sum_i w_{i,j}     (sum over N eigenvalues)
+
+    followed by L1 normalisation so sum_j h_j = 1.
+
+    Parameters
+    ----------
+    eigvals : torch.Tensor
+        Shape (B, N) or (N,).  Eigenvalues of the feature-space Laplacian.
+        Need not be clipped prior to calling; values outside [0, lam_max]
+        will contribute only to the tail bins.
+    n_bins : int
+        Number of histogram bins.  Default 32.
+    lam_max : float
+        Upper bound of the histogram range.  Default 2.0 (normalised
+        Laplacian spectrum lies in [0, 2] by construction).
+    bandwidth : float
+        Gaussian kernel bandwidth (standard deviation).  Default 0.05.
+        Smaller values give sharper localisation but noisier gradients;
+        larger values smooth the fingerprint across adjacent bins.
+
+    Returns
+    -------
+    torch.Tensor
+        Shape (B, n_bins) or (n_bins,) matching the input rank.
+        Each row is a normalised probability vector (sums to 1).
+
+    Examples
+    --------
+    Using as a differentiable training signal::
+
+        fp = lambda_fingerprint_soft(eigvals_q, n_bins=32)
+        entropy = -(fp * (fp + 1e-8).log()).sum(dim=-1).mean()
+        loss = loss + entropy_weight * (-entropy)  # maximise spectral entropy
+    """
+    squeeze = eigvals.dim() == 1
+    if squeeze:
+        eigvals = eigvals.unsqueeze(0)   # (1, N)
+
+    B, N = eigvals.shape
+
+    # Bin centres: uniformly spaced in [0, lam_max].  Shape (1, 1, n_bins).
+    centres = torch.linspace(
+        0.0, lam_max, n_bins,
+        device=eigvals.device, dtype=eigvals.dtype,
+    ).view(1, 1, n_bins)
+
+    # Soft assignment: Gaussian kernel for every (eigenvalue, bin) pair.
+    # eigvals expanded to (B, N, 1) for broadcasting against (1, 1, n_bins).
+    ev_exp = eigvals.unsqueeze(-1)                        # (B, N, 1)
+    soft_counts = torch.exp(
+        -0.5 * ((ev_exp - centres) / bandwidth) ** 2
+    )                                                     # (B, N, n_bins)
+
+    soft_hist = soft_counts.sum(dim=1)                    # (B, n_bins)
+
+    # L1 normalise: each histogram row sums to 1.
+    soft_hist = soft_hist / (soft_hist.sum(dim=-1, keepdim=True) + 1e-8)
+
+    return soft_hist.squeeze(0) if squeeze else soft_hist
+
+
+def lambda_fingerprint_hard(
     L: torch.Tensor,
     tau_modes: int = 8,
     n_bins: int = 16,
     eigvals: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """
-    ArrowSpace-style lambda-distribution fingerprint of the Laplacian spectrum.
+    ArrowSpace-style lambda-distribution fingerprint using a hard histogram.
 
-    Computes a normalised histogram of the tau_modes lowest eigenvalues
-    of L over [0, 2].  The result is concatenated to the encoder input to
-    enrich the latent code z with the current wiring geometry.
+    WARNING: Non-differentiable
+    --------------------------
+    This function uses torch.histc which has no gradient w.r.t. the input
+    eigenvalues.  It forces each batch slice to CPU internally.  Use this
+    function for logging, visualisation, and monitoring ONLY.  For any use
+    case where gradients need to flow back through the fingerprint (e.g. a
+    spectral entropy training objective) use lambda_fingerprint_soft() instead.
+
+    Previously named lambda_fingerprint().  That name is preserved as a
+    backwards-compat alias pointing here.
 
     Parameters
     ----------
@@ -401,6 +524,10 @@ def lambda_fingerprint(
             ).to(device)
             fp[b] = counts / (counts.sum() + 1e-8)
     return fp
+
+
+# backwards-compat alias -- existing call sites continue to work unchanged.
+lambda_fingerprint = lambda_fingerprint_hard
 
 
 # ---------------------------------------------------------------------------
