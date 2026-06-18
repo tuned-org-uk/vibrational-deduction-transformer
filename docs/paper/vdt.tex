@@ -75,6 +75,8 @@ where $\Umat_{1:q}$ are the $q$ lowest-frequency eigenvectors of a frozen
 ArrowSpace graph-Laplacian index $\Lmat(\mathcal{I})$, $\Smat$ is a learnable
 coefficient matrix in that eigenbasis, and $\boldsymbol{\omega}$ are mode weights
 drawn from a taumode variational prior.
+Here $\Wmat \in \R^{N \times q}$ where $N$ is the number of graph nodes and
+$q$ is the number of retained spectral modes.
 This loading matrix parametrises a differentiable Laplacian $\Lmat(\mathbf{z})$
 over which a heat-kernel \emph{taumode diffusion} decoder reconstructs the input.
 The objective is a four-term Evidence Lower Bound (ELBO) comprising a
@@ -178,7 +180,8 @@ continuous media~\cite{rayleigh1877}.
 
 Probabilistic PCA (PPCA)~\cite{tipping1999} provides a generative model
 $p(\mathbf{x}|\mathbf{z}) = \normal(\mathbf{W}\mathbf{z}+\boldsymbol{\mu}, \sigma^2\mathbf{I})$
-where $\Wmat \in \R^{D\times q}$ is the loading matrix and $\mathbf{z}\sim\normal(\mathbf{0},\mathbf{I})$.
+where $\Wmat \in \R^{D\times q}$ is the loading matrix, $D$ is the input
+feature dimension, and $\mathbf{z}\sim\normal(\mathbf{0},\mathbf{I})$.
 Variational Autoencoders (VAEs)~\cite{kingma2013} extend this to nonlinear decoders
 by maximising the Evidence Lower Bound
 $\ELBO = \E{\log p(\mathbf{x}|\mathbf{z})} - \KL{q(\mathbf{z}|\mathbf{x})}{p(\mathbf{z})}$.
@@ -200,7 +203,7 @@ matrix.  The key insight is:
 \end{quote}
 
 The VDT operationalises this at the level of the \emph{loading matrix}:
-entries of $\Wmat \in \R^{d \times q}$ can be positive or negative,
+entries of $\Wmat \in \R^{N \times q}$ can be positive or negative,
 modulating the relative magnitude and sign of each eigenvector's contribution
 to the row embeddings of $\Lmat(\mathbf{z})$.  Edge weights themselves remain
 strictly positive (Section~\ref{sec:architecture:laplacian}); the signed
@@ -267,7 +270,9 @@ loss = recon + kl_z + kl_S + kl_tau
     \texttt{WiringEncoder} from \texttt{eigvals\_q}.
     \texttt{log\_var\_S} is a separate output of
     \texttt{SpectralLoadingDecoder} required for the $\mathrm{KL}_S$
-    computation (fix~\#52).}
+    computation (fix~\#52).
+    Note: $N$ is the graph node count; $D$ is the input feature dimension.
+    These differ in practice (e.g.\ CORA: $N{=}2708$, $D{=}1433$).}
   \label{fig:arch}
 \end{figure}
 
@@ -317,9 +322,22 @@ The spectral loading decoder then produces:
   \text{mode weights},
   \label{eq:omega} \\
   \Wmat &= \Umat_{1:q}\,\mathrm{diag}(\boldsymbol{\omega})\,\Smat
-  \;\in\; \R^{d\times q}.
+  \;\in\; \R^{N\times q}.
   \label{eq:W}
 \end{align}
+
+\begin{remark}\label{rem:N-vs-D}
+In Eq.~\eqref{eq:W}, $N$ denotes the \emph{graph node count}---the row
+dimension of the eigenvector matrix $\Umat_{1:q}\in\R^{N\times q}$---and
+is \emph{distinct} from the input feature dimension $D$ used in
+Section~\ref{sec:background:ppca}.  For the PPCA loading matrix
+$\Wmat_{\text{PPCA}}\in\R^{D\times q}$ the row index ranges over feature
+coordinates; here it ranges over graph nodes.
+In CORA, for example, $N=2708$ (nodes) while $D=1433$ (bag-of-words
+feature dimension).  The spectral loading matrix therefore has shape
+$(2708\times q)$, projecting from the $q$-dimensional eigenbasis onto
+all $N$ graph nodes---not onto feature coordinates.
+\end{remark}
 
 Equation~\eqref{eq:W} is the central structural commitment of the VDT:
 the loading matrix lives in the Laplacian eigenbasis.
@@ -333,7 +351,7 @@ biased KL gradients.
 \subsection{DifferentiableLaplacian}
 \label{sec:architecture:laplacian}
 
-The loading matrix $\Wmat$ is converted to a graph Laplacian by:
+The loading matrix $\Wmat\in\R^{N\times q}$ is converted to a graph Laplacian by:
 
 \begin{equation}
   w_{ij}(\Wmat) = w_{ij}^{\text{base}} \cdot \sigma\!\left(-\|\Wmat_i - \Wmat_j\|^2\right),
@@ -342,10 +360,11 @@ The loading matrix $\Wmat$ is converted to a graph Laplacian by:
   \label{eq:difflaplacian}
 \end{equation}
 
-where $\sigma$ is the logistic sigmoid and $w_{ij}^{\text{base}}$ is a frozen
-base-graph weight.  Since $\|\Wmat_i - \Wmat_j\|^2 \geq 0$ by definition,
-$\sigma(-\|\Wmat_i - \Wmat_j\|^2) \in (0, 0.5]$, so all edge weights are
-\emph{strictly positive} and lie in $(0,\, w_{ij}^{\text{base}}/2]$.
+where $\sigma$ is the logistic sigmoid, $w_{ij}^{\text{base}}$ is a frozen
+base-graph weight, and $\Wmat_i \in \R^q$ denotes the $i$-th row of $\Wmat$
+(the spectral embedding of node $i$).  Since $\|\Wmat_i - \Wmat_j\|^2 \geq 0$
+by definition, $\sigma(-\|\Wmat_i - \Wmat_j\|^2) \in (0, 0.5]$, so all edge
+weights are \emph{strictly positive} and lie in $(0,\, w_{ij}^{\text{base}}/2]$.
 The construction remains fully differentiable through $\Wmat$.
 
 Quantum-like interference in the heat kernel does not arise here from
@@ -528,8 +547,8 @@ At the prior mean ($\mathbf{z}=\mathbf{0}$) the decoder emits a
   \label{eq:artefact}
 \end{equation}
 
-where $\hat{\mathbf{w}}_k$ is the $k$-th column of $\hat{\Wmat}$ and
-$d_\theta(\hat{\mathbf{w}}_k)$ is the decoder response at spectral direction $k$.
+where $\hat{\mathbf{w}}_k\in\R^N$ is the $k$-th column of $\hat{\Wmat}\in\R^{N\times q}$
+and $d_\theta(\hat{\mathbf{w}}_k)$ is the decoder response at spectral direction $k$.
 $\Smat_{\mathrm{mem}}$ is a Hopfield outer-product memory matrix~\cite{hopfield1982}.
 
 \subsection{Phase 2: Spectral Memory Transformer}
