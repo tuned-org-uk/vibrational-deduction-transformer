@@ -383,18 +383,23 @@ cancellation~\cite{aaronson2013}.
 \subsection{DiffusionDecoder (TauModeDiffusion)}
 \label{sec:architecture:diffusion}
 
-The decoder applies a truncated heat kernel to the embedding table $\mathbf{E}$:
+The decoder applies a truncated heat kernel to the embedding table $\mathbf{E}$
+and returns the heat-diffused row for each queried node:
 
 \begin{equation}
   \mathbf{K}_\tau = \Umat_{\tau}\,\exp(-\tau\,\boldsymbol{\Lambda}_{\tau})\,\Umat_{\tau}\T,
-  \quad
-  \hat{\mathbf{x}} = (\mathbf{K}_\tau\,\mathbf{E})_{[\text{node\_idx}]} + \text{MLP}(\mathbf{z}_q),
+  \qquad
+  \hat{\mathbf{x}} = \bigl(\mathbf{K}_\tau\,\mathbf{E}\bigr)_{[\text{node\_idx}]},
   \label{eq:diffusion}
 \end{equation}
 
 where the summation is truncated to the leading $\tau_{\text{modes}}$ eigenpairs
-of $\Lmat(\mathbf{z})$.  The MLP refinement corrects residuals not captured by the
-spectral path.  The heat kernel $\mathbf{K}_\tau$ is a real symmetric
+of $\Lmat(\mathbf{z})$, and $\mathbf{E}\in\R^{N\times D}$ is the frozen node
+embedding table.
+The reconstruction is purely spectral: no MLP residual correction is
+applied inside \texttt{TauModeDiffusion} or in
+\texttt{WiringAutoencoder.forward()} after the diffusion step.
+The heat kernel $\mathbf{K}_\tau$ is a real symmetric
 positive-semi-definite operator---the real-valued analogue of a quantum
 channel~\cite{aaronson2013,belkin2003}.
 
