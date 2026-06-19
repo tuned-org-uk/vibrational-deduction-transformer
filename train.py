@@ -300,8 +300,8 @@ def main() -> None:
         warnings.simplefilter("always")
         stability_issues = pre_training_checks(
             L_f.cpu(),
-            mass_diag=_mass_for_check.M_diag,
             dt_init=tc.get("dt_init", 0.05),
+            mass_diag=_mass_for_check.M_diag,
         )
     if stability_issues:
         for msg in stability_issues:

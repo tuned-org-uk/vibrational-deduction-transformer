@@ -323,8 +323,8 @@ _CHECKS_ORDER = [
 
 def pre_training_checks(
     L_f: torch.Tensor,
+    M_diag: torch.Tensor,
     dt_init: float,
-    M_diag: Optional[torch.Tensor] = None,
     **kwargs,
     # gamma: Optional[torch.Tensor] = None,
     # mass_diag: Optional[torch.Tensor] = None,
@@ -380,9 +380,9 @@ def pre_training_checks(
         Diagonal mass matrix.
     dt_init : float
         Initial time step chosen by the caller.
-    gamma : Tensor  shape (d,) or None
+    gamma (optional) : Tensor  shape (d,) or None
         Per-feature damping vector.  Skipped when None.
-    kl_sample : float or None
+    kl_sample (optional) : float or None
         A sample ELBO KL value.  Checked for finiteness when provided.
 
     Returns
@@ -452,7 +452,8 @@ def pre_training_checks(
         )
 
     # Level 4 -- damping positivity
-    if gamma is not None:
+    if kwargs.get("gamma") is not None:
+        gamma = kwargs.get("gamma")
         if float(gamma.min().item()) <= 0.0:
             warnings_out.append(
                 "gamma contains non-positive entries.  "
@@ -467,7 +468,7 @@ def pre_training_checks(
         )
 
     # Level 6 -- KL finiteness
-    if kl_sample is not None:
+    if kwargs.get("kl_sample") is not None:
         if not math.isfinite(kl_sample):
             warnings_out.append(
                 f"KL sample is non-finite ({kl_sample}).  "
