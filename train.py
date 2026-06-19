@@ -35,6 +35,19 @@ Three safeguards added that were previously dead code:
 3.  spectral_kl_health_check -- called at the end of each epoch after
     val_metrics is computed.  Failures are printed as [WARN] lines; they
     do not abort training.
+
+active_modes wiring (issue #77)
+--------------------------------
+spectral_kl_health_check requires an integer active_modes count that the
+model forward pass does not yet expose.  Until issue #77 is resolved the
+call site uses val_metrics.get('N_active', _q) which:
+  - falls back to _q (all modes treated as active) when the model does
+    not return N_active -- Option A guard, prevents the TypeError at
+    stability.py:528
+  - automatically picks up the real value when the model is wired up
+    per issue #77 -- no further change to train.py required at that point
+N_active is pre-populated in csv_fields and the per-epoch row dict so it
+appears in the training log as soon as the model exposes it.
 """
 from __future__ import annotations
 import argparse
@@ -114,10 +127,13 @@ def train_one_epoch(
 
     Returns
     -------
-    dict with mean loss, recon, kl_z, kl_S, kl_tau, and log_var_saturations
-    over the epoch.  log_var_saturations counts the number of batches that
-    emitted a 'log_var clamp active' RuntimeWarning from WiringEncoder
-    (issue #75).
+    dict with mean loss, recon, kl_z, kl_S, kl_tau, log_var_saturations,
+    and N_active over the epoch.  log_var_saturations counts the number of
+    batches that emitted a 'log_var clamp active' RuntimeWarning from
+    WiringEncoder (issue #75).  N_active is the mean number of spectrally
+    active modes per batch as returned by the model forward pass; it is
+    present in the dict only when the model exposes out['N_active']
+    (issue #77).
     """
     model.train()
     # Keys match WiringAutoencoder.forward() return dict exactly.
@@ -129,6 +145,11 @@ def train_one_epoch(
     # defined by WiringEncoder.log_var_max.  We catch and tally these per
     # epoch so they surface in the CSV and W&B log rather than flooding stderr.
     log_var_saturations = 0
+    # Accumulate N_active when model exposes it (issue #77).
+    # n_active_sum counts total active modes across batches;
+    # n_active_batches counts how many batches returned the value.
+    n_active_sum = 0
+    n_active_batches = 0
     for batch in loader:
         x        = batch["x"].to(device)
         node_idx = batch["node_idx"].to(device)
@@ -146,6 +167,9 @@ def train_one_epoch(
         log_var_saturations += sum(
             1 for w in caught if "log_var clamp active" in str(w.message)
         )
+        if "N_active" in out:
+            n_active_sum += int(out["N_active"])
+            n_active_batches += 1
         out["loss"].backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
         optimizer.step()
@@ -155,6 +179,8 @@ def train_one_epoch(
         n += bs
     metrics = {k: v / n for k, v in totals.items()}
     metrics["log_var_saturations"] = log_var_saturations
+    if n_active_batches > 0:
+        metrics["N_active"] = n_active_sum / n_active_batches
     return metrics
 
 
@@ -184,10 +210,14 @@ def eval_epoch(
     Returns
     -------
     dict with mean loss, recon, kl_z, kl_S, kl_tau over the epoch.
+    N_active is included when the model forward pass exposes out['N_active']
+    (issue #77); the value is the mean over batches in this split.
     """
     model.eval()
     totals = {"loss": 0.0, "recon": 0.0, "kl_z": 0.0, "kl_S": 0.0, "kl_tau": 0.0}
     n = 0
+    n_active_sum = 0
+    n_active_batches = 0
     for batch in loader:
         x        = batch["x"].to(device)
         node_idx = batch["node_idx"].to(device)
@@ -199,11 +229,17 @@ def eval_epoch(
             spectral_cache=spectral_cache,
             L_f=L_f,
         )
+        if "N_active" in out:
+            n_active_sum += int(out["N_active"])
+            n_active_batches += 1
         bs = x.shape[0]
         for k in totals:
             totals[k] += out[k].item() * bs
         n += bs
-    return {k: v / n for k, v in totals.items()}
+    metrics = {k: v / n for k, v in totals.items()}
+    if n_active_batches > 0:
+        metrics["N_active"] = n_active_sum / n_active_batches
+    return metrics
 
 
 def main() -> None:
@@ -308,7 +344,7 @@ def main() -> None:
             _mass_for_check.M_diag,
             tc.get("dt_init", 0.005),
         )
-        print(f"[VDT] dt_init: {tc.get("dt_init", 0.005)}")
+        print(f"[VDT] dt_init: {tc.get('dt_init', 0.005)}")
     spotted = False
     if stability_issues:
         spotted = True
@@ -338,15 +374,23 @@ def main() -> None:
     log_path = save_dir / "training_log.csv"
     # CSV fields aligned with forward() return dict keys.
     # log_var_saturations added per issue #75.
+    # N_active added per issue #77: populated as soon as model exposes it;
+    # empty string written for epochs where the model does not return it.
     csv_fields = [
         "epoch",
         "train_loss", "train_recon", "train_kl_z", "train_kl_S", "train_kl_tau",
         "val_loss",   "val_recon",   "val_kl_z",   "val_kl_S",   "val_kl_tau",
         "log_var_saturations",
+        "N_active",
     ]
     csv_f = open(log_path, "w", newline="")
     csv_writer = csv.DictWriter(csv_f, fieldnames=csv_fields)
     csv_writer.writeheader()
+
+    # _q is the configured number of spectral modes.
+    # Used as the conservative active_modes fallback in spectral_kl_health_check
+    # until the model exposes N_active (issue #77, Option A guard).
+    _q = cfg["model"].get("q", 16)
 
     best_val = float("inf")
     for epoch in range(1, tc["epochs"] + 1):
@@ -380,19 +424,29 @@ def main() -> None:
         # ------------------------------------------------------------------
         # Per-epoch spectral KL health check (issue #75)
         # ------------------------------------------------------------------
-        # N_active is not yet returned by the model forward pass.
-        # Approximate: count modes with non-negligible per-mode kl_tau contribution.
-        # Until model is wired, fall back to q (all modes assumed active).
-        _q = cfg["model"].get("q", 16)
+        # active_modes: use real N_active from val_metrics when the model
+        # exposes it (issue #77 Option B); fall back to _q (all modes
+        # treated as active) otherwise -- Option A guard, prevents the
+        # TypeError at stability.py:528 when N_active is not yet wired.
         kl_health = spectral_kl_health_check(
             val_metrics["kl_z"],
             val_metrics["kl_S"],
             val_metrics["kl_tau"],
-            active_modes=_q,    # conservative: treat all modes as active until model exposes N_active
+            active_modes=val_metrics.get("N_active", _q),
             q=_q,
         )
         if not all(kl_health.values()):
+            failed = [k for k, v in kl_health.items() if not v]
             print(f"  [WARN] KL health check failed: {kl_health}")
+            if "mode_explosion" in failed:
+                print(
+                    "  [WARN] mode_explosion detected -- kl_S is large relative to "
+                    f"q={_q} modes.  Consider increasing lam_s in the config "
+                    "(current: model.lam_s={:.4f}).  "
+                    "See smoke-test analysis in issue #77.".format(
+                        cfg["model"].get("lam_s", 0.01)
+                    )
+                )
 
         row = {
             "epoch":                epoch,
@@ -407,6 +461,7 @@ def main() -> None:
             "val_kl_S":             val_metrics["kl_S"],
             "val_kl_tau":           val_metrics["kl_tau"],
             "log_var_saturations":  log_var_sat,
+            "N_active":             val_metrics.get("N_active", ""),
         }
         csv_writer.writerow(row)
         csv_f.flush()
