@@ -38,16 +38,17 @@ Three safeguards added that were previously dead code:
 
 active_modes wiring (issue #77)
 --------------------------------
-spectral_kl_health_check requires an integer active_modes count that the
-model forward pass does not yet expose.  Until issue #77 is resolved the
-call site uses val_metrics.get('N_active', _q) which:
-  - falls back to _q (all modes treated as active) when the model does
-    not return N_active -- Option A guard, prevents the TypeError at
-    stability.py:528
-  - automatically picks up the real value when the model is wired up
-    per issue #77 -- no further change to train.py required at that point
-N_active is pre-populated in csv_fields and the per-epoch row dict so it
-appears in the training log as soon as the model exposes it.
+spectral_kl_health_check now receives the real N_active from
+val_metrics['N_active'] (returned by WiringAutoencoder.forward() since
+issue #77 was closed).  The fallback val_metrics.get('N_active', _q) is
+still present for backward compatibility with older checkpoints.
+
+mode_explosion warmup (stability.py fix)
+-----------------------------------------
+spectral_kl_health_check accepts epoch and warmup_epochs so the
+mode_explosion warning is suppressed during early training when all modes
+are still active by initialisation.  warmup_epochs is read from
+cfg['training']['kl_warmup_epochs'] (default 5).
 """
 from __future__ import annotations
 import argparse
@@ -303,7 +304,7 @@ def main() -> None:
         ).to(device)
         base_L      = base_lap(base_lap.base_weights.unsqueeze(0)).squeeze(0)  # (N, N)
         
-        # work-around for MLP support
+        # work-around for MPS: eigh runs on CPU
         base_L_cpu = base_L.detach().to("cpu")
         full_eigvals, full_eigvecs = torch.linalg.eigh(base_L_cpu)
         full_eigvals = full_eigvals.to(device)
@@ -389,8 +390,14 @@ def main() -> None:
 
     # _q is the configured number of spectral modes.
     # Used as the conservative active_modes fallback in spectral_kl_health_check
-    # until the model exposes N_active (issue #77, Option A guard).
+    # when the model does not yet expose N_active (backward compat).
     _q = cfg["model"].get("q", 16)
+
+    # Number of epochs during which the mode_explosion *warning* is suppressed.
+    # The flag is still computed and logged; only the RuntimeWarning is gated.
+    # Read from cfg['training']['kl_warmup_epochs'], default 5.
+    # Set to 0 to always emit the warning from epoch 1.
+    _kl_warmup = int(tc.get("kl_warmup_epochs", 5))
 
     best_val = float("inf")
     for epoch in range(1, tc["epochs"] + 1):
@@ -424,29 +431,22 @@ def main() -> None:
         # ------------------------------------------------------------------
         # Per-epoch spectral KL health check (issue #75)
         # ------------------------------------------------------------------
-        # active_modes: use real N_active from val_metrics when the model
-        # exposes it (issue #77 Option B); fall back to _q (all modes
-        # treated as active) otherwise -- Option A guard, prevents the
-        # TypeError at stability.py:528 when N_active is not yet wired.
+        # active_modes: real N_active from val_metrics (issue #77); falls
+        # back to _q when the model version predates issue #77.
+        # epoch and warmup_epochs control when mode_explosion emits a warning
+        # (stability.py fix): the flag is always computed, warning is
+        # suppressed for the first _kl_warmup epochs.
         kl_health = spectral_kl_health_check(
             val_metrics["kl_z"],
             val_metrics["kl_S"],
             val_metrics["kl_tau"],
             active_modes=val_metrics.get("N_active", _q),
             q=_q,
+            epoch=epoch,
+            warmup_epochs=_kl_warmup,
         )
         if not all(kl_health.values()):
-            failed = [k for k, v in kl_health.items() if not v]
             print(f"  [WARN] KL health check failed: {kl_health}")
-            if "mode_explosion" in failed:
-                print(
-                    "  [WARN] mode_explosion detected -- kl_S is large relative to "
-                    f"q={_q} modes.  Consider increasing lam_s in the config "
-                    "(current: model.lam_s={:.4f}).  "
-                    "See smoke-test analysis in issue #77.".format(
-                        cfg["model"].get("lam_s", 0.01)
-                    )
-                )
 
         row = {
             "epoch":                epoch,
