@@ -43,6 +43,12 @@ Two mitigations prevent mode-weight collapse during training:
     q_min=0 to disable.  The penalty is NOT returned as a separate key
     in the output dict -- it is absorbed into 'loss'.
 
+3.  N_active diagnostic: count_active_modes(log_a, log_b) returns the
+    same mean active-mode count as a plain Python int (no gradient graph
+    involvement) and is stored in out['N_active'] (issue #77).  This
+    feeds spectral_kl_health_check in train.py so mode-collapse is
+    detected correctly at the end of every epoch.
+
 MassMatrix and L_f construction (issue #74)
 --------------------------------------------
 The feature-space Laplacian L_f passed to WiringEncoder is built once
@@ -127,7 +133,7 @@ from .laplacian import DifferentiableLaplacian, MassMatrix
 # ---------------------------------------------------------------------------
 
 from .wiring_decoder import SpectralLoadingDecoder
-from .spectral import spectral_basis_kl, tau_mode_kl, active_mode_penalty
+from .spectral import spectral_basis_kl, tau_mode_kl, active_mode_penalty, count_active_modes
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +178,12 @@ class WiringAutoencoder(nn.Module):
         ``nu`` (default 1.0).  Set nu=0 or q_min=0 to disable.
         The penalty is folded into 'loss' and is NOT returned as a
         separate key in the output dict.
+
+    3.  N_active diagnostic (issue #77) -- count_active_modes(log_a, log_b)
+        returns the same mean active-mode count as a plain Python int with
+        no gradient graph involvement.  It is stored as out['N_active'] so
+        train.py can pass it directly to spectral_kl_health_check without
+        a None placeholder.
 
     MassMatrix and L_f (issue #74)
     --------------------------------
@@ -445,7 +457,7 @@ class WiringAutoencoder(nn.Module):
         spectral_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         L_f: Optional[torch.Tensor] = None,
         embedding_table: Optional[torch.Tensor] = None,
-    ) -> dict[str, torch.Tensor]:
+    ) -> dict[str, Any]:
         """
         Single forward pass returning all ELBO components.
 
@@ -482,7 +494,7 @@ class WiringAutoencoder(nn.Module):
 
         Returns
         -------
-        dict with exactly 9 keys:
+        dict with exactly 10 keys:
             loss     -- total loss scalar (minimise this; equals negative ELBO
                         plus the active-mode penalty, up to constants).
                         Computed as recon + kl_z + kl_S + kl_tau + penalty,
@@ -497,6 +509,10 @@ class WiringAutoencoder(nn.Module):
             z        -- (B, latent_dim) latent samples
             mu       -- (B, latent_dim) posterior means
             log_var  -- (B, latent_dim) posterior log-variances
+            N_active -- int, mean count of modes with E[omega_k] > delta
+                        across the batch.  Computed under no_grad via
+                        count_active_modes() (issue #77).  Feeds
+                        spectral_kl_health_check in train.py.
         """
         B = x.shape[0]
 
@@ -574,6 +590,12 @@ class WiringAutoencoder(nn.Module):
         # Folded into 'loss' only -- not returned as a separate output key.
         penalty = active_mode_penalty(log_a, log_b, q_min=self.q_min, nu=self.nu)
 
+        # N_active diagnostic (issue #77): plain Python int, no gradient graph.
+        # count_active_modes() shares the E[omega_k] = a/b computation with
+        # active_mode_penalty() but runs under no_grad and returns an int.
+        # The value feeds spectral_kl_health_check in train.py each epoch.
+        n_active = count_active_modes(log_a, log_b)
+
         # Total loss (all four KL terms are non-negative by construction).
         # Minimising this loss is equivalent to maximising the ELBO.
         loss = recon + kl_z + kl_S + kl_tau + penalty
@@ -588,6 +610,7 @@ class WiringAutoencoder(nn.Module):
             "z": z,
             "mu": mu,
             "log_var": log_var,
+            "N_active": n_active,
         }
 
     # ------------------------------------------------------------------
