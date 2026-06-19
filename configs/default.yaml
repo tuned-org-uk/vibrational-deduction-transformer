@@ -34,7 +34,7 @@ model:
                           # Use 1e4 for sparse graphs; 1e3 is recommended for Cora/k-NN.
 
 graph:
-  knn_k: 35               # base kNN graph degree
+  knn_k: 10               # base kNN graph degree
   sigma: 1.2              # RBF kernel bandwidth
   normalised: true        # use normalised Laplacian
   sparse: true            # use sparse COO Laplacian -- avoids materialising (B,N,N) on MPS
