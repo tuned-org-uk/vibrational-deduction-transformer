@@ -380,12 +380,16 @@ def main() -> None:
         # ------------------------------------------------------------------
         # Per-epoch spectral KL health check (issue #75)
         # ------------------------------------------------------------------
+        # N_active is not yet returned by the model forward pass.
+        # Approximate: count modes with non-negligible per-mode kl_tau contribution.
+        # Until model is wired, fall back to q (all modes assumed active).
+        _q = cfg["model"].get("q", 16)
         kl_health = spectral_kl_health_check(
             val_metrics["kl_z"],
             val_metrics["kl_S"],
             val_metrics["kl_tau"],
-            active_modes=None,   # wire up when N_active is returned by model
-            q=cfg["model"].get("q", 16),
+            active_modes=_q,    # conservative: treat all modes as active until model exposes N_active
+            q=_q,
         )
         if not all(kl_health.values()):
             print(f"  [WARN] KL health check failed: {kl_health}")
