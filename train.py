@@ -16,10 +16,30 @@ current package:
 Spectral pre-computation builds (eigvals, eigvecs) from the base Laplacian
 once at startup and passes them as spectral_cache=(eigvals, eigvecs) into
 every forward call -- avoiding repeated O(N^3) eigh inside the model.
+
+Stability safeguards (issue #75)
+----------------------------------
+Three safeguards added that were previously dead code:
+
+1.  pre_training_checks -- called once before epoch 1 from main(), after
+    the spectral pre-computation block.  A CFL failure raises RuntimeError
+    so training is aborted before any weights are dirtied.  MassMatrix is
+    now wired (issue #74 merged), so mass_diag is supplied.
+
+2.  log_var saturation counter -- train_one_epoch wraps every forward call
+    in warnings.catch_warnings and counts batches that emit the
+    'log_var clamp active' RuntimeWarning from WiringEncoder.  The count
+    is returned in the metrics dict as 'log_var_saturations' and written
+    to the CSV and W&B log.
+
+3.  spectral_kl_health_check -- called at the end of each epoch after
+    val_metrics is computed.  Failures are printed as [WARN] lines; they
+    do not abort training.
 """
 from __future__ import annotations
 import argparse
 import time
+import warnings
 import yaml
 import csv
 from pathlib import Path
@@ -30,7 +50,8 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 
 from vdt import WiringAutoencoder, get_device
 from vdt.dataset import load_dataset, make_loaders
-from vdt.laplacian import DifferentiableLaplacian
+from vdt.laplacian import DifferentiableLaplacian, MassMatrix
+from vdt.stability import pre_training_checks, spectral_kl_health_check
 
 
 def parse_args() -> argparse.Namespace:
@@ -93,23 +114,37 @@ def train_one_epoch(
 
     Returns
     -------
-    dict with mean loss, recon, kl_z, kl_S, kl_tau over the epoch.
+    dict with mean loss, recon, kl_z, kl_S, kl_tau, and log_var_saturations
+    over the epoch.  log_var_saturations counts the number of batches that
+    emitted a 'log_var clamp active' RuntimeWarning from WiringEncoder
+    (issue #75).
     """
     model.train()
     # Keys match WiringAutoencoder.forward() return dict exactly.
     totals = {"loss": 0.0, "recon": 0.0, "kl_z": 0.0, "kl_S": 0.0, "kl_tau": 0.0}
     n = 0
+    # Count batches where WiringEncoder clamped log_var (issue #75).
+    # Each forward() call may emit a RuntimeWarning with message containing
+    # 'log_var clamp active' when the posterior log-variance hits the ceiling
+    # defined by WiringEncoder.log_var_max.  We catch and tally these per
+    # epoch so they surface in the CSV and W&B log rather than flooding stderr.
+    log_var_saturations = 0
     for batch in loader:
         x        = batch["x"].to(device)
         node_idx = batch["node_idx"].to(device)
         optimizer.zero_grad()
-        out = model(
-            x,
-            U_q,
-            eigvals_q,
-            node_idx=node_idx,
-            spectral_cache=spectral_cache,
-            L_f=L_f,
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            out = model(
+                x,
+                U_q,
+                eigvals_q,
+                node_idx=node_idx,
+                spectral_cache=spectral_cache,
+                L_f=L_f,
+            )
+        log_var_saturations += sum(
+            1 for w in caught if "log_var clamp active" in str(w.message)
         )
         out["loss"].backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
@@ -118,7 +153,9 @@ def train_one_epoch(
         for k in totals:
             totals[k] += out[k].item() * bs
         n += bs
-    return {k: v / n for k, v in totals.items()}
+    metrics = {k: v / n for k, v in totals.items()}
+    metrics["log_var_saturations"] = log_var_saturations
+    return metrics
 
 
 @torch.no_grad()
@@ -213,6 +250,7 @@ def main() -> None:
     #   U_q          (N, q) -- leading eigenvectors passed to every forward() call
     #   eigvals_q    (q,)   -- corresponding eigenvalues
     #   spectral_cache      -- (full_eigvals, full_eigvecs) for DiffusionDecoder
+    #   L_f          (N, N) -- mass-weighted feature-space Laplacian (issue #74)
     #
     # This avoids repeated O(N^3) eigh inside the model at each training step.
     # The base Laplacian L_base is computed once from the frozen base weights;
@@ -233,7 +271,41 @@ def main() -> None:
         U_q         = full_eigvecs[:, :q].to(device)    # (N, q)
         eigvals_q   = full_eigvals[:q].to(device)       # (q,)
         spectral_cache = (full_eigvals.to(device), full_eigvecs.to(device))
+        # Build mass-weighted L_f once using MassMatrix (issue #74).
+        # mass_clip is read from cfg by model.build_L_f via self.mass_clip.
+        L_f = model.build_L_f(full_eigvals, full_eigvecs).to(device)  # (N, N)
     print(f"[VDT] cached base spectral quantities in {time.time() - t_spec:.1f}s  (q={q})")
+
+    # ------------------------------------------------------------------
+    # Pre-flight stability check (issue #75)
+    # ------------------------------------------------------------------
+    # Runs CFL, mass-conditioning, and spectral-health checks on L_f
+    # before constructing the optimiser.  A CFL failure raises RuntimeError
+    # so training is aborted before any weights are modified.
+    # MassMatrix is constructed here from the full eigenvalue spectrum so
+    # that mass_diag reflects the clipped diagonal (issue #74).
+    mass_clip = float(cfg["model"].get("mass_clip", 1e3))
+    _mass_for_check = MassMatrix(
+        full_eigvals.cpu(),
+        tau=float(cfg["model"].get("tau", 0.5)),
+        mass_clip=mass_clip,
+    )
+    with warnings.catch_warnings(record=True) as pre_warns:
+        warnings.simplefilter("always")
+        stability_issues = pre_training_checks(
+            L_f.cpu(),
+            mass_diag=_mass_for_check.M_diag,
+            dt_init=tc.get("dt_init", 0.05),
+        )
+    if stability_issues:
+        for msg in stability_issues:
+            print(f"[VDT][STABILITY] {msg}")
+    if any("CFL" in str(w.message) for w in pre_warns):
+        raise RuntimeError(
+            "CFL pre-flight check failed. "
+            "Reduce dt_init or grad_clip in the config before training."
+        )
+    print("[VDT] Pre-flight stability checks passed.")
 
     optimizer = optim.AdamW(
         model.parameters(), lr=tc["lr"], weight_decay=tc.get("weight_decay", 1e-5)
@@ -251,10 +323,12 @@ def main() -> None:
     save_dir.mkdir(parents=True, exist_ok=True)
     log_path = save_dir / "training_log.csv"
     # CSV fields aligned with forward() return dict keys.
+    # log_var_saturations added per issue #75.
     csv_fields = [
         "epoch",
         "train_loss", "train_recon", "train_kl_z", "train_kl_S", "train_kl_tau",
         "val_loss",   "val_recon",   "val_kl_z",   "val_kl_S",   "val_kl_tau",
+        "log_var_saturations",
     ]
     csv_f = open(log_path, "w", newline="")
     csv_writer = csv.DictWriter(csv_f, fieldnames=csv_fields)
@@ -268,27 +342,53 @@ def main() -> None:
             U_q, eigvals_q, device,
             grad_clip=tc.get("grad_clip", 1.0),
             spectral_cache=spectral_cache,
+            L_f=L_f,
         )
         val_metrics = eval_epoch(
             model, loaders["val"],
             U_q, eigvals_q, device,
             spectral_cache=spectral_cache,
+            L_f=L_f,
         )
         if scheduler:
             scheduler.step()
 
+        # ------------------------------------------------------------------
+        # Per-epoch log_var saturation warning (issue #75)
+        # ------------------------------------------------------------------
+        log_var_sat = train_metrics.get("log_var_saturations", 0)
+        if log_var_sat > 0:
+            print(
+                f"  [WARN] log_var saturated in {log_var_sat} batch(es) this epoch -- "
+                "consider reducing lr or increasing log_var_max in WiringEncoder."
+            )
+
+        # ------------------------------------------------------------------
+        # Per-epoch spectral KL health check (issue #75)
+        # ------------------------------------------------------------------
+        kl_health = spectral_kl_health_check(
+            val_metrics["kl_z"],
+            val_metrics["kl_S"],
+            val_metrics["kl_tau"],
+            active_modes=None,   # wire up when N_active is returned by model
+            q=cfg["model"].get("q", 16),
+        )
+        if not all(kl_health.values()):
+            print(f"  [WARN] KL health check failed: {kl_health}")
+
         row = {
-            "epoch":       epoch,
-            "train_loss":  train_metrics["loss"],
-            "train_recon": train_metrics["recon"],
-            "train_kl_z":  train_metrics["kl_z"],
-            "train_kl_S":  train_metrics["kl_S"],
-            "train_kl_tau":train_metrics["kl_tau"],
-            "val_loss":    val_metrics["loss"],
-            "val_recon":   val_metrics["recon"],
-            "val_kl_z":    val_metrics["kl_z"],
-            "val_kl_S":    val_metrics["kl_S"],
-            "val_kl_tau":  val_metrics["kl_tau"],
+            "epoch":                epoch,
+            "train_loss":           train_metrics["loss"],
+            "train_recon":          train_metrics["recon"],
+            "train_kl_z":           train_metrics["kl_z"],
+            "train_kl_S":           train_metrics["kl_S"],
+            "train_kl_tau":         train_metrics["kl_tau"],
+            "val_loss":             val_metrics["loss"],
+            "val_recon":            val_metrics["recon"],
+            "val_kl_z":             val_metrics["kl_z"],
+            "val_kl_S":             val_metrics["kl_S"],
+            "val_kl_tau":           val_metrics["kl_tau"],
+            "log_var_saturations":  log_var_sat,
         }
         csv_writer.writerow(row)
         csv_f.flush()

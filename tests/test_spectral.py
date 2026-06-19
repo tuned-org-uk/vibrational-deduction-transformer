@@ -1,5 +1,6 @@
 """
-Unit tests for vdt/spectral.py --  additions: spectral_basis_kl, tau_mode_kl.
+Unit tests for vdt/spectral.py --  additions: spectral_basis_kl, tau_mode_kl,
+lambda_fingerprint_soft.
 
 Acceptance criteria from issue #24
 -----------------------------------
@@ -10,6 +11,18 @@ AC2  spectral_basis_kl is >= 0, scales with lam_s, and is differentiable
 AC3  tau_mode_kl matches a Monte Carlo numerical estimate on (B=4, q=8)
      input to 3 significant figures.
 AC4  No regressions on existing spectral.py symbols.
+
+Acceptance criteria from issue #56
+-----------------------------------
+AC5  lambda_fingerprint_soft is differentiable: eigvals.grad is not None
+     and finite after .backward().
+AC6  lambda_fingerprint_soft output lives on the same device as eigvals
+     (no silent CPU migration).
+AC7  lambda_fingerprint_soft output shape is (B, n_bins) for batched input
+     and (n_bins,) for unbatched input; each row sums to 1.
+AC8  lambda_fingerprint_soft peak bin agrees with lambda_fingerprint_hard
+     to within +/-1 bin on a synthetic well-separated spectrum.
+AC9  lambda_fingerprint alias still resolves (backwards-compat).
 """
 from __future__ import annotations
 import math
@@ -22,6 +35,8 @@ from vdt.spectral import (
     TauModeDiffusion,
     spectral_freq_cost,
     lambda_fingerprint,
+    lambda_fingerprint_hard,
+    lambda_fingerprint_soft,
 )
 
 torch.manual_seed(0)
@@ -230,6 +245,174 @@ class TestNoRegressions:
         assert torch.isfinite(cost)
 
     def test_lambda_fingerprint_importable(self):
+        """Backwards-compat alias must still resolve and return correct shape."""
         L = torch.eye(8).unsqueeze(0)
         fp = lambda_fingerprint(L, tau_modes=4, n_bins=8)
         assert fp.shape == (1, 8)
+
+
+# ---------------------------------------------------------------------------
+# AC5 -- lambda_fingerprint_soft is differentiable w.r.t. eigvals
+# ---------------------------------------------------------------------------
+
+class TestLambdaFingerprintSoftDifferentiability:
+    """
+    Gradient must flow back from the soft-histogram output through eigvals.
+    This is the primary requirement from issue #56: the fingerprint must
+    be usable as a genuine training signal.
+    """
+
+    def test_grad_flows_through_eigvals_batched(self):
+        eigvals = torch.rand(B, Q, requires_grad=True)
+        fp = lambda_fingerprint_soft(eigvals, n_bins=16)
+        # Use entropy as a scalar loss to trigger .backward()
+        loss = -(fp * (fp + 1e-8).log()).sum()
+        loss.backward()
+        assert eigvals.grad is not None, "No gradient on eigvals after backward()"
+        assert torch.isfinite(eigvals.grad).all(), "Non-finite gradient on eigvals"
+
+    def test_grad_flows_through_eigvals_unbatched(self):
+        eigvals = torch.rand(Q, requires_grad=True)
+        fp = lambda_fingerprint_soft(eigvals, n_bins=16)
+        loss = fp.sum()
+        loss.backward()
+        assert eigvals.grad is not None
+        assert torch.isfinite(eigvals.grad).all()
+
+    def test_grad_is_nonzero(self):
+        """Gradient should not be identically zero for a generic input."""
+        eigvals = torch.rand(B, Q, requires_grad=True)
+        fp = lambda_fingerprint_soft(eigvals, n_bins=16)
+        fp.sum().backward()
+        assert eigvals.grad.abs().sum().item() > 0.0
+
+
+# ---------------------------------------------------------------------------
+# AC6 -- device consistency
+# ---------------------------------------------------------------------------
+
+class TestLambdaFingerprintSoftDevice:
+    """
+    Output device must match input device.  The original torch.histc
+    implementation forced CPU; lambda_fingerprint_soft must not.
+    """
+
+    def test_output_on_cpu_for_cpu_input(self):
+        eigvals = torch.rand(B, Q)
+        fp = lambda_fingerprint_soft(eigvals, n_bins=16)
+        assert fp.device == eigvals.device
+
+    @pytest.mark.skipif(
+        not torch.cuda.is_available(),
+        reason="CUDA not available",
+    )
+    def test_output_on_cuda_for_cuda_input(self):
+        eigvals = torch.rand(B, Q).cuda()
+        fp = lambda_fingerprint_soft(eigvals, n_bins=16)
+        assert fp.device.type == "cuda"
+
+    @pytest.mark.skipif(
+        not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()),
+        reason="MPS not available",
+    )
+    def test_output_on_mps_for_mps_input(self):
+        eigvals = torch.rand(B, Q).to("mps")
+        fp = lambda_fingerprint_soft(eigvals, n_bins=16)
+        assert fp.device.type == "mps"
+
+
+# ---------------------------------------------------------------------------
+# AC7 -- output shape and normalisation
+# ---------------------------------------------------------------------------
+
+class TestLambdaFingerprintSoftShape:
+
+    def test_batched_shape(self):
+        eigvals = torch.rand(B, Q)
+        fp = lambda_fingerprint_soft(eigvals, n_bins=32)
+        assert fp.shape == (B, 32), f"Expected ({B}, 32), got {fp.shape}"
+
+    def test_unbatched_shape(self):
+        eigvals = torch.rand(Q)
+        fp = lambda_fingerprint_soft(eigvals, n_bins=16)
+        assert fp.shape == (16,), f"Expected (16,), got {fp.shape}"
+
+    def test_each_row_sums_to_one(self):
+        eigvals = torch.rand(B, Q)
+        fp = lambda_fingerprint_soft(eigvals, n_bins=32)
+        row_sums = fp.sum(dim=-1)
+        assert torch.allclose(row_sums, torch.ones(B), atol=1e-5), (
+            f"Row sums not all 1.0: {row_sums}"
+        )
+
+    def test_unbatched_sums_to_one(self):
+        eigvals = torch.rand(Q)
+        fp = lambda_fingerprint_soft(eigvals, n_bins=16)
+        assert fp.sum().item() == pytest.approx(1.0, abs=1e-5)
+
+    def test_all_non_negative(self):
+        eigvals = torch.rand(B, Q)
+        fp = lambda_fingerprint_soft(eigvals, n_bins=32)
+        assert (fp >= 0).all()
+
+
+# ---------------------------------------------------------------------------
+# AC8 -- soft histogram peak agrees with hard histogram on well-separated
+#        synthetic spectrum
+# ---------------------------------------------------------------------------
+
+class TestLambdaFingerprintSoftVsHard:
+    """
+    On a synthetic eigenvalue cluster placed at a known frequency, the
+    dominant bin in lambda_fingerprint_soft should agree with the dominant
+    bin in lambda_fingerprint_hard to within +/-1 bin.
+
+    Synthetic spectrum: N=32 eigenvalues clustered tightly around 1.0
+    (mid-range of the normalised Laplacian [0, 2]).  The majority of
+    eigenvalue mass should map to bins near the midpoint of the range.
+    """
+
+    def test_peak_bin_agreement(self):
+        N_BINS = 32
+        # Cluster all eigenvalues near 1.0 with tiny noise
+        torch.manual_seed(7)
+        eigvals_1d = torch.ones(16) + torch.randn(16) * 0.02  # cluster at lam ~ 1.0
+        eigvals_1d = eigvals_1d.clamp(0.0, 2.0)
+
+        # Soft fingerprint (differentiable)
+        fp_soft = lambda_fingerprint_soft(
+            eigvals_1d.unsqueeze(0), n_bins=N_BINS, lam_max=2.0, bandwidth=0.05
+        ).squeeze(0)  # (N_BINS,)
+
+        # Hard fingerprint -- wrap as (1, N, N) dummy Laplacian and pass
+        # pre-computed eigvals to skip the eigensolver.
+        dummy_L = torch.eye(16).unsqueeze(0)  # (1, 16, 16)
+        fp_hard = lambda_fingerprint_hard(
+            dummy_L, tau_modes=16, n_bins=N_BINS,
+            eigvals=eigvals_1d.unsqueeze(0),
+        ).squeeze(0)  # (N_BINS,)
+
+        peak_soft = fp_soft.argmax().item()
+        peak_hard = fp_hard.argmax().item()
+
+        assert abs(peak_soft - peak_hard) <= 1, (
+            f"Soft peak bin={peak_soft} and hard peak bin={peak_hard} "
+            f"differ by more than 1 bin on a well-separated spectrum."
+        )
+
+
+# ---------------------------------------------------------------------------
+# AC9 -- backwards-compat alias
+# ---------------------------------------------------------------------------
+
+class TestBackwardsCompatAlias:
+
+    def test_lambda_fingerprint_is_hard(self):
+        """lambda_fingerprint must still resolve as lambda_fingerprint_hard."""
+        assert lambda_fingerprint is lambda_fingerprint_hard
+
+    def test_hard_importable_separately(self):
+        assert lambda_fingerprint_hard is not None
+
+    def test_soft_importable_separately(self):
+        assert lambda_fingerprint_soft is not None

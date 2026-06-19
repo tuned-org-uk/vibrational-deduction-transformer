@@ -257,6 +257,15 @@ def log_preconditioner_stability(
     Hessian approximation: H_prec = sigma * M_diag * I  +  L_f
     (Tikhonov-preconditioned, ignoring off-diagonal coupling).
 
+    Note on MassMatrix singularity
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    If MassMatrix was constructed without mass_clip (or with a large
+    mass_clip), M_diag may contain very large entries (~1/eps = 10^6)
+    near lambda = 1.  These will dominate H_prec and produce an
+    unrealistically large L_sigma_M and kappa_H_prec.  Construct
+    MassMatrix with mass_clip=1e3 to prevent this (see MassMatrix
+    docstring and docs/04-stability.md section 7).
+
     Parameters
     ----------
     A : Tensor  shape (N, N)
@@ -344,6 +353,23 @@ def pre_training_checks(
       zero-multiplicity property holds; the non-zero eigenvalues shift but
       each component still contributes exactly one zero.
 
+    Level 3 -- mass matrix conditioning
+    ------------------------------------
+    A high conditioning ratio (> 100) at level 3 may be caused by the
+    MassMatrix singularity at lambda = 1 rather than genuine Laplacian
+    ill-conditioning.  For a normalised symmetric Laplacian, eigenvalues
+    lie in [0, 2] and the Rayleigh-damping mass M = 1/(1 - lambda^tau)
+    diverges at lambda = 1.  Regular graphs and k-NN graphs on uniform
+    point clouds commonly have spectral density near lambda = 1.
+
+    If you see this warning and your graph is geometrically well-behaved,
+    reconstruct MassMatrix with mass_clip=1e3::
+
+        mass = MassMatrix(eigvals, tau=0.5, mass_clip=1e3)
+
+    This clamps the singularity without affecting modes far from lambda = 1.
+    See MassMatrix docstring and docs/04-stability.md section 7 for details.
+
     Parameters
     ----------
     L_f : Tensor  shape (N, N) or (B, N, N)
@@ -409,11 +435,18 @@ def pre_training_checks(
         )
 
     # Level 3 -- mass matrix conditioning
+    # A high ratio here may be caused by the MassMatrix singularity at
+    # lambda = 1 rather than genuine Laplacian ill-conditioning.  See the
+    # docstring above and MassMatrix docstring for guidance on mass_clip.
     cond = float(M_diag.max().item()) / max(float(M_diag.min().item()), 1e-8)
     if cond > 100.0:
         warnings_out.append(
             f"MassMatrix conditioning ratio {cond:.1f} > 100. "
-            "Laplacian may be poorly conditioned (docs//04-stability.md S7)."
+            "This may be caused by the Rayleigh-damping singularity at lambda=1 "
+            "(common for regular and k-NN graphs on uniform point clouds). "
+            "If the graph is otherwise well-behaved, reconstruct MassMatrix with "
+            "mass_clip=1e3 to suppress this warning. "
+            "See MassMatrix docstring and docs/04-stability.md S7."
         )
 
     # Level 4 -- damping positivity

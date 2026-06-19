@@ -31,6 +31,7 @@ Typical usage
 """
 from __future__ import annotations
 
+import warnings
 from typing import Optional, Tuple
 
 import torch
@@ -154,6 +155,28 @@ class WiringEncoder(nn.Module):
     use_lambda_features=True, or for input_dim alone otherwise, so the
     projection dimension is always consistent with what forward() feeds in.
 
+    log_var clamping
+    ----------------
+    The posterior log-variance is clamped to [-10, 4] before the
+    reparameterisation sampling step.  This corresponds to sigma in
+    [exp(-5), exp(2)] ~ [0.007, 7.4]::
+
+        log_var = -10  ->  sigma = exp(-5) ~ 0.007  (very narrow posterior)
+        log_var =   4  ->  sigma = exp( 2) ~ 7.4    (very wide posterior)
+
+    - Lower bound -10 (sigma ~ 0.007): prevents numerical underflow in
+      exp(0.5 * log_var) and prevents the posterior from collapsing to a
+      deterministic encoder (which would make the KL diverge to -inf).
+    - Upper bound 4 (sigma ~ 7.4): prevents KL explosion.  This bound is
+      deliberately generous to allow the encoder to maintain high
+      uncertainty during early training.  If kl_z consistently exceeds
+      100 * latent_dim during training, tighten this bound to 2.0
+      (sigma ~ 2.7).
+
+    A RuntimeWarning is emitted in forward() when the raw log_var hits
+    either bound, indicating that the log_var_head has saturated and may
+    need a learning-rate adjustment or gradient clipping.
+
     Parameters
     ----------
     input_dim : int
@@ -268,7 +291,7 @@ class WiringEncoder(nn.Module):
         -------
         z       : (B, latent_dim)  reparameterised VAE latent
         mu      : (B, latent_dim)  posterior mean
-        log_var : (B, latent_dim)  posterior log-variance
+        log_var : (B, latent_dim)  posterior log-variance  (clamped to [-10, 4])
         log_a   : (B, q)           Gamma shape log-params (spectral modes)
         log_b   : (B, q)           Gamma rate  log-params (spectral modes)
         """
@@ -302,8 +325,22 @@ class WiringEncoder(nn.Module):
         z_modal = self.vdt.modal_projection(Q_K, eigvecs)  # (B, d)
 
         # -- Readout -------------------------------------------------------
-        mu      = self.mu_head(z_modal)                         # (B, latent_dim)
-        log_var = self.log_var_head(z_modal).clamp(-10.0, 4.0)  # (B, latent_dim)
+        mu          = self.mu_head(z_modal)           # (B, latent_dim)
+        raw_log_var = self.log_var_head(z_modal)      # (B, latent_dim)  pre-clamp
+
+        # Warn if the head has saturated at either clamp boundary.
+        # Saturation indicates the log_var_head may need a LR adjustment
+        # or gradient clipping (see class docstring for tuning guidance).
+        if (raw_log_var < -10.0).any() or (raw_log_var > 4.0).any():
+            warnings.warn(
+                "WiringEncoder: log_var clamp active -- log_var_head may be "
+                "saturated.  Check for KL explosion (kl_z >> 100*latent_dim) "
+                "or posterior collapse (kl_z near 0).",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
+        log_var = raw_log_var.clamp(-10.0, 4.0)      # (B, latent_dim)
         z       = _reparameterise(mu, log_var)
 
         log_a, log_b = self.mode_weight_head(z_modal)  # (B, q) each

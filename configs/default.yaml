@@ -11,6 +11,11 @@
 # Stability mitigations (issue #68):
 #   - Added a_min, q_min, nu under training: to configure the two
 #     mode-weight collapse mitigations described in Section 5.2.
+#
+# MassMatrix singularity fix (issue #74):
+#   - Added mass_clip under model: so from_config() can forward it to
+#     MassMatrix and suppress the spurious lambda=1 singularity warning
+#     on normalised Laplacians.  See docs/04-stability.md S7.
 
 model:
   version: 2              # canonical v2 path in from_config()
@@ -23,7 +28,9 @@ model:
   n_layers: 4             # VDT blocks inside WiringEncoder
   n_heads: 4              # attention heads per VDT block
   dropout: 0.1            # dropout probability inside WiringEncoder
-  mass_clip: 1000.0
+  mass_clip: 1000.0       # clamp MassMatrix M_diag at lambda=1 singularity (issue #74)
+                          # prevents spurious conditioning warning on normalised Laplacians.
+                          # Use 1e4 for sparse graphs; 1e3 is recommended for Cora/k-NN.
 
 graph:
   knn_k: 15               # base kNN graph degree
