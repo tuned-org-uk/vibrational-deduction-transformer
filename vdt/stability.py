@@ -57,6 +57,21 @@ from vdt.vdt import _gershgorin_lambda_max
 #: combinatorial and normalised symmetric Laplacians.
 _ZERO_EIG_TOL: float = 1e-3
 
+#: Fraction of q above which all-modes-active is flagged as mode_explosion.
+#: A freshly initialised model will have active_modes == q (all modes above
+#: a_min at epoch 1); the check must therefore be a *fractional* upper bound
+#: rather than an equality so that normal early-training behaviour is not
+#: misdiagnosed as pathological.
+#:
+#: Symmetric counterpart to the mode_collapse lower bound (q * 0.1):
+#:   mode_collapse  : active_modes <  q * 0.1   (<10% modes active)
+#:   mode_explosion : active_modes >  q * 0.9   (>90% modes still active)
+#:
+#: The explosion warning is only meaningful after the model has had enough
+#: epochs to begin discriminating modes.  Pass warmup_epochs to
+#: spectral_kl_health_check to suppress the warning during early training.
+_MODE_EXPLOSION_FRAC: float = 0.9
+
 
 def _min_eigval(M: torch.Tensor) -> float:
     """
@@ -143,14 +158,7 @@ def stability_diagnostics(
         CFL_ok              bool  -- dt <= dt_max_CFL  (base; backward compat)
         cfl_Lf_ok           bool  -- dt <= dt_max_CFL_Lf  (authoritative)
         n_underdamped_modes int   -- number of modes with gamma_k < sqrt(lambda_k)
-        frac_underdamped    float -- n_underdamped_modes / N
-        modal_energy_per_depth  list[float] -- ||Q_k||_F^2 / elements per depth step
-        energy_amplified    bool  -- any ||Q_{k+1}|| > ||Q_k|| * 1.05
-        spectral_entropy_K  float -- entropy of normalised eigenvalue distribution
-        min_eig_rho_plus    float -- min eigenvalue across all rho_plus matrices
-        min_eig_rho_minus   float -- min eigenvalue across all rho_minus matrices
-        max_frob_signed     float -- max Frobenius norm of (rho_plus - rho_minus)
-        rho_psd_ok          bool  -- min_eig_rho_plus >= -1e-5 and min_eig_rho_minus >= -1e-5
+        frac_underdamped    float -- n_underdamped_m
     """
     # -- Eigenvalues of the base Laplacian (or L_f if eigvals not provided) --
     L_single = L_f[0] if L_f.dim() == 3 else L_f
@@ -488,17 +496,40 @@ def spectral_kl_health_check(
     kl_tau: float,
     active_modes: int,
     q: int,
+    epoch: int = 0,
+    warmup_epochs: int = 5,
 ) -> dict:
     """
      ELBO health check -- run after each WiringAutoencoder.forward().
 
     Checks all three KL components for sign, finiteness, and explosion.
-    Detects mode collapse (< 10% modes active) and mode explosion (all
-    modes active, meaning no spectral selection is happening).
+    Detects mode collapse (fewer than 10% of modes active) and mode
+    explosion (more than 90% of modes still undifferentiated).
+
+    Mode explosion vs. mode collapse
+    ---------------------------------
+    Both flags use symmetric fractional thresholds against q:
+
+      mode_collapse  : active_modes <  q * 0.1   -- fewer than 10% active
+      mode_explosion : active_modes >  q * 0.9   -- more than 90% active
+
+    The threshold constant is _MODE_EXPLOSION_FRAC = 0.9 (module level).
+
+    A freshly initialised model will have active_modes == q (all q modes
+    above a_min) because the Gamma shape parameters log_a are initialised
+    near zero.  This is normal early-training behaviour and NOT a sign of
+    pathology.  The mode_explosion flag is only a meaningful signal after
+    the model has had enough epochs for log_a to diverge across modes;
+    pass warmup_epochs to suppress the warning during that period.
+
+    The flag is always computed and returned regardless of warmup_epochs
+    so that it appears in the CSV log from epoch 1.  Only the warning.warn
+    call is gated by the warmup guard.
 
     Emits warnings.warn on:
-      - mode_collapse: active_modes < 0.1 * q
-      - kl explosion: any KL component > 1e4
+      - mode_collapse : active_modes < q * 0.1  (always, no warmup guard)
+      - mode_explosion: active_modes > q * 0.9  (only when epoch >= warmup_epochs)
+      - kl explosion  : any KL component > 1e4
 
     Parameters
     ----------
@@ -509,9 +540,19 @@ def spectral_kl_health_check(
     kl_tau : float
         Mode-weight KL from tau_mode_kl().  Should be > 0.
     active_modes : int
-        Number of modes with omega_k above a relevance threshold (caller-computed).
+        Number of modes with E[omega_k] above a relevance threshold.
+        Obtained from out['N_active'] returned by WiringAutoencoder.forward()
+        (issue #77).  Pass val_metrics.get('N_active', q) from train.py.
     q : int
         Total number of latent modes.
+    epoch : int
+        Current training epoch (0-indexed).  Used only to gate the
+        mode_explosion warning against warmup_epochs.  Default 0.
+    warmup_epochs : int
+        Number of initial epochs during which the mode_explosion *warning*
+        is suppressed.  The flag is still computed and returned.  Default 5.
+        Set to 0 to always emit the warning.  Typical values: 5-10 for
+        small graphs, 10-20 for large graphs with slow spectral convergence.
 
     Returns
     -------
@@ -520,19 +561,30 @@ def spectral_kl_health_check(
         kl_S_ok        bool  -- kl_S > 0
         kl_tau_ok      bool  -- kl_tau > 0
         mode_collapse  bool  -- active_modes < q * 0.1
-        mode_explosion bool  -- active_modes == q
+        mode_explosion bool  -- active_modes > q * _MODE_EXPLOSION_FRAC  (0.9)
     """
     kl_z_ok        = (kl_z > 0.0) and (kl_z < 1e4)
     kl_S_ok        = kl_S > 0.0
     kl_tau_ok      = kl_tau > 0.0
     mode_collapse  = active_modes < q * 0.1
-    mode_explosion = active_modes == q
+    mode_explosion = active_modes > q * _MODE_EXPLOSION_FRAC
 
     if mode_collapse:
         warnings.warn(
             f"spectral_kl_health_check: mode collapse detected -- "
             f"only {active_modes}/{q} modes active (<10%). "
             "Consider reducing tau or increasing the spectral diversity loss.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+
+    if mode_explosion and epoch >= warmup_epochs:
+        warnings.warn(
+            f"spectral_kl_health_check: mode explosion at epoch {epoch} -- "
+            f"{active_modes}/{q} modes active (>{int(_MODE_EXPLOSION_FRAC * 100)}%). "
+            "Spectral selection has not yet occurred.  "
+            f"If this persists beyond epoch {warmup_epochs}, consider "
+            "increasing lam_s or the active-mode penalty weight nu.",
             RuntimeWarning,
             stacklevel=2,
         )
