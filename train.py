@@ -300,13 +300,15 @@ def main() -> None:
         warnings.simplefilter("always")
         stability_issues = pre_training_checks(
             L_f.cpu(),
-            dt_init=tc.get("dt_init", 0.05),
-            mass_diag=_mass_for_check.M_diag,
+            _mass_for_check.M_diag,
+            tc.get("dt_init", 0.005),
         )
+    spotted = False
     if stability_issues:
+        spotted = True
         for msg in stability_issues:
             print(f"[VDT][STABILITY] {msg}")
-    if any("CFL" in str(w.message) for w in pre_warns):
+    if spotted is True:
         raise RuntimeError(
             "CFL pre-flight check failed. "
             "Reduce dt_init or grad_clip in the config before training."

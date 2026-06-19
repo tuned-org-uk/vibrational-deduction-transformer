@@ -294,13 +294,16 @@ class DifferentiableLaplacian(nn.Module):
     @property
     def lambda_max(self) -> float:
         """
-        Largest eigenvalue of the base Laplacian.  Scalar float.  Cached.
+        Largest eigenvalue of the base Laplacian. Scalar float. Cached.
 
         For a normalised symmetric Laplacian the value lies in [0, 2].
+        On MPS, eigvalsh is executed on CPU because the operator is not
+        implemented natively.
         """
         if self._lambda_max is None:
             L = self.base_laplacian.detach()
-            eigs = torch.linalg.eigvalsh(L)
+            L_cpu = L.to("cpu")
+            eigs = torch.linalg.eigvalsh(L_cpu)
             self._lambda_max = float(eigs.max().clamp(min=0.0))
         return self._lambda_max
 

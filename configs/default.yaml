@@ -58,6 +58,7 @@ training:
                # Set to 0 to disable the penalty entirely.
   nu: 1.0      # Lagrange weight for the active-mode penalty term;
                # added to total ELBO loss.  Set to 0.0 to disable.
+  dt_init: 0.005
 
 dataset:
   name: cora              # cora | pubmed | mnist | custom
