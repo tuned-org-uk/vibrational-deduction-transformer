@@ -30,7 +30,7 @@ model:                    # taken from default.yml
   mass_clip: 1000.0       # suppress lambda=1 MassMatrix singularity (issue #74)
 
 graph:
-  knn_k: 25               # slightly larger than mps.yaml's 10 -- reduces disconnection risk
+  knn_k: 35               # slightly larger than mps.yaml's 10 -- reduces disconnection risk
   sigma: 1.2              # match default.yaml (mps.yaml had 0.5 -- too narrow for Cora)
   normalised: true
   sparse: true            # lever 1: never materialise (B, N, N)
