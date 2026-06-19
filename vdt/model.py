@@ -361,6 +361,18 @@ class WiringAutoencoder(nn.Module):
             tau_modes=tau_modes,
         )
         self._laplacian = laplacian
+    
+    @classmethod
+    def from_config(cls, cfg: dict, E: torch.Tensor) -> "WiringAutoencoder":
+        """
+        Construct a WiringAutoencoder from the repository config dict.
+
+        This classmethod preserves compatibility with call sites such as
+        `WiringAutoencoder.from_config(cfg, E)` used by train.py, while
+        delegating the actual version dispatch to the module-level
+        `from_config(cfg, E)` function tested in tests/test_model.py.
+        """
+        return from_config(cfg, E)
 
     # ------------------------------------------------------------------
     # build_L_f  (issue #74)

@@ -716,8 +716,9 @@ class DifferentiableLaplacian(nn.Module):
         dtype = embeddings.dtype
 
         # Pairwise squared distances
-        diff = embeddings.unsqueeze(1) - embeddings.unsqueeze(0)  # (N, N, D)
-        dist2 = diff.pow(2).sum(dim=-1)  # (N, N)
+        x2 = (embeddings * embeddings).sum(dim=1, keepdim=True)      # (N, 1)
+        dist2 = x2 + x2.transpose(0, 1) - 2.0 * (embeddings @ embeddings.t())
+        dist2 = dist2.clamp(min=0.0)
 
         # Mask diagonal to exclude self-loops from kNN
         dist2_masked = dist2 + torch.eye(N, device=device, dtype=dtype) * 1e9

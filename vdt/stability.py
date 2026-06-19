@@ -323,10 +323,12 @@ _CHECKS_ORDER = [
 
 def pre_training_checks(
     L_f: torch.Tensor,
-    M_diag: torch.Tensor,
-    dt_init: float,
-    gamma: Optional[torch.Tensor] = None,
-    kl_sample: Optional[float] = None,
+    M_diag: Optional[torch.Tensor] = None,
+    **kwargs,
+    # dt_init: float,
+    # gamma: Optional[torch.Tensor] = None,
+    # mass_diag: Optional[torch.Tensor] = None,
+    # kl_sample: Optional[float] = None,
 ) -> List[str]:
     """
     Six-level pre-training checklist from docs//04-stability.md section 7.

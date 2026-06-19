@@ -266,7 +266,13 @@ def main() -> None:
             sparse=use_sparse,
         ).to(device)
         base_L      = base_lap(base_lap.base_weights.unsqueeze(0)).squeeze(0)  # (N, N)
-        full_eigvals, full_eigvecs = torch.linalg.eigh(base_L)                 # (N,), (N, N)
+        
+        # work-around for MLP support
+        base_L_cpu = base_L.detach().to("cpu")
+        full_eigvals, full_eigvecs = torch.linalg.eigh(base_L_cpu)
+        full_eigvals = full_eigvals.to(device)
+        full_eigvecs = full_eigvecs.to(device)                 # (N,), (N, N)
+        
         q           = cfg["model"].get("q", cfg["model"].get("tau_modes", 8))
         U_q         = full_eigvecs[:, :q].to(device)    # (N, q)
         eigvals_q   = full_eigvals[:q].to(device)       # (q,)
