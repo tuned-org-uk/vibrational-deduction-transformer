@@ -21,7 +21,7 @@ model:                    # taken from default.yml
   hidden_dim: 64          # reduced from 256 -- cuts MHA activation by 16x
   q: 8                    # spectral modes -- half of default; covers low-freq structure
   tau_modes: 8            # keep == q as recommended
-  lam_s: 0.01             # spectral basis KL weight -- unchanged from default
+  lam_s: 0.1             # spectral basis KL weight, changed from 0.01
   tau: 0.5                # diffusion time scale -- unchanged
   n_layers: 2             # VDT blocks -- reduced from 4; exercises stack without OOM
   n_heads: 2              # attention heads -- matches small hidden_dim
