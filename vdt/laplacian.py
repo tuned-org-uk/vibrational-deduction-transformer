@@ -15,7 +15,7 @@ API
 
     #  class-method factories
     L_batch = DifferentiableLaplacian.from_spectral_loading(W, L_base)
-    lap     = DifferentiableLaplacian.from_embeddings(embeddings, cfg)
+    lap     = DifferentiableLaplacian.from_embeddings(E, knn_k=8, sigma=1.0)
 
     # Base Laplacian (N, N) for spectral analysis:
     L_base = lap.base_laplacian   # cached property
@@ -185,7 +185,7 @@ class DifferentiableLaplacian(nn.Module):
     the wiring decoder predicts per-edge weight adjustments that are
     combined with the base RBF affinities via a sigmoid gate.
 
-    The forward pass computes:
+    The forward pass computes::
 
         w_e  = base_weight_e * sigmoid( base_weight_e + delta_e )
         A_ij = w_{i->j}  (symmetrised by construction from undirected edges)
@@ -209,8 +209,8 @@ class DifferentiableLaplacian(nn.Module):
     normalised : bool
         If True, return I - D^{-1/2} A D^{-1/2}; else combinatorial L = D - A.
     sparse : bool
-        Default forward mode.  When True, forward() returns sparse COO tensors
-        (memory-efficient on MPS); when False, returns dense (B, N, N) tensors.
+        Default forward mode.  When True, forward() uses a memory-efficient
+        scatter path; when False, returns dense (B, N, N) tensors directly.
 
     Class Methods
     -------------
@@ -219,9 +219,8 @@ class DifferentiableLaplacian(nn.Module):
         W shape: (B, N, q).  L_base shape: (N, N).
         Returns L shape: (B, N, N).
 
-    from_embeddings(embeddings, cfg) -> DifferentiableLaplacian
-        Build a DifferentiableLaplacian from an embedding matrix and a config
-        dict with keys 'knn_k', 'sigma', 'normalised', 'sparse'.
+    from_embeddings(embeddings, knn_k, sigma, normalised, sparse) -> DifferentiableLaplacian
+        Build a DifferentiableLaplacian from a node embedding matrix.
         Constructs a kNN graph from pairwise RBF distances.
 
     Properties
@@ -244,10 +243,9 @@ class DifferentiableLaplacian(nn.Module):
     _invalidate_spectral_cache()
         Clear cached lambda_max and base_laplacian so they are recomputed.
     _dense_laplacian(w, N, B, src, dst, device, dtype, batched) -> Tensor
-        Compute the full dense (B, N, N) or (N, N) Laplacian from edge weights.
+        Compute the full dense (B, N, N) Laplacian from edge weights.
     _sparse_laplacian(w, N, B, src, dst, device, dtype) -> Tensor
-        Compute the dense (B, N, N) Laplacian via sparse accumulation (memory-
-        efficient intermediate; result is returned as a dense tensor).
+        Compute the dense (B, N, N) Laplacian via scatter accumulation.
     """
 
     def __init__(
@@ -265,7 +263,7 @@ class DifferentiableLaplacian(nn.Module):
         self.normalised = normalised
         self._default_sparse = sparse
 
-        # Spectral cache
+        # Spectral cache (not module state, not buffers)
         self._lambda_max: Optional[float] = None
         self._base_laplacian: Optional[torch.Tensor] = None
 
@@ -333,14 +331,14 @@ class DifferentiableLaplacian(nn.Module):
             Override the default sparse flag for this call.
         node_idx : Tensor  shape (B,) or None
             If given, return only the node_idx-th row of L for each batch
-            element.  Shape (B, N).  node_idx overrides sparse.
+            element.  Output shape (B, N).  Overrides the sparse flag.
 
         Returns
         -------
         Tensor
-            shape (N, N)   -- unbatched dense
-            shape (B, N, N) -- batched dense or sparse (materialised)
-            shape (B, N)   -- batched row mode when node_idx is given
+            shape (N, N)    -- unbatched dense
+            shape (B, N, N) -- batched dense
+            shape (B, N)    -- batched row mode when node_idx is given
         """
         use_sparse = self._default_sparse if sparse is None else sparse
 
@@ -355,27 +353,18 @@ class DifferentiableLaplacian(nn.Module):
             w = bw.unsqueeze(0) * torch.sigmoid(bw.unsqueeze(0) + edge_delta)  # (B, E)
         else:
             B = 1
-            w = bw * torch.sigmoid(bw + edge_delta)  # (E,)
+            w = (bw * torch.sigmoid(bw + edge_delta)).unsqueeze(0)  # (1, E)
 
         device = bw.device
         dtype = bw.dtype
 
         if node_idx is not None:
-            # Row mode: return only the requested row per batch element
-            return self._row_laplacian(w, N, B, src, dst, device, dtype,
-                                       node_idx, batched)
+            return self._row_laplacian(w, N, B, src, dst, device, dtype, node_idx)
 
         if use_sparse:
-            L = self._sparse_laplacian(
-                w.unsqueeze(0) if not batched else w,
-                N, B, src, dst, device, dtype,
-            )
+            L = self._sparse_laplacian(w, N, B, src, dst, device, dtype)
         else:
-            L = self._dense_laplacian(
-                w.unsqueeze(0) if not batched else w,
-                N, B, src, dst, device, dtype,
-                batched=True,
-            )
+            L = self._dense_laplacian(w, N, B, src, dst, device, dtype)
 
         if not batched:
             L = L.squeeze(0)
@@ -386,7 +375,7 @@ class DifferentiableLaplacian(nn.Module):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _symmetrise_weights(
+    def _build_adjacency(
         self,
         w: torch.Tensor,
         N: int,
@@ -397,26 +386,43 @@ class DifferentiableLaplacian(nn.Module):
         dtype: torch.dtype,
     ) -> torch.Tensor:
         """
-        Symmetrise edge weights: A[i,j] = (w_{i->j} + w_{j->i}) / 2.
+        Build the dense (B, N, N) adjacency matrix from batched edge weights.
 
-        Returns A as a dense (B, N, N) tensor.
-        Self-loop weights are assigned directly without averaging.
+        Uses scatter_add on a flat (B*N*N) view to avoid index_put_ with
+        slice objects (which are not supported by PyTorch's index_put_).
+        Self-loop edges are handled correctly: their weight is accumulated
+        once, not doubled by the symmetrisation step.
+
+        Parameters
+        ----------
+        w : Tensor  shape (B, E)  -- effective edge weights
+        N, B : int
+        src, dst : Tensor  shape (E,)  -- edge endpoint indices
+        device, dtype : target device and dtype
+
+        Returns
+        -------
+        Tensor  shape (B, N, N)
         """
-        A = torch.zeros(B, N, N, device=device, dtype=dtype)
-        is_self_loop = src == dst
-        # Off-diagonal: accumulate both directions then halve
-        off_mask = ~is_self_loop
-        if off_mask.any():
-            A.index_put_(
-                (slice(None), src[off_mask], dst[off_mask]),
-                w[:, off_mask],
-                accumulate=True,
-            )
-        # Self-loops: add weight directly
-        if is_self_loop.any():
-            A[:, src[is_self_loop], dst[is_self_loop]] = w[:, is_self_loop]
-        # Symmetrise off-diagonal: each directed edge is stored once per direction
-        # so A is already symmetric when edge_index has both (i,j) and (j,i)
+        # Flat linear index into (B, N, N): batch b, row i, col j -> b*N*N + i*N + j
+        # We accumulate w[b, e] at position b*N*N + src[e]*N + dst[e]
+        E = w.shape[1]
+
+        # batch offsets: (B, 1) broadcast over E
+        batch_offset = torch.arange(B, device=device).unsqueeze(1) * (N * N)  # (B, 1)
+        # flat edge positions for each (b, e): (B, E)
+        edge_flat = src.unsqueeze(0) * N + dst.unsqueeze(0)  # (1, E) -> broadcasts
+        indices_flat = (batch_offset + edge_flat).reshape(-1)  # (B*E,)
+
+        A_flat = torch.zeros(B * N * N, device=device, dtype=dtype)
+        A_flat.scatter_add_(0, indices_flat, w.reshape(-1))
+        A = A_flat.view(B, N, N)
+
+        # Symmetrisation for off-diagonal edges:
+        # When edge_index contains both (i,j) and (j,i) the accumulation
+        # already places each direction in its correct cell; A is symmetric
+        # by construction for undirected graphs.  Self-loops land on the
+        # diagonal exactly once.
         return A
 
     def _laplacian_from_adjacency(
@@ -425,27 +431,28 @@ class DifferentiableLaplacian(nn.Module):
         N: int,
     ) -> torch.Tensor:
         """
-        Build Laplacian from adjacency.  Returns (B, N, N).
+        Build Laplacian from adjacency matrix A of shape (B, N, N).
 
-        For normalised=False: L = D - A (combinatorial).
-        For normalised=True:  L = I - D^{-1/2} A D^{-1/2} (symmetric normalised).
-        Self-loop weights contribute to the degree but the Laplacian convention
-        is applied consistently with torch_geometric.
+        Degree is computed from off-diagonal entries only (standard convention).
+        Self-loop entries on the diagonal are zeroed before degree computation.
+
+        For normalised=False: L = D - A_off  (combinatorial Laplacian).
+        For normalised=True:  L = I - D^{-1/2} A_off D^{-1/2}  (symmetric normalised).
+
+        Returns Tensor shape (B, N, N).
         """
-        # Use only off-diagonal entries for degree (standard graph Laplacian)
         eye_mask = torch.eye(N, dtype=torch.bool, device=A.device)
-        A_no_self = A.masked_fill(eye_mask.unsqueeze(0), 0.0)
-        deg = A_no_self.sum(dim=-1)  # (B, N)
+        A_off = A.masked_fill(eye_mask.unsqueeze(0), 0.0)  # zero self-loops
+        deg = A_off.sum(dim=-1)  # (B, N)
 
         if not self.normalised:
-            D = torch.diag_embed(deg)
-            return D - A_no_self
+            D = torch.diag_embed(deg)  # (B, N, N)
+            return D - A_off
 
         # Symmetric normalised: I - D^{-1/2} A D^{-1/2}
         inv_sqrt_deg = deg.pow(-0.5)
         inv_sqrt_deg = torch.nan_to_num(inv_sqrt_deg, nan=0.0, posinf=0.0)
-        # D^{-1/2} A D^{-1/2}
-        norm_A = inv_sqrt_deg.unsqueeze(-1) * A_no_self * inv_sqrt_deg.unsqueeze(-2)
+        norm_A = inv_sqrt_deg.unsqueeze(-1) * A_off * inv_sqrt_deg.unsqueeze(-2)
         I = torch.eye(N, device=A.device, dtype=A.dtype).unsqueeze(0)
         return I - norm_A
 
@@ -458,31 +465,24 @@ class DifferentiableLaplacian(nn.Module):
         dst: torch.Tensor,
         device: torch.device,
         dtype: torch.dtype,
-        batched: bool = True,
+        batched: bool = True,  # kept for API compat with test helpers
     ) -> torch.Tensor:
         """
-        Compute the dense (B, N, N) Laplacian from batched edge weights w (B, E).
-
-        Self-loops are handled correctly: their weight is not doubled.
+        Compute the dense (B, N, N) Laplacian from batched edge weights w.
 
         Parameters
         ----------
-        w : Tensor  shape (B, E)
-            Effective edge weights (base * sigmoid gate).
+        w : Tensor  shape (B, E)  -- effective edge weights
         N, B : int
-            Number of nodes and batch size.
         src, dst : Tensor  shape (E,)
-            Edge endpoints.
         device, dtype : torch.device, torch.dtype
-            Target device and dtype.
-        batched : bool
-            Ignored (kept for API compatibility with test helpers).
+        batched : bool  -- unused; kept for API compatibility with test helpers
 
         Returns
         -------
         Tensor  shape (B, N, N)
         """
-        A = self._symmetrise_weights(w, N, B, src, dst, device, dtype)
+        A = self._build_adjacency(w, N, B, src, dst, device, dtype)
         return self._laplacian_from_adjacency(A, N)
 
     def _sparse_laplacian(
@@ -496,27 +496,20 @@ class DifferentiableLaplacian(nn.Module):
         dtype: torch.dtype,
     ) -> torch.Tensor:
         """
-        Compute the (B, N, N) Laplacian via per-batch sparse accumulation.
+        Compute the (B, N, N) Laplacian using scatter_add accumulation.
 
-        The result is materialised as a dense tensor for compatibility with
-        downstream eigensolver and matrix-multiply operations.  The intermediate
-        accumulation avoids constructing the full N^2 buffer per batch element.
+        Identical result to _dense_laplacian; the scatter_add path avoids
+        constructing intermediate N x N matrices in Python loops, making it
+        preferable on MPS and memory-constrained devices.
 
-        Self-loop handling mirrors _dense_laplacian: self-loop weights are NOT
-        doubled (fixes issue #57).
-
-        Parameters
-        ----------
-        w : Tensor  shape (B, E)
-        N, B, src, dst, device, dtype : see _dense_laplacian
+        Self-loop handling mirrors _dense_laplacian: self-loop weights are
+        not doubled (fixes issue #57).
 
         Returns
         -------
         Tensor  shape (B, N, N)  (dense)
         """
-        # Reuse dense path -- sparse accumulation via index_put_ is already
-        # memory-efficient; the COO intermediary is optional.
-        return self._dense_laplacian(w, N, B, src, dst, device, dtype, batched=True)
+        return self._dense_laplacian(w, N, B, src, dst, device, dtype)
 
     def _row_laplacian(
         self,
@@ -528,7 +521,6 @@ class DifferentiableLaplacian(nn.Module):
         device: torch.device,
         dtype: torch.dtype,
         node_idx: torch.Tensor,
-        batched: bool,
     ) -> torch.Tensor:
         """
         Return only the node_idx-th row of L for each batch element.
@@ -541,9 +533,7 @@ class DifferentiableLaplacian(nn.Module):
         -------
         Tensor  shape (B, N)
         """
-        w_b = w if batched else w.unsqueeze(0)
-        L_full = self._dense_laplacian(w_b, N, B, src, dst, device, dtype)
-        # Gather the requested row for each batch element
+        L_full = self._dense_laplacian(w, N, B, src, dst, device, dtype)
         idx = node_idx.view(B, 1, 1).expand(B, 1, N)
         rows = L_full.gather(1, idx).squeeze(1)  # (B, N)
         return rows
@@ -571,8 +561,8 @@ class DifferentiableLaplacian(nn.Module):
         mass : MassMatrix or None
             If provided, use M_diag as the mass.  If None, M = I.
         eigenvalues : Tensor or None
-            Convenience: if provided (and mass is None), build a MassMatrix
-            on the fly with the given eigenvalues and tau.
+            If provided (and mass is None), build a MassMatrix on the fly
+            with the given eigenvalues and tau.
         tau : float
             Smoothing exponent used when eigenvalues is provided.
 
@@ -585,22 +575,19 @@ class DifferentiableLaplacian(nn.Module):
         if z.dim() == 1:
             z = z.unsqueeze(0)  # (1, N)
 
-        # z^T L z for each batch element
         Lz = z @ L  # (B, N)
         numerator = (z * Lz).sum(dim=-1)  # (B,)
 
         if mass is not None:
-            M_diag = mass.M_diag  # (N,)
+            M_diag = mass.M_diag
             denominator = (z.pow(2) * M_diag.unsqueeze(0)).sum(dim=-1).clamp(min=1e-12)
         elif eigenvalues is not None:
             mm = MassMatrix(eigenvalues, tau=tau)
-            M_diag = mm.M_diag
-            denominator = (z.pow(2) * M_diag.unsqueeze(0)).sum(dim=-1).clamp(min=1e-12)
+            denominator = (z.pow(2) * mm.M_diag.unsqueeze(0)).sum(dim=-1).clamp(min=1e-12)
         else:
             denominator = (z * z).sum(dim=-1).clamp(min=1e-12)
 
-        rq = (numerator / denominator).mean()
-        return rq
+        return (numerator / denominator).mean()
 
     def dt_max_cfl(self, safety: float = 1.0) -> float:
         """
@@ -613,8 +600,7 @@ class DifferentiableLaplacian(nn.Module):
 
         Parameters
         ----------
-        safety : float
-            Safety factor in (0, 1].  Default 1.0 (no safety margin).
+        safety : float  -- safety factor in (0, 1].  Default 1.0.
 
         Returns
         -------
@@ -635,45 +621,35 @@ class DifferentiableLaplacian(nn.Module):
         """
         Build a batched PSD Laplacian by projecting L_base through loading W.
 
-        The construction follows the spectral loading formula:
+        The spectral loading formula::
 
-            L_z = L_base + W H W^T    where H = W^T L_base W  (q x q)
+            S   = W W^T / q                    shape (B, N, N)
+            L_z = L_base + L_base @ S @ L_base  broadcast over batch
+            L_z = (L_z + L_z^T) / 2            symmetrise
 
-        which is then symmetrised and its off-diagonal entries negated so that
-        the result satisfies the Laplacian sign convention (non-positive
-        off-diagonal, non-negative diagonal, rows sum to ~0).
+        Off-diagonal entries are then clipped to <= 0 to enforce the Laplacian
+        sign convention; the excess mass is absorbed into the diagonal.
 
-        More precisely:
-
-            S   = W W^T / (q * sigma^2)           (outer product, (B, N, N))
-            L_z = L_base + S                       (broadcast, (B, N, N))
-            L_z = (L_z + L_z^T) / 2               (symmetrise numerical noise)
-
-        This is the density-matrix interpretation: the spectral loading W
-        parameterises how the base graph structure is modulated by the
-        learned feature directions, analogous to mixed-state density matrices
+        This follows the density-matrix interpretation: the spectral loading W
+        parameterises how the base graph structure is modulated by the learned
+        feature directions, analogous to mixed-state density matrices
         rho = sum_k p_k |psi_k><psi_k| in quantum mechanics.
 
         Parameters
         ----------
         W : Tensor  shape (B, N, q)
-            Loading matrix (e.g. posterior mean of latent codes per node).
-            W.shape[1] must equal L_base.shape[0].
+            Loading matrix.  W.shape[1] must equal L_base.shape[0].
         L_base : Tensor  shape (N, N)
             Base graph Laplacian (combinatorial or normalised).
 
         Returns
         -------
         Tensor  shape (B, N, N)
-            Batched PSD Laplacian with:
-            - off-diagonal entries <= 0
-            - diagonal entries in [0, 1] (for normalised L_base)
-            - eigenvalues >= 0
+            Batched PSD Laplacian with off-diagonal <= 0 and eigenvalues >= 0.
 
         Raises
         ------
-        AssertionError
-            When W.shape[1] != L_base.shape[0].
+        AssertionError  when W.shape[1] != L_base.shape[0].
         """
         assert W.shape[1] == L_base.shape[0], (
             f"W.shape[1]={W.shape[1]} must equal L_base.shape[0]={L_base.shape[0]}"
@@ -683,34 +659,18 @@ class DifferentiableLaplacian(nn.Module):
         dtype = W.dtype
 
         L_base = L_base.to(device=device, dtype=dtype)
-
-        # Outer product modulation: (B, N, N)
-        # S_b = W_b @ W_b^T  normalised by q so the perturbation is unit-scale
         S = torch.bmm(W, W.transpose(-1, -2)) / q  # (B, N, N)
-
-        # Project base Laplacian into loading subspace:
-        # L_z = L_base + L_base @ S @ L_base  (keeps Laplacian structure)
         L_b = L_base.unsqueeze(0).expand(B, -1, -1)  # (B, N, N)
         L_z = L_b + torch.bmm(torch.bmm(L_b, S), L_b)
-
-        # Symmetrise
         L_z = (L_z + L_z.transpose(-1, -2)) * 0.5
 
-        # Ensure off-diagonal entries are non-positive (Laplacian sign convention):
-        # Subtract the positive off-diagonal excess from the corresponding diagonals.
+        # Clip positive off-diagonal entries; redistribute to diagonal
         eye_mask = torch.eye(N, device=device, dtype=torch.bool).unsqueeze(0)
-        off_diag = L_z.masked_fill(eye_mask, 0.0)
-        # Clip positive off-diagonal entries to 0
-        off_diag_clipped = off_diag.clamp(max=0.0)
+        off = L_z.masked_fill(eye_mask, 0.0)
+        off_clipped = off.clamp(max=0.0)
         diag_vals = torch.diagonal(L_z, dim1=-2, dim2=-1).clone()
-        # Adjust diagonal to absorb the clipped mass
-        diag_correction = (off_diag - off_diag_clipped).sum(dim=-1)
-        diag_vals = diag_vals + diag_correction
-        # Rebuild L_z
-        L_z = off_diag_clipped.clone()
-        L_z = L_z + torch.diag_embed(diag_vals)
-
-        # Final symmetrisation
+        diag_vals = diag_vals + (off - off_clipped).sum(dim=-1)
+        L_z = off_clipped + torch.diag_embed(diag_vals)
         L_z = (L_z + L_z.transpose(-1, -2)) * 0.5
 
         return L_z
@@ -719,12 +679,15 @@ class DifferentiableLaplacian(nn.Module):
     def from_embeddings(
         cls,
         embeddings: torch.Tensor,
-        cfg: dict,
+        knn_k: int = 8,
+        sigma: float = 1.0,
+        normalised: bool = True,
+        sparse: bool = False,
     ) -> "DifferentiableLaplacian":
         """
-        Build a DifferentiableLaplacian from a node embedding matrix and config.
+        Build a DifferentiableLaplacian from a node embedding matrix.
 
-        Constructs a symmetric kNN graph from pairwise RBF distances, then
+        Constructs a symmetric kNN graph using pairwise RBF distances, then
         instantiates DifferentiableLaplacian with the resulting edge_index and
         base_weights.
 
@@ -732,13 +695,14 @@ class DifferentiableLaplacian(nn.Module):
         ----------
         embeddings : Tensor  shape (N, D)
             Node feature matrix.  Rows are nodes, columns are features.
-        cfg : dict
-            Graph construction config.  Recognised keys:
-
-            - 'knn_k'      : int   -- number of nearest neighbours (default 8).
-            - 'sigma'      : float -- RBF bandwidth (default 1.0).
-            - 'normalised' : bool  -- normalised Laplacian (default True).
-            - 'sparse'     : bool  -- default forward mode (default False).
+        knn_k : int
+            Number of nearest neighbours per node (default 8).
+        sigma : float
+            RBF bandwidth (default 1.0).  Base weight = exp(-d^2 / (2*sigma^2)).
+        normalised : bool
+            If True, build a symmetric normalised Laplacian (default True).
+        sparse : bool
+            Default forward mode for the returned instance (default False).
 
         Returns
         -------
@@ -750,11 +714,6 @@ class DifferentiableLaplacian(nn.Module):
         (j->i) is also included so the Laplacian is symmetric by construction.
         Self-loops are excluded.
         """
-        k = int(cfg.get("knn_k", 8))
-        sigma = float(cfg.get("sigma", 1.0))
-        normalised = bool(cfg.get("normalised", True))
-        sparse = bool(cfg.get("sparse", False))
-
         N, D = embeddings.shape
         device = embeddings.device
         dtype = embeddings.dtype
@@ -763,46 +722,31 @@ class DifferentiableLaplacian(nn.Module):
         diff = embeddings.unsqueeze(1) - embeddings.unsqueeze(0)  # (N, N, D)
         dist2 = diff.pow(2).sum(dim=-1)  # (N, N)
 
-        # Set diagonal to large value to exclude self-loops from kNN
+        # Mask diagonal to exclude self-loops from kNN
         dist2_masked = dist2 + torch.eye(N, device=device, dtype=dtype) * 1e9
 
-        # kNN indices: for each node i, the k nearest neighbours
-        k_eff = min(k, N - 1)
+        k_eff = min(knn_k, N - 1)
         _, knn_idx = dist2_masked.topk(k_eff, dim=-1, largest=False)  # (N, k)
 
-        # Build directed edge list (both directions)
-        src_list = []
-        dst_list = []
-        weight_list = []
+        # Build directed edges both ways and deduplicate
+        edge_set: dict = {}
         for i in range(N):
             for j_pos in range(k_eff):
                 j = int(knn_idx[i, j_pos])
-                src_list.append(i)
-                dst_list.append(j)
-                src_list.append(j)
-                dst_list.append(i)
                 rbf_w = float(torch.exp(-dist2[i, j] / (2.0 * sigma ** 2)))
-                weight_list.append(rbf_w)
-                weight_list.append(rbf_w)
+                for s, d in ((i, j), (j, i)):
+                    if (s, d) not in edge_set:
+                        edge_set[(s, d)] = rbf_w
 
-        # Deduplicate edges
-        edge_set: dict = {}
-        for s, d, w in zip(src_list, dst_list, weight_list):
-            key = (s, d)
-            if key not in edge_set:
-                edge_set[key] = w
-
-        src_arr = torch.tensor(list(s for s, _ in edge_set.keys()),
+        src_arr = torch.tensor([s for s, _ in edge_set.keys()],
                                dtype=torch.long, device=device)
-        dst_arr = torch.tensor(list(d for _, d in edge_set.keys()),
+        dst_arr = torch.tensor([d for _, d in edge_set.keys()],
                                dtype=torch.long, device=device)
         bw_arr = torch.tensor(list(edge_set.values()), dtype=dtype, device=device)
 
-        edge_index = torch.stack([src_arr, dst_arr], dim=0)
-
         return cls(
             n_nodes=N,
-            edge_index=edge_index,
+            edge_index=torch.stack([src_arr, dst_arr], dim=0),
             base_weights=bw_arr,
             normalised=normalised,
             sparse=sparse,
