@@ -619,61 +619,58 @@ class DifferentiableLaplacian(nn.Module):
         L_base: torch.Tensor,
     ) -> torch.Tensor:
         """
-        Build a batched PSD Laplacian by projecting L_base through loading W.
-
-        The spectral loading formula::
-
-            S   = W W^T / q                    shape (B, N, N)
-            L_z = L_base + L_base @ S @ L_base  broadcast over batch
-            L_z = (L_z + L_z^T) / 2            symmetrise
-
-        Off-diagonal entries are then clipped to <= 0 to enforce the Laplacian
-        sign convention; the excess mass is absorbed into the diagonal.
-
-        This follows the density-matrix interpretation: the spectral loading W
-        parameterises how the base graph structure is modulated by the learned
-        feature directions, analogous to mixed-state density matrices
-        rho = sum_k p_k |psi_k><psi_k| in quantum mechanics.
+        Build a batched symmetric normalised Laplacian from spectral loadings.
 
         Parameters
         ----------
         W : Tensor  shape (B, N, q)
             Loading matrix.  W.shape[1] must equal L_base.shape[0].
         L_base : Tensor  shape (N, N)
-            Base graph Laplacian (combinatorial or normalised).
+            Base graph Laplacian.  Used for shape / device compatibility.
 
         Returns
         -------
         Tensor  shape (B, N, N)
-            Batched PSD Laplacian with off-diagonal <= 0 and eigenvalues >= 0.
-
-        Raises
-        ------
-        AssertionError  when W.shape[1] != L_base.shape[0].
+            Symmetric normalised Laplacian with:
+            - off-diagonal entries <= 0
+            - diagonal entries in [0, 1]
+            - eigenvalues in [0, 2]
         """
         assert W.shape[1] == L_base.shape[0], (
             f"W.shape[1]={W.shape[1]} must equal L_base.shape[0]={L_base.shape[0]}"
         )
+
         B, N, q = W.shape
         device = W.device
         dtype = W.dtype
 
-        L_base = L_base.to(device=device, dtype=dtype)
-        S = torch.bmm(W, W.transpose(-1, -2)) / q  # (B, N, N)
-        L_b = L_base.unsqueeze(0).expand(B, -1, -1)  # (B, N, N)
-        L_z = L_b + torch.bmm(torch.bmm(L_b, S), L_b)
-        L_z = (L_z + L_z.transpose(-1, -2)) * 0.5
+        # Symmetric similarity from spectral loadings
+        S = torch.bmm(W, W.transpose(-1, -2)) / q
+        S = 0.5 * (S + S.transpose(-1, -2))
 
-        # Clip positive off-diagonal entries; redistribute to diagonal
-        eye_mask = torch.eye(N, device=device, dtype=torch.bool).unsqueeze(0)
-        off = L_z.masked_fill(eye_mask, 0.0)
-        off_clipped = off.clamp(max=0.0)
-        diag_vals = torch.diagonal(L_z, dim1=-2, dim2=-1).clone()
-        diag_vals = diag_vals + (off - off_clipped).sum(dim=-1)
-        L_z = off_clipped + torch.diag_embed(diag_vals)
-        L_z = (L_z + L_z.transpose(-1, -2)) * 0.5
+        # Remove self-interaction
+        eye = torch.eye(N, device=device, dtype=dtype).unsqueeze(0)
+        S = S * (1.0 - eye)
 
-        return L_z
+        # Nonnegative adjacency
+        A = torch.relu(S)
+
+        # Symmetric normalised Laplacian
+        deg = A.sum(dim=-1)
+        inv_sqrt_deg = deg.clamp(min=1e-12).pow(-0.5)
+        inv_sqrt_deg = torch.where(
+            deg > 0,
+            inv_sqrt_deg,
+            torch.zeros_like(inv_sqrt_deg),
+        )
+
+        A_norm = inv_sqrt_deg.unsqueeze(-1) * A * inv_sqrt_deg.unsqueeze(-2)
+        I = torch.eye(N, device=device, dtype=dtype).unsqueeze(0)
+        L = I - A_norm
+
+        # Final symmetrisation for numerical stability
+        L = 0.5 * (L + L.transpose(-1, -2))
+        return L
 
     @classmethod
     def from_embeddings(
