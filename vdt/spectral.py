@@ -24,6 +24,10 @@ of the VDT training loop:
                           full Gamma shape collapse.
     active_mode_penalty   soft Lagrange penalty nu * relu(q_min - N_active)
                           that maintains a minimum number of active modes.
+    count_active_modes    diagnostic helper that returns N_active as a
+                          plain Python int (no gradient graph involvement).
+                          Used by model.forward() to populate out['N_active']
+                          for spectral_kl_health_check (issue #77).
 
  soft fingerprint (issue #56):
 
@@ -683,6 +687,56 @@ def tau_mode_kl(
 
 
 # ---------------------------------------------------------------------------
+# count_active_modes  --  diagnostic helper (issue #77)
+# ---------------------------------------------------------------------------
+
+def count_active_modes(
+    log_a: torch.Tensor,
+    log_b: torch.Tensor,
+    delta: float = 0.01,
+) -> int:
+    """
+    Count the mean number of spectrally active modes across a batch.
+
+    A mode k is considered active when its expected value under the Gamma
+    variational posterior exceeds the threshold delta::
+
+        E[omega_k] = a_k / b_k = exp(log_a_k) / exp(log_b_k) > delta
+
+    The result is the mean count over the batch, rounded to the nearest
+    integer and returned as a plain Python int so it can be stored in the
+    output dict and used directly by spectral_kl_health_check without
+    touching the gradient graph.
+
+    This function shares the active-mode counting logic with
+    active_mode_penalty() but is separated so that the diagnostic value
+    is always available from model.forward() regardless of whether the
+    penalty weight nu is zero.
+
+    Parameters
+    ----------
+    log_a : torch.Tensor
+        Log shape parameters.  Shape (B, q).  a = exp(log_a) > 0.
+    log_b : torch.Tensor
+        Log rate parameters.  Shape (B, q).  b = exp(log_b) > 0.
+    delta : float
+        Threshold for classifying a mode as active:  E[omega_k] > delta.
+        Default 0.01.  Must match the delta used in active_mode_penalty()
+        for the health-check result to be consistent with the penalty.
+
+    Returns
+    -------
+    int
+        Mean number of active modes across the batch, in [0, q].
+        Computed under torch.no_grad() so it never introduces graph nodes.
+    """
+    with torch.no_grad():
+        expected_omega = log_a.exp() / log_b.exp()          # (B, q)
+        n_active = (expected_omega > delta).float().sum(dim=-1).mean()
+        return int(round(n_active.item()))
+
+
+# ---------------------------------------------------------------------------
 # active_mode_penalty  --  stability mitigation (issue #68)
 # ---------------------------------------------------------------------------
 
@@ -716,6 +770,11 @@ def active_mode_penalty(
     torch.no_grad() for the active count; gradients only flow through
     the relu(q_min - n_active_mean) path, so the gradient signal is
     sparse (zero when the constraint is satisfied, non-zero otherwise).
+
+    Use count_active_modes() when you need N_active as a plain Python int
+    for logging or health checks (issue #77) -- it avoids recomputing
+    expected_omega a second time when both the penalty and the diagnostic
+    are needed in the same forward pass.
 
     Parameters
     ----------
