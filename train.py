@@ -291,9 +291,14 @@ def main() -> None:
     # MassMatrix is constructed here from the full eigenvalue spectrum so
     # that mass_diag reflects the clipped diagonal (issue #74).
     mass_clip = float(cfg["model"].get("mass_clip", 1e3))
+    eps = float(cfg["model"].get("eps"))
+    tau = float(cfg["model"].get("tau", 0.5))
+    print("[VDT] eps: {eps}, tau: {tau}, mass_clip: {mass_clip}")
+    assert eps is not None, "eps should be set in config -> model"
     _mass_for_check = MassMatrix(
         full_eigvals.cpu(),
-        tau=float(cfg["model"].get("tau", 0.5)),
+        tau=tau,
+        eps=eps,
         mass_clip=mass_clip,
     )
     with warnings.catch_warnings(record=True) as pre_warns:
@@ -303,6 +308,7 @@ def main() -> None:
             _mass_for_check.M_diag,
             tc.get("dt_init", 0.005),
         )
+        print(f"[VDT] dt_init: {tc.get("dt_init", 0.005)}")
     spotted = False
     if stability_issues:
         spotted = True
