@@ -1,45 +1,56 @@
-# Wiring Autoencoder — Apple Silicon (MPS) profile
+# Wiring Autoencoder -- Apple Silicon MPS research baseline
 #
-# Memory-safe defaults for M-series Macs (M1/M2/M3/M4 Pro/Max/Ultra).
-# All three OOM levers are set to their minimal safe values.
+# Merges v2 model API (default.yaml) with MPS memory levers.
+# Uses the smallest model that still exercises all vibrational
+# components: VDT blocks, SpectralLoadingDecoder, MassMatrix,
+# DifferentiableLaplacian, density-matrix loss.
 #
-# Peak memory budget on Cora (N=2708) with these settings:
-#   L(z) sparse COO   : B x E x 4B  = 16 x 40620 x 4  ~  2.5 MB
-#   eigvecs (tau=8)   : B x N x k   = 16 x 2708 x 8   ~  1.4 MB
-#   gradient buffers  : ~2x forward = ~8 MB
-#   model params      : ~10 MB
-#   Total peak        : < 25 MB   (vs ~30 GB without fixes)
+# Peak memory estimate on Cora (N=2708, batch=4):
+#   L(z) sparse COO   : 4 x 40620 x 4   ~  0.6 MB
+#   eigvecs (q=8)     : 4 x 2708 x 8    ~  0.3 MB
+#   MHA activations   : 4 x 2708 x 64   ~  2.8 MB (manageable)
+#   model params      : latent=16,hid=64 ~  5 MB
+#   Total peak        : << 1 GB
 #
 # Usage:
-#   python train.py   --config configs/mps.yaml
-#   python benchmark.py --config configs/mps.yaml --device mps
+#   python train.py --config configs/mps.yaml
 
-model:
-  latent_dim: 32
-  hidden_dim: 256
-  n_wiring_heads: 4
-  tau_modes: 8            # lever 3: half eigvec storage
-  beta: 1.0
-  alpha: 0.1
-  use_lambda_features: true
+model:                    # taken from default.yml
+  version: 2              # use canonical v2 from_config() path
+  latent_dim: 16          # reduced from 32 -- enough for Cora 7-class
+  hidden_dim: 64          # reduced from 256 -- cuts MHA activation by 16x
+  q: 8                    # spectral modes -- half of default; covers low-freq structure
+  tau_modes: 8            # keep == q as recommended
+  lam_s: 0.01             # spectral basis KL weight -- unchanged from default
+  tau: 0.5                # diffusion time scale -- unchanged
+  n_layers: 2             # VDT blocks -- reduced from 4; exercises stack without OOM
+  n_heads: 2              # attention heads -- matches small hidden_dim
+  dropout: 0.1            # unchanged
+  eps: 0.3                # 
+  mass_clip: 1000.0       # suppress lambda=1 MassMatrix singularity (issue #74)
 
 graph:
-  knn_k: 10               # slightly smaller neighbourhood to cut E further
-  sigma: 0.5
+  knn_k: 25               # slightly larger than mps.yaml's 10 -- reduces disconnection risk
+  sigma: 1.2              # match default.yaml (mps.yaml had 0.5 -- too narrow for Cora)
   normalised: true
-  sparse: true            # lever 1: sparse Laplacian — never materialise (B,N,N)
+  sparse: true            # lever 1: never materialise (B, N, N)
 
 training:
-  epochs: 200
-  batch_size: 16          # lever 2: safe batch size for M4 Pro 24 GB
-  mps_batch_size: 16
+  epochs: 50              # smoke-test length; increase once stable
+  batch_size: 4           # lever 2: minimal safe batch for 1B-reduced model on MPS
+  mps_batch_size: 4       # explicit override
   lr: 3.0e-4
   weight_decay: 1.0e-5
   scheduler: cosine
-  warmup_epochs: 10
+  warmup_epochs: 5
   grad_clip: 1.0
   seed: 42
   device: auto
+  density_loss_weight: 1.0
+  a_min: 0.1              # prevent mode-weight collapse
+  q_min: 2                # minimum active modes (reduced from 4, matches q=8)
+  nu: 1.0                 # active-mode penalty weight
+  dt_init: 0.001          # conservative CFL-safe value (well below dynamic bound ~0.012)
 
 dataset:
   name: cora
@@ -49,5 +60,5 @@ dataset:
 logging:
   use_wandb: false
   project: wiring-autoencoder
-  log_every: 10
+  log_every: 1
   save_dir: ./checkpoints

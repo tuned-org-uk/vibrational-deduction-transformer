@@ -293,7 +293,7 @@ def main() -> None:
     mass_clip = float(cfg["model"].get("mass_clip", 1e3))
     eps = float(cfg["model"].get("eps"))
     tau = float(cfg["model"].get("tau", 0.5))
-    print("[VDT] eps: {eps}, tau: {tau}, mass_clip: {mass_clip}")
+    print(f"[VDT] eps: {eps}, tau: {tau}, mass_clip: {mass_clip}")
     assert eps is not None, "eps should be set in config -> model"
     _mass_for_check = MassMatrix(
         full_eigvals.cpu(),
