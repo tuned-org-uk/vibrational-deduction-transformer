@@ -1,7 +1,7 @@
 # Vibrational Deduction Transformer (VDT)
 
 A **Spectral-PPCA Variational Autoencoder** whose generative path is mediated by a
-learned graph wiring (Laplacian) constrained to the eigenbasis of an ArrowSpace index `I`.
+learned graph wiring (Laplacian) constrained to the eigenbasis of an ArrowSpace index $$I$$.
 Post-training, the model emits a **spectral artefact** that initialises a transformer
 with pre-built associative memory.
 
@@ -9,7 +9,7 @@ This architecture is related to NVIB (Nonparametric Variational Information Bott
 It applies pre-built semantic spectral filters and inline memory to a VAE, saving learning
 steps by identifying the object of learning via spectral methods.
 
-The feature-space Laplacian `L_f` (as in Graph Wiring) replaces the basis of the latent
+The feature-space Laplacian $$L_f$$ (as in Graph Wiring) replaces the basis of the latent
 space and the prior over mode weights, leaving reparameterisation itself still diagonal
 and cheap.
 
@@ -27,17 +27,17 @@ Laplacian    AE     Wiring  VDT (this repo)
 
 ## Core Idea
 
-The encoder produces a posterior `q(z|x)` enriched by a lambda-fingerprint from `L(I)`.
-The decoder maps `z` into a **spectral loading matrix**:
+The encoder produces a posterior $$q(z|x)$$ enriched by a lambda-fingerprint from $$L(I)$$.
+The decoder maps $$z$$ into a **spectral loading matrix**:
 
-```
-W = U_{1:q} diag(omega) S
-```
+$$
+W = U_{1:q} diag(\omega) S
+$$
 
-where `U_{1:q}` are the `q` lowest-frequency eigenvectors of the ArrowSpace Laplacian
-`L(I)`, `S` are learnable loadings in that eigenbasis, and `omega` are mode weights drawn
-from a tau-mode prior. `W` then parametrises a differentiable Laplacian `L(z)`, over
-which a tau-mode diffusion reconstructs `x_hat` from the embedding table `E`.
+where $$U_{1:q}$$ are the $$q$$ lowest-frequency eigenvectors of the ArrowSpace Laplacian
+$$L(I)$$, $$S$$ are learnable loadings in that eigenbasis, and $$\omega$$ are mode weights drawn
+from a tau-mode prior. $$W$$ then parametrises a differentiable Laplacian $$L(z)$$, over
+which a tau-mode diffusion reconstructs $$x_hat$$ from the embedding table $$E$$.
 
 ---
 
@@ -50,9 +50,9 @@ L_VDT = E_q[log p(x | z, W)]
       - KL( q(w)  ||  p(w | tau, L)   )   [tau-mode frequency KL -- Gamma vs Exp(tau*lk)]
 ```
 
-The ArrowSpace index `I` enters solely through the pre-computed frozen eigenpair
-`(U_{1:q}, L_{1:q})` of `L(I)` -- no Laplacian is evaluated or inverted at training time.
-Index selection is Bayesian via the ELBO Bayes factor `exp(L(I1) - L(I2))`.
+The ArrowSpace index $$I$$ enters solely through the pre-computed frozen eigenpair
+$$(U_{1:q}, L_{1:q})$$ of $$L(I)$$ -- no Laplacian is evaluated or inverted at training time.
+Index selection is Bayesian via the ELBO Bayes factor $$exp(L(I1) - L(I2))$$.
 
 ---
 
@@ -102,11 +102,11 @@ Input x (B, D)                   Embedding table E (N, D)
 
 Post-training, `extract_spectral_artefact()` builds:
 
-```
-A(I) = { W_hat,  {omega_hat_k},  S_memory }
-```
+$$
+A(I) = { W_{hat},  {\omega_{hat_k}},  S_{memory} }
+$$
 
-`S_memory` is a pre-built outer-product Hopfield matrix keyed on Laplacian eigenvectors
+$$S_{memory}$$ is a pre-built outer-product Hopfield matrix keyed on Laplacian eigenvectors
 (orthonormal by construction, maximising retrieval SNR) that initialises the transformer's
 feed-forward / cross-attention value matrices.
 
@@ -118,8 +118,8 @@ feed-forward / cross-attention value matrices.
 |--------|------|
 | `vdt/encoder.py` | `WiringEncoder` -- VDT attention blocks + lambda-fingerprint; `ModeWeightHead` outputs `(log_a, log_b)` for tau-mode prior |
 | `vdt/vdt.py` | `VDTBlock` stack -- multi-head self-attention over graph eigenbasis; computes `rho_p`, `rho_m` density matrices per block |
-| `vdt/wiring_decoder.py` | `SpectralLoadingDecoder` -- `z, U_q -> (W, omega, S, L_z, log_var_S)`; `W = U_q diag(omega) S`; `log_var_S` from independent head |
-| `vdt/diffusion_decoder.py` | `L(z), E -> x_hat` via tau-mode diffusion + MLP refinement |
+| `vdt/wiring_decoder.py` | `SpectralLoadingDecoder` -- $$z, U_q -> (W, \omega, S, L_z, log_var_S)$$; $$W = U_q diag(\omega) S$$; `log_var_S` from independent head |
+| `vdt/diffusion_decoder.py` | $$L(z), E -> x_hat$$ via taumode diffusion + MLP refinement |
 | `vdt/model.py` | `WiringAutoencoder` -- three-term ELBO; `forward()` returns dict `{loss, recon, kl_z, kl_S, kl_tau, x_hat, z, mu, log_var, N_active}`; `extract_spectral_artefact()` |
 | `vdt/vib_autoencoder.py` | `VibrationalAutoencoder` -- vibrational energy formulation with Rayleigh-Ritz mode selection |
 | `vdt/laplacian.py` | Differentiable Laplacian builder; `from_spectral_loading(W, L_base)`; `MassMatrix` conditioning |
@@ -191,7 +191,7 @@ uv run benchmark.py --dataset cora --output data/Cora/results/ --batch-size 16
 
 ## Flagship Demo -- Spectral Graph Generation
 
-Standard VAEs decode `z` into flat feature vectors. The VDT decodes `z` into a
+Standard VAEs decode $$z$$ into flat feature vectors. The VDT decodes $$z$$ into a
 *graph wiring* -- a Laplacian -- whose eigenvalues are vibrational modes of the system
 (cf. Rayleigh's *Theory of Sound*). The latent space directly encodes spectral geometry,
 enabling **entropy-controlled generation**: sample novel wirings whose Laplacian spectrum
