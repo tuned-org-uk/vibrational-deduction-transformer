@@ -134,9 +134,9 @@ feed-forward / cross-attention value matrices.
 ## Quickstart
 
 ```bash
-pip install -e ".[dev]"
-python train.py --config configs/default.yaml --dataset cora
-python benchmark.py --dataset cora --output results/
+uv pip install -e ".[dev]"
+uv run train.py --config configs/default.yaml --dataset cora
+uv run benchmark.py --dataset cora --output results/
 ```
 
 ---
@@ -166,10 +166,10 @@ matches a target entropy level.
 
 ```bash
 # Train on synthetic spring-network graphs and run all evaluations
-python demos/spectral_generation_demo.py --n-graphs 400 --epochs 60
+uv run demos/spectral_generation_demo.py --n-graphs 400 --epochs 60
 
 # Interactive pluot + static visualisations
-python demos/visualise_spectral_demo.py --results results/spectral_demo
+uv run demos/visualise_spectral_demo.py --results results/spectral_demo
 ```
 
 Outputs written to `results/spectral_demo/`:
@@ -186,6 +186,13 @@ Outputs written to `results/spectral_demo/`:
 | `figures/mode_shapes.png` | First 4 vibrational mode shapes of a sample spring network |
 | `figures/entropy_target_error.png` | Entropy targeting precision across entropy range |
 | `figures/pluot_manifest.json` | Load in [pluot](https://github.com/keller-mark/pluot) for interactive view |
+
+## Full training
+
+```bash
+uv run python train.py --config configs/default.yaml --epochs 50
+uv run visualise.py --mode training --checkpoint checkpoints/ --dataset data/Cora/processed/ --output data/Cora/output
+```
 
 ---
 
