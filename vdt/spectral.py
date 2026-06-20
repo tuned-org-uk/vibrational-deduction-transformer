@@ -29,6 +29,19 @@ of the VDT training loop:
                           Used by model.forward() to populate out['N_active']
                           for spectral_kl_health_check (issue #77).
 
+ DC-mode precision floor (issue #24 follow-up):
+
+    spectral_basis_kl     The DC eigenvalue lambda_0 = 0 previously caused
+                          prec_0 = lam_s * clamp(0, min=1e-6) = 1e-7, which
+                          made -log(prec_0) = 16.1 per entry and drove a
+                          constant ~122 offset in kl_S that could never be
+                          learned away.  The precision is now additionally
+                          clamped to min=lam_s, flooring every mode's prior
+                          variance at 1/lam_s.  This corresponds to treating
+                          the DC mode as if lambda_k = 1.0 (the centre of a
+                          normalised Laplacian spectrum), making the prior
+                          variance reachable by log_var_S.
+
  soft fingerprint (issue #56):
 
     lambda_fingerprint_soft  Gaussian KDE soft-histogram replacing the
@@ -562,6 +575,21 @@ def spectral_basis_kl(
     which reduces to the standard unit-Gaussian KL when eigvals_q are all
     ones and lam_s=1.
 
+    DC-mode precision floor
+    -----------------------
+    The normalised graph Laplacian always has lambda_0 = 0 (the DC /
+    constant mode).  Without a floor, prec_0 = lam_s * clamp(0, 1e-6)
+    = 1e-7, which makes -log(prec_0) = 16.1 per entry.  With q columns
+    this creates a constant offset of roughly q * 8 in kl_S that the
+    posterior can never eliminate because log_var_S would need to reach
+    +16 to match the near-flat prior N(0, 1e7).
+
+    The fix clamps the final precision to min=lam_s, which is equivalent
+    to treating the DC mode as having lambda_k = 1.0 (the centre of the
+    normalised Laplacian spectrum [0, 2]).  The prior variance for that
+    mode becomes 1/lam_s, which log_var_S can realistically reach, so
+    kl_S is now learnable to zero as the posterior converges to the prior.
+
     Parameters
     ----------
     S : torch.Tensor
@@ -570,16 +598,23 @@ def spectral_basis_kl(
         Log-variance matrix.  Shape (B, q, q).
     eigvals_q : torch.Tensor
         Leading q eigenvalues of the frozen index Laplacian L(I).  Shape (q,).
-        Must be >= 0; clipped to min=1e-6 internally to avoid log(0).
+        Must be >= 0; clipped to min=1e-6 then floored at lam_s internally.
     lam_s : float
         Scalar precision multiplier.  Default 1.0.
+        Also serves as the minimum precision floor so the DC mode (lambda=0)
+        is treated as having at least unit eigenvalue contribution.
 
     Returns
     -------
     torch.Tensor  scalar -- mean over batch and all (k, j) entries.
     """
-    # precision per mode: shape (q,) -> broadcast to (1, q, 1) for the k-axis
-    prec = (lam_s * eigvals_q.clamp(min=1e-6))  # (q,)
+    # precision per mode: shape (q,) -> broadcast to (1, q, 1) for the k-axis.
+    # Two-stage clamp:
+    #   1. clamp(min=1e-6) prevents log(0) for any near-zero eigenvalue.
+    #   2. clamp(min=lam_s) prevents the DC mode (lambda_0=0) from producing
+    #      prec_0 = lam_s * 1e-6 ~ 1e-7, which would create a constant
+    #      -log(prec_0) ~ 16 offset that log_var_S can never compensate.
+    prec = (lam_s * eigvals_q.clamp(min=1e-6)).clamp(min=lam_s)  # (q,)
     prec = prec.view(1, -1, 1)                   # (1, q, 1) -- broadcasts over (B, q, q)
 
     var_S = log_var_S.exp()                       # (B, q, q)
