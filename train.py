@@ -49,6 +49,35 @@ spectral_kl_health_check accepts epoch and warmup_epochs so the
 mode_explosion warning is suppressed during early training when all modes
 are still active by initialisation.  warmup_epochs is read from
 cfg['training']['kl_warmup_epochs'] (default 5).
+
+Checkpoint strategy
+-------------------
+Two files are written to save_dir on every epoch:
+
+  last.pt   -- unconditional snapshot after every epoch.  Contains
+               model.state_dict(), optimizer.state_dict(),
+               scheduler.state_dict() (when a scheduler is active),
+               cfg, epoch, and best_val.  Use --resume to restart from
+               this file after a crash or pre-emption.
+
+  best.pt   -- written only when val_loss strictly improves.  Same
+               payload as last.pt so it can also serve as a resume point.
+
+Resuming training::
+
+    python train.py --config configs/mps.yaml --resume checkpoints/last.pt
+
+The resume path restores model weights, optimizer and scheduler state,
+the epoch counter (training continues from epoch+1), and best_val so
+the best.pt gate is not reset to inf.
+
+Periodic checkpoints (save_every_n_epochs) are also supported::
+
+    # in your config under logging:
+    save_every_n_epochs: 10
+
+This writes checkpoints/epoch_{N:04d}.pt every N epochs in addition to
+last.pt and best.pt.
 """
 from __future__ import annotations
 import argparse
@@ -78,6 +107,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--device", default=None,
                    help="Force device: 'mps', 'cuda', 'cpu'. Default: auto-detect.")
     p.add_argument("--no-wandb", action="store_true")
+    p.add_argument(
+        "--resume",
+        default=None,
+        metavar="CHECKPOINT",
+        help=(
+            "Path to a checkpoint file (last.pt or best.pt) to resume training from. "
+            "Restores model weights, optimizer state, scheduler state, epoch counter, "
+            "and best_val so training continues seamlessly."
+        ),
+    )
     return p.parse_args()
 
 
@@ -97,6 +136,92 @@ def resolve_batch_size(cfg: dict, device: torch.device) -> int:
         print(f"[VDT] MPS device detected -- using mps_batch_size={bs} (override batch_size={tc['batch_size']})")
         return bs
     return tc["batch_size"]
+
+
+def save_checkpoint(
+    path: Path,
+    epoch: int,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler,
+    cfg: dict,
+    best_val: float,
+) -> None:
+    """
+    Save a full training checkpoint to path.
+
+    The checkpoint dict contains:
+
+    - epoch        : int   -- the epoch just completed
+    - model        : dict  -- model.state_dict()
+    - optimizer    : dict  -- optimizer.state_dict()
+    - scheduler    : dict or None  -- scheduler.state_dict() when active
+    - cfg          : dict  -- full config used for this run
+    - best_val     : float -- best validation loss seen so far
+
+    Saving is atomic: the payload is first written to a sibling .tmp file
+    and then renamed to path so a crash mid-write never leaves a corrupt
+    checkpoint.
+
+    Parameters
+    ----------
+    path      : destination file (e.g. save_dir / 'last.pt')
+    epoch     : epoch number just completed
+    model     : the model being trained
+    optimizer : the optimizer
+    scheduler : LR scheduler or None
+    cfg       : config dict
+    best_val  : best validation loss seen so far in this run
+    """
+    payload = {
+        "epoch":     epoch,
+        "model":     model.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict() if scheduler is not None else None,
+        "cfg":       cfg,
+        "best_val":  best_val,
+    }
+    tmp = path.with_suffix(".tmp")
+    torch.save(payload, tmp)
+    tmp.rename(path)
+
+
+def load_checkpoint(
+    path: Path,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler,
+    device: torch.device,
+) -> tuple[int, float]:
+    """
+    Load a checkpoint and restore model, optimizer, and scheduler state.
+
+    Parameters
+    ----------
+    path      : checkpoint file produced by save_checkpoint()
+    model     : model instance (must already be on device)
+    optimizer : optimizer instance
+    scheduler : LR scheduler or None
+    device    : target device for map_location
+
+    Returns
+    -------
+    (start_epoch, best_val)
+        start_epoch -- epoch to resume FROM (checkpoint epoch + 1)
+        best_val    -- best validation loss persisted in the checkpoint
+    """
+    ckpt = torch.load(path, map_location=device)
+    model.load_state_dict(ckpt["model"])
+    optimizer.load_state_dict(ckpt["optimizer"])
+    if scheduler is not None and ckpt.get("scheduler") is not None:
+        scheduler.load_state_dict(ckpt["scheduler"])
+    start_epoch = int(ckpt["epoch"]) + 1
+    best_val    = float(ckpt.get("best_val", float("inf")))
+    print(
+        f"[VDT] Resumed from {path}  "
+        f"(epoch {ckpt['epoch']}, best_val={best_val:.4f})"
+    )
+    return start_epoch, best_val
 
 
 def train_one_epoch(
@@ -137,18 +262,9 @@ def train_one_epoch(
     (issue #77).
     """
     model.train()
-    # Keys match WiringAutoencoder.forward() return dict exactly.
     totals = {"loss": 0.0, "recon": 0.0, "kl_z": 0.0, "kl_S": 0.0, "kl_tau": 0.0}
     n = 0
-    # Count batches where WiringEncoder clamped log_var (issue #75).
-    # Each forward() call may emit a RuntimeWarning with message containing
-    # 'log_var clamp active' when the posterior log-variance hits the ceiling
-    # defined by WiringEncoder.log_var_max.  We catch and tally these per
-    # epoch so they surface in the CSV and W&B log rather than flooding stderr.
     log_var_saturations = 0
-    # Accumulate N_active when model exposes it (issue #77).
-    # n_active_sum counts total active modes across batches;
-    # n_active_batches counts how many batches returned the value.
     n_active_sum = 0
     n_active_batches = 0
     for batch in loader:
@@ -277,21 +393,13 @@ def main() -> None:
     meta    = data["meta"]
     print(f"[VDT] nodes={meta['n_nodes']}, feat_dim={meta['feat_dim']}, classes={meta['n_classes']}")
 
-    # Build model via factory -- also wires up the internal DifferentiableLaplacian.
     model   = WiringAutoencoder.from_config(cfg, E).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[VDT] trainable params: {n_params:,}")
 
-    # One-time spectral pre-computation for the fixed base graph.
-    # Builds:
-    #   U_q          (N, q) -- leading eigenvectors passed to every forward() call
-    #   eigvals_q    (q,)   -- corresponding eigenvalues
-    #   spectral_cache      -- (full_eigvals, full_eigvecs) for DiffusionDecoder
-    #   L_f          (N, N) -- mass-weighted feature-space Laplacian (issue #74)
-    #
-    # This avoids repeated O(N^3) eigh inside the model at each training step.
-    # The base Laplacian L_base is computed once from the frozen base weights;
-    # it does not change during training.
+    # ------------------------------------------------------------------
+    # Spectral pre-computation (one-time, frozen base graph)
+    # ------------------------------------------------------------------
     t_spec = time.time()
     with torch.no_grad():
         use_sparse = gc.get("sparse", device.type == "mps")
@@ -302,35 +410,52 @@ def main() -> None:
             normalised=gc["normalised"],
             sparse=use_sparse,
         ).to(device)
-        base_L      = base_lap(base_lap.base_weights.unsqueeze(0)).squeeze(0)  # (N, N)
-        
-        # work-around for MPS: eigh runs on CPU
-        base_L_cpu = base_L.detach().to("cpu")
+        base_L      = base_lap(base_lap.base_weights.unsqueeze(0)).squeeze(0)
+        base_L_cpu  = base_L.detach().to("cpu")
         full_eigvals, full_eigvecs = torch.linalg.eigh(base_L_cpu)
         full_eigvals = full_eigvals.to(device)
-        full_eigvecs = full_eigvecs.to(device)                 # (N,), (N, N)
-        
+        full_eigvecs = full_eigvecs.to(device)
         q           = cfg["model"].get("q", cfg["model"].get("tau_modes", 8))
-        U_q         = full_eigvecs[:, :q].to(device)    # (N, q)
-        eigvals_q   = full_eigvals[:q].to(device)       # (q,)
+        U_q         = full_eigvecs[:, :q].to(device)
+        eigvals_q   = full_eigvals[:q].to(device)
         spectral_cache = (full_eigvals.to(device), full_eigvecs.to(device))
-        # Build mass-weighted L_f once using MassMatrix (issue #74).
-        # mass_clip is read from cfg by model.build_L_f via self.mass_clip.
-        L_f = model.build_L_f(full_eigvals, full_eigvecs).to(device)  # (N, N)
+        L_f = model.build_L_f(full_eigvals, full_eigvecs).to(device)
     print(f"[VDT] cached base spectral quantities in {time.time() - t_spec:.1f}s  (q={q})")
+
+    # ------------------------------------------------------------------
+    # Optimiser and scheduler -- built before checkpoint restore so that
+    # load_checkpoint() can populate their state dicts in-place.
+    # ------------------------------------------------------------------
+    optimizer = optim.AdamW(
+        model.parameters(), lr=tc["lr"], weight_decay=tc.get("weight_decay", 1e-5)
+    )
+    scheduler = None
+    if tc.get("scheduler") == "cosine":
+        scheduler = CosineAnnealingLR(optimizer, T_max=tc["epochs"])
+
+    # ------------------------------------------------------------------
+    # Resume from checkpoint (--resume flag)
+    # ------------------------------------------------------------------
+    # start_epoch is 1 for a fresh run; load_checkpoint() returns
+    # ckpt['epoch'] + 1 so training continues from the next epoch.
+    # best_val is also restored so the best.pt gate is not reset to inf.
+    start_epoch = 1
+    best_val    = float("inf")
+    if args.resume:
+        resume_path = Path(args.resume)
+        if not resume_path.exists():
+            raise FileNotFoundError(f"--resume path not found: {resume_path}")
+        start_epoch, best_val = load_checkpoint(
+            resume_path, model, optimizer, scheduler, device
+        )
 
     # ------------------------------------------------------------------
     # Pre-flight stability check (issue #75)
     # ------------------------------------------------------------------
-    # Runs CFL, mass-conditioning, and spectral-health checks on L_f
-    # before constructing the optimiser.  A CFL failure raises RuntimeError
-    # so training is aborted before any weights are modified.
-    # MassMatrix is constructed here from the full eigenvalue spectrum so
-    # that mass_diag reflects the clipped diagonal (issue #74).
     mass_clip = float(cfg["model"].get("mass_clip", 1e3))
-    eps = float(cfg["model"].get("eps"))
-    tau = float(cfg["model"].get("tau", 0.5))
-    lam_s = float(cfg["model"].get("lam_s", 0.1))
+    eps       = float(cfg["model"].get("eps"))
+    tau       = float(cfg["model"].get("tau", 0.5))
+    lam_s     = float(cfg["model"].get("lam_s", 0.1))
     print(f"[VDT] eps: {eps}, tau: {tau}, mass_clip: {mass_clip}, lam_s: {lam_s}")
     assert eps is not None, "eps should be set in config -> model"
     _mass_for_check = MassMatrix(
@@ -339,7 +464,7 @@ def main() -> None:
         eps=eps,
         mass_clip=mass_clip,
     )
-    with warnings.catch_warnings(record=True) as pre_warns:
+    with warnings.catch_warnings(record=True):
         warnings.simplefilter("always")
         stability_issues = pre_training_checks(
             L_f.cpu(),
@@ -347,25 +472,18 @@ def main() -> None:
             tc.get("dt_init", 0.005),
         )
         print(f"[VDT] dt_init: {tc.get('dt_init', 0.005)}")
-    spotted = False
     if stability_issues:
-        spotted = True
         for msg in stability_issues:
             print(f"[VDT][STABILITY] {msg}")
-    if spotted is True:
         raise RuntimeError(
             "CFL pre-flight check failed. "
             "Reduce dt_init or grad_clip in the config before training."
         )
     print("[VDT] Pre-flight stability checks passed.")
 
-    optimizer = optim.AdamW(
-        model.parameters(), lr=tc["lr"], weight_decay=tc.get("weight_decay", 1e-5)
-    )
-    scheduler = None
-    if tc.get("scheduler") == "cosine":
-        scheduler = CosineAnnealingLR(optimizer, T_max=tc["epochs"])
-
+    # ------------------------------------------------------------------
+    # Logging setup
+    # ------------------------------------------------------------------
     lc = cfg["logging"]
     if lc.get("use_wandb"):
         import wandb
@@ -374,10 +492,7 @@ def main() -> None:
     save_dir = Path(lc.get("save_dir", "./checkpoints"))
     save_dir.mkdir(parents=True, exist_ok=True)
     log_path = save_dir / "training_log.csv"
-    # CSV fields aligned with forward() return dict keys.
-    # log_var_saturations added per issue #75.
-    # N_active added per issue #77: populated as soon as model exposes it;
-    # empty string written for epochs where the model does not return it.
+
     csv_fields = [
         "epoch",
         "train_loss", "train_recon", "train_kl_z", "train_kl_S", "train_kl_tau",
@@ -385,23 +500,21 @@ def main() -> None:
         "log_var_saturations",
         "N_active",
     ]
-    csv_f = open(log_path, "w", newline="")
+    # When resuming, append to the existing CSV rather than overwriting it.
+    csv_mode = "a" if (args.resume and log_path.exists()) else "w"
+    csv_f = open(log_path, csv_mode, newline="")
     csv_writer = csv.DictWriter(csv_f, fieldnames=csv_fields)
-    csv_writer.writeheader()
+    if csv_mode == "w":
+        csv_writer.writeheader()
 
-    # _q is the configured number of spectral modes.
-    # Used as the conservative active_modes fallback in spectral_kl_health_check
-    # when the model does not yet expose N_active (backward compat).
-    _q = cfg["model"].get("q", 16)
+    _q          = cfg["model"].get("q", 16)
+    _kl_warmup  = int(tc.get("kl_warmup_epochs", 5))
+    save_every  = int(lc.get("save_every_n_epochs", 0))  # 0 = disabled
 
-    # Number of epochs during which the mode_explosion *warning* is suppressed.
-    # The flag is still computed and logged; only the RuntimeWarning is gated.
-    # Read from cfg['training']['kl_warmup_epochs'], default 5.
-    # Set to 0 to always emit the warning from epoch 1.
-    _kl_warmup = int(tc.get("kl_warmup_epochs", 5))
-
-    best_val = float("inf")
-    for epoch in range(1, tc["epochs"] + 1):
+    # ------------------------------------------------------------------
+    # Training loop
+    # ------------------------------------------------------------------
+    for epoch in range(start_epoch, tc["epochs"] + 1):
         t0 = time.time()
         train_metrics = train_one_epoch(
             model, loaders["train"], optimizer,
@@ -419,9 +532,6 @@ def main() -> None:
         if scheduler:
             scheduler.step()
 
-        # ------------------------------------------------------------------
-        # Per-epoch log_var saturation warning (issue #75)
-        # ------------------------------------------------------------------
         log_var_sat = train_metrics.get("log_var_saturations", 0)
         if log_var_sat > 0:
             print(
@@ -429,14 +539,6 @@ def main() -> None:
                 "consider reducing lr or increasing log_var_max in WiringEncoder."
             )
 
-        # ------------------------------------------------------------------
-        # Per-epoch spectral KL health check (issue #75)
-        # ------------------------------------------------------------------
-        # active_modes: real N_active from val_metrics (issue #77); falls
-        # back to _q when the model version predates issue #77.
-        # epoch and warmup_epochs control when mode_explosion emits a warning
-        # (stability.py fix): the flag is always computed, warning is
-        # suppressed for the first _kl_warmup epochs.
         kl_health = spectral_kl_health_check(
             val_metrics["kl_z"],
             val_metrics["kl_S"],
@@ -447,7 +549,13 @@ def main() -> None:
             warmup_epochs=_kl_warmup,
         )
         if not all(kl_health.values()):
-            print(f"  [WARN] KL health check failed: {kl_health}")
+            failed = [k for k, v in kl_health.items() if not v]
+            print(f"  [WARN] KL health check failed: {failed}")
+            if "mode_explosion" in failed:
+                print(
+                    f"  [WARN] mode_explosion detected -- current lam_s={lam_s:.4f}. "
+                    "Consider increasing lam_s in the config."
+                )
 
         row = {
             "epoch":                epoch,
@@ -484,15 +592,33 @@ def main() -> None:
                 f"({dt:.1f}s)"
             )
 
+        # --------------------------------------------------------------
+        # Checkpoint saves
+        # --------------------------------------------------------------
+        # 1. Always write last.pt (atomic rename via .tmp).
+        save_checkpoint(
+            save_dir / "last.pt",
+            epoch, model, optimizer, scheduler, cfg, best_val,
+        )
+
+        # 2. Write best.pt when val_loss strictly improves.
         if val_metrics["loss"] < best_val:
             best_val = val_metrics["loss"]
-            torch.save(
-                {"epoch": epoch, "model": model.state_dict(), "cfg": cfg},
+            save_checkpoint(
                 save_dir / "best.pt",
+                epoch, model, optimizer, scheduler, cfg, best_val,
+            )
+
+        # 3. Periodic snapshot (optional; controlled by save_every_n_epochs).
+        if save_every > 0 and epoch % save_every == 0:
+            save_checkpoint(
+                save_dir / f"epoch_{epoch:04d}.pt",
+                epoch, model, optimizer, scheduler, cfg, best_val,
             )
 
     csv_f.close()
     print(f"[VDT] Training complete. Best val loss: {best_val:.4f}")
+    print(f"[VDT] Checkpoints saved to {save_dir}")
     print(f"[VDT] Log saved to {log_path}")
 
 
