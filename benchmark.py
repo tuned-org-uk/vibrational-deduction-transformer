@@ -11,9 +11,21 @@ Metrics reported (saved to CSV + printed as table):
 
 Usage
 -----
-    python benchmark.py --dataset cora --output results/ --epochs 100
+    python benchmark.py --dataset cora --output results/
     python benchmark.py --dataset cora --device mps     # force MPS
     python benchmark.py --dataset cora --device cpu     # force CPU
+    python benchmark.py --dataset cora --batch-size 8   # override batch
+
+Device / config defaults
+------------------------
+    When device resolves to 'mps' and no --config flag is passed, the
+    script automatically uses configs/mps.yaml instead of
+    configs/default.yaml.  That profile sets hidden_dim=32, n_layers=2,
+    and batch_size=4 which keeps MHA activations under 1 GB on Cora.
+
+    To run the full default profile on MPS (requires >=32 GB RAM)::
+
+        python benchmark.py --config configs/default.yaml
 """
 from __future__ import annotations
 import argparse
@@ -170,7 +182,8 @@ def compute_test_metrics(
 ) -> dict[str, float]:
     """Accumulate per-batch metrics over a loader and return means.
 
-    Key mapping for VDT (WiringAutoencoder output keys -> benchmark keys):
+    Key mapping for VDT (WiringAutoencoder output keys -> benchmark keys)::
+
         'recon'  -> recon_loss
         'kl_z'   -> kl_loss    (isotropic VAE KL)
         'kl_S'   -> freq_loss  (spectral basis KL, analogous to old freq cost)
@@ -217,33 +230,85 @@ def linear_probe_accuracy(
 
 
 # ---------------------------------------------------------------------------
+# Batch-size resolution helper
+# ---------------------------------------------------------------------------
+
+def _resolve_batch_size(cfg: dict, device: str, cli_override: int | None) -> int:
+    """Return the batch size to use for all loaders.
+
+    Priority order (highest first):
+
+    1. --batch-size CLI flag (explicit override)
+    2. cfg['training']['mps_batch_size']  when device == 'mps'
+    3. cfg['training']['batch_size']
+    4. Hard fallback: 4 (safe on any device)
+
+    The MPS path reads 'mps_batch_size' first so that mps.yaml can keep
+    a small safe default without touching the generic 'batch_size' key
+    (which train.py may read independently).
+    """
+    if cli_override is not None:
+        return cli_override
+    tc = cfg.get("training", {})
+    if str(device) == "mps" and "mps_batch_size" in tc:
+        return int(tc["mps_batch_size"])
+    return int(tc.get("batch_size", 4))
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main() -> None:
-    p = argparse.ArgumentParser()
-    p.add_argument("--dataset",  default="cora")
-    p.add_argument("--output",   default="results/")
-    p.add_argument("--epochs",   type=int,   default=50)
-    p.add_argument("--lr",       type=float, default=3e-4)
-    p.add_argument("--latent",   type=int,   default=32)
-    p.add_argument("--hidden",   type=int,   default=256)
-    p.add_argument("--config",   default="configs/default.yaml")
-    p.add_argument("--device",   default=None,
+    p = argparse.ArgumentParser(
+        description="Benchmark WiringAutoencoder vs. VAE and LinearAE baselines."
+    )
+    p.add_argument("--dataset",    default="cora")
+    p.add_argument("--output",     default="results/")
+    p.add_argument("--epochs",     type=int,   default=50)
+    p.add_argument("--lr",         type=float, default=3e-4)
+    p.add_argument("--latent",     type=int,   default=32)
+    p.add_argument("--hidden",     type=int,   default=256)
+    p.add_argument("--config",     default=None,
+                   help="Path to YAML config.  Defaults to configs/mps.yaml "
+                        "when device is MPS, configs/default.yaml otherwise.")
+    p.add_argument("--device",     default=None,
                    help="Force device: 'mps', 'cuda', 'cpu'. Default: auto-detect.")
+    p.add_argument("--batch-size", type=int, default=None, dest="batch_size",
+                   help="Override batch size for all loaders.  When omitted, "
+                        "the value is read from the config file "
+                        "(mps_batch_size for MPS, batch_size otherwise).")
     args = p.parse_args()
 
     # ------------------------------------------------------------------ #
-    # Device selection -- MPS -> CUDA -> CPU, with MPS fallback env-var   #
+    # Device selection -- MPS -> CUDA -> CPU                              #
     # ------------------------------------------------------------------ #
     device = get_device(force=args.device, verbose=True)
     print(f"[Benchmark] device={device}, dataset={args.dataset}")
 
-    with open(args.config) as f:
+    # ------------------------------------------------------------------ #
+    # Config selection -- auto-pick mps.yaml on MPS when not overridden   #
+    # ------------------------------------------------------------------ #
+    if args.config is not None:
+        config_path = args.config
+    elif str(device) == "mps" and Path("configs/mps.yaml").exists():
+        config_path = "configs/mps.yaml"
+        print("[Benchmark] MPS device detected -- using configs/mps.yaml "
+              "(pass --config configs/default.yaml to override).")
+    else:
+        config_path = "configs/default.yaml"
+
+    with open(config_path) as f:
         cfg = yaml.safe_load(f)
     cfg["dataset"]["name"] = args.dataset
 
+    # ------------------------------------------------------------------ #
+    # Batch size -- read from config, override via CLI                    #
+    # ------------------------------------------------------------------ #
+    batch_size = _resolve_batch_size(cfg, device, args.batch_size)
+    print(f"[Benchmark] batch_size={batch_size}  (config: {config_path})")
+
     data    = load_dataset(args.dataset, root=cfg["dataset"]["root"], device=device)
-    loaders = make_loaders(data, batch_size=256)
+    loaders = make_loaders(data, batch_size=batch_size)
     E       = data["E"]
     meta    = data["meta"]
     D       = meta["feat_dim"]
@@ -258,13 +323,11 @@ def main() -> None:
     #   L_f       -- mass-weighted feature-space Laplacian      (N, N)   #
     #   eig_cache -- full (eigvals, eigvecs) for DiffusionDecoder        #
     #                                                                      #
-    # base_L is no longer passed to forward(); it is held internally by  #
-    # self._laplacian.base_laplacian and used by SpectralLoadingDecoder.  #
+    # linalg.eigh runs on CPU to avoid the MPS linalg restriction; the   #
+    # results are moved to device afterwards.                             #
     # ------------------------------------------------------------------ #
     vdt = WiringAutoencoder.from_config(cfg, E).to(device)
 
-    # Full eigendecomposition of the base Laplacian (on CPU to avoid MPS
-    # linalg.eigh issues; moved to device afterwards).
     base_lap = vdt._laplacian
     with torch.no_grad():
         base_L_dense = base_lap(base_lap.base_weights.unsqueeze(0)).squeeze(0)
@@ -274,14 +337,13 @@ def main() -> None:
         full_eigvecs = full_eigvecs_cpu.to(device)
 
     q = vdt.q
-    # Top-q truncated spectral basis passed to forward() each step.
-    U_q       = full_eigvecs[:, :q]        # (N, q)
-    eigvals_q = full_eigvals[:q]           # (q,)
+    U_q       = full_eigvecs[:, :q]   # (N, q)
+    eigvals_q = full_eigvals[:q]      # (q,)
 
-    # Mass-weighted feature-space Laplacian built once (issue #74).
+    # Mass-weighted feature-space Laplacian, built once (issue #74).
     L_f = vdt.build_L_f(full_eigvals_cpu, full_eigvecs_cpu).to(device)  # (N, N)
 
-    # Full eigendecomposition cache for DiffusionDecoder (avoids per-step O(N^3)).
+    # Full eigdecomposition cache for DiffusionDecoder.
     eig_cache = (full_eigvals, full_eigvecs)
 
     results = []
@@ -316,13 +378,15 @@ def main() -> None:
                     "kl":           vdt_metrics["kl_loss"],
                     "freq_cost":    vdt_metrics["freq_loss"],
                     "linear_probe": vdt_acc})
-    print(f"  VDT  -> recon={vdt_metrics['recon_loss']:.4f}  kl={vdt_metrics['kl_loss']:.4f}  probe={vdt_acc:.4f}")
+    print(f"  VDT  -> recon={vdt_metrics['recon_loss']:.4f}  "
+          f"kl={vdt_metrics['kl_loss']:.4f}  probe={vdt_acc:.4f}")
 
     # -------------------------------------------------------------------
-    # 2. Baseline VAE
+    # 2. Baseline VAE  -- uses same hidden_dim as VDT config for fairness
     # -------------------------------------------------------------------
+    vdt_hidden = cfg["model"].get("hidden_dim", args.hidden)
     print("[2/3] Training Baseline VAE...")
-    vae = BaselineVAE(D, args.latent, args.hidden)
+    vae = BaselineVAE(D, args.latent, vdt_hidden)
     vae = train_model(vae, loaders, device, args.epochs, args.lr, is_vdt=False)
     vae_metrics = compute_test_metrics(vae, loaders["test"], device, is_vdt=False)
     z_tr, y_tr = extract_latents(vae, loaders["train"], device)
@@ -333,7 +397,8 @@ def main() -> None:
                     "kl":           vae_metrics["kl_loss"],
                     "freq_cost":    0.0,
                     "linear_probe": vae_acc})
-    print(f"  VAE  -> recon={vae_metrics['recon_loss']:.4f}  kl={vae_metrics['kl_loss']:.4f}  probe={vae_acc:.4f}")
+    print(f"  VAE  -> recon={vae_metrics['recon_loss']:.4f}  "
+          f"kl={vae_metrics['kl_loss']:.4f}  probe={vae_acc:.4f}")
 
     # -------------------------------------------------------------------
     # 3. Linear AE
@@ -350,7 +415,8 @@ def main() -> None:
                     "kl":           0.0,
                     "freq_cost":    0.0,
                     "linear_probe": lin_acc})
-    print(f"  LinAE-> recon={lin_metrics['recon_loss']:.4f}                      probe={lin_acc:.4f}")
+    print(f"  LinAE-> recon={lin_metrics['recon_loss']:.4f}  "
+          f"                    probe={lin_acc:.4f}")
 
     # -------------------------------------------------------------------
     # Save results
