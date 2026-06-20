@@ -18,7 +18,7 @@
 model:                    # taken from default.yml
   version: 2              # use canonical v2 from_config() path
   latent_dim: 16          # reduced from 32 -- enough for Cora 7-class
-  hidden_dim: 64          # reduced from 256 -- cuts MHA activation by 16x
+  hidden_dim: 32          # reduced from 256 -- cuts MHA activation by 16x
   q: 8                    # spectral modes -- half of default; covers low-freq structure
   tau_modes: 8            # keep == q as recommended
   lam_s: 0.1             # spectral basis KL weight, changed from 0.01
