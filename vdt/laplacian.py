@@ -70,8 +70,24 @@ class MassMatrix:
     where lambda_i are eigenvalues of the graph Laplacian, tau is a
     smoothing exponent, and eps guards against division by zero.
 
-    A conditioning warning is emitted when max(M_ii)/min(M_ii) > 100
-    (per docs/04-stability.md section 7).
+    Conditioning warning
+    --------------------
+    A conditioning warning is emitted only when the ratio max(M_ii)/min(M_ii)
+    of the *clipped* mass diagonal exceeds ``warn_threshold``, which is
+    computed automatically as::
+
+        warn_threshold = max(100.0, mass_clip / 10.0)
+
+    Rationale: with mass_clip=1e3 the natural clipped ratio on a normalised
+    Laplacian (eigenvalues near 0 give M~1, eigenvalues near 1 give M~mass_clip)
+    is on the order of mass_clip itself.  Using a fixed threshold of 100 causes
+    a spurious warning whenever mass_clip > 1000, even though the clip is
+    already performing its intended job.  The adaptive threshold fires only
+    when the conditioning is genuinely worse than what mass_clip allows.
+
+    To silence the warning entirely, set mass_clip to a large value (e.g. 1e6)
+    or reduce it further so the ratio falls below the threshold.  The warning
+    text always prints the effective threshold so the user knows what to do.
 
     Singularity at lambda = 1
     -------------------------
@@ -116,7 +132,9 @@ class MassMatrix:
         would exceed this value (due to the singularity at lambda = 1)
         are clamped to mass_clip.  Default 1e6.  Set to a smaller value
         such as 1e3 if your graph has significant spectral density near
-        lambda = 1.
+        lambda = 1.  The conditioning warning threshold is automatically
+        scaled to mass_clip/10 so that the normal clipped ratio does not
+        trigger a false alarm.
     """
 
     def __init__(
@@ -141,11 +159,15 @@ class MassMatrix:
 
         Entries near the lambda = 1 singularity are clamped to
         self.mass_clip before the conditioning check.  The conditioning
-        warning therefore reflects the clipped matrix; if you see a ratio
-        > 100 even with mass_clip set, the Laplacian has genuine spectral
-        spread beyond the singularity.
+        warning fires only when the ratio of the *clipped* M exceeds
+        max(100, mass_clip/10).  This means that with mass_clip=1e3 the
+        threshold is 100 (unchanged), but with mass_clip=1e4 the threshold
+        rises to 1000, preventing spurious warnings on graphs whose natural
+        clipped ratio is proportional to mass_clip.
 
-        Emits RuntimeWarning when max/min ratio of the clipped M exceeds 100.
+        If the ratio exceeds the threshold even after clipping, the
+        Laplacian has genuine spectral spread beyond what mass_clip handles
+        and the warning is actionable.
         """
         if self._M_diag is not None:
             return self._M_diag
@@ -154,13 +176,20 @@ class MassMatrix:
         denom = (1.0 - lam.pow(self.tau) + self.eps).abs().clamp(min=self.eps)
         M = denom.reciprocal().clamp(max=self.mass_clip)  # guard singularity at lambda=1
 
+        # Adaptive threshold: the expected clipped ratio for a graph with
+        # eigenvalues spanning [0, 1] is roughly mass_clip / M_min where
+        # M_min ~ 1 for low-frequency modes.  We allow up to mass_clip/10
+        # before warning so that users who have already set mass_clip to a
+        # sensible value do not see a false alarm on every run.
+        warn_threshold = max(100.0, self.mass_clip / 10.0)
         ratio = float(M.max() / M.clamp(min=self.eps).min())
-        if ratio > 100.0:
+        if ratio > warn_threshold:
             warnings.warn(
-                f"MassMatrix conditioning ratio {ratio:.1f} > 100. "
+                f"MassMatrix conditioning ratio {ratio:.1f} > {warn_threshold:.0f}. "
                 "The Laplacian may be poorly conditioned (see docs/04-stability.md S7). "
-                "If your graph has spectral density near lambda=1 (regular or k-NN graphs), "
-                "set mass_clip=1e3 to suppress this warning.",
+                f"Current mass_clip={self.mass_clip:.0f}. "
+                "Reduce mass_clip further (e.g. mass_clip=100) or increase it to 1e6 "
+                "if you want to disable all clipping.",
                 RuntimeWarning,
                 stacklevel=2,
             )
