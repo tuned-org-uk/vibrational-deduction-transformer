@@ -1,13 +1,13 @@
 """
-Benchmark script — compare Wiring Autoencoder (VDT) against:
+Benchmark script -- compare Wiring Autoencoder (VDT) against:
     1. Plain VAE (same architecture, no wiring / graph path)
-    2. Linear Autoencoder (AE) — PCA-equivalent reconstruction baseline
+    2. Linear Autoencoder (AE) -- PCA-equivalent reconstruction baseline
 
 Metrics reported (saved to CSV + printed as table):
     - Reconstruction MSE (lower is better)
-    - Latent KL divergence (lower ≈ better posterior collapse diagnostic)
+    - Latent KL divergence (lower ~ better posterior collapse diagnostic)
     - Downstream classification accuracy on frozen latent z (linear probe)
-    - Spectral entropy H(Λ) of the generated Laplacians (VDT only)
+    - Spectral entropy H(Lambda) of the generated Laplacians (VDT only)
 
 Usage
 -----
@@ -91,7 +91,24 @@ class LinearAE(nn.Module):
 # ---------------------------------------------------------------------------
 # Training helpers
 # ---------------------------------------------------------------------------
-def train_model(model, loaders, E, base_L, device, epochs, lr, is_vdt=False):
+def train_model(
+    model, loaders, device, epochs, lr,
+    # VDT-only spectral arguments (None for baselines)
+    U_q=None, eigvals_q=None, L_f=None, eig_cache=None,
+    is_vdt=False,
+):
+    """Train model for the given number of epochs.
+
+    For VDT (is_vdt=True) the current WiringAutoencoder.forward() signature
+    is used::
+
+        model(x, U_q, eigvals_q, node_idx=node_idx,
+              L_f=L_f, spectral_cache=eig_cache)
+
+    U_q, eigvals_q, L_f, and eig_cache must be pre-computed by the caller
+    (see spectral pre-computation block in main()) and passed here.  They
+    are ignored for baseline models.
+    """
     optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
     model.to(device)
     for epoch in range(epochs):
@@ -101,7 +118,12 @@ def train_model(model, loaders, E, base_L, device, epochs, lr, is_vdt=False):
             node_idx = batch["node_idx"].to(device)
             optimizer.zero_grad()
             if is_vdt:
-                out = model(x, E, node_idx=node_idx, base_L=base_L)
+                out = model(
+                    x, U_q, eigvals_q,
+                    node_idx=node_idx,
+                    L_f=L_f,
+                    spectral_cache=eig_cache,
+                )
             else:
                 out = model(x)
             out["loss"].backward()
@@ -112,15 +134,27 @@ def train_model(model, loaders, E, base_L, device, epochs, lr, is_vdt=False):
 
 @torch.no_grad()
 def extract_latents(
-    model, loader, E, base_L, device, is_vdt=False
+    model, loader, device,
+    U_q=None, eigvals_q=None, L_f=None, eig_cache=None,
+    is_vdt=False,
 ) -> tuple[np.ndarray, np.ndarray]:
+    """Extract latent means (mu) and labels for a linear probe.
+
+    VDT output uses the 'mu' key returned by WiringAutoencoder.forward().
+    Baseline outputs also return 'mu'; no key remapping is needed.
+    """
     model.eval()
     zs, ys = [], []
     for batch in loader:
         x        = batch["x"].to(device)
         node_idx = batch["node_idx"].to(device)
         if is_vdt:
-            out = model(x, E, node_idx=node_idx, base_L=base_L)
+            out = model(
+                x, U_q, eigvals_q,
+                node_idx=node_idx,
+                L_f=L_f,
+                spectral_cache=eig_cache,
+            )
         else:
             out = model(x)
         zs.append(out["mu"].cpu().numpy())
@@ -130,8 +164,20 @@ def extract_latents(
 
 @torch.no_grad()
 def compute_test_metrics(
-    model, loader, E, base_L, device, is_vdt=False
+    model, loader, device,
+    U_q=None, eigvals_q=None, L_f=None, eig_cache=None,
+    is_vdt=False,
 ) -> dict[str, float]:
+    """Accumulate per-batch metrics over a loader and return means.
+
+    Key mapping for VDT (WiringAutoencoder output keys -> benchmark keys):
+        'recon'  -> recon_loss
+        'kl_z'   -> kl_loss    (isotropic VAE KL)
+        'kl_S'   -> freq_loss  (spectral basis KL, analogous to old freq cost)
+
+    Baseline models still return 'recon_loss', 'kl_loss', 'freq_loss'
+    directly; their branch is unchanged.
+    """
     model.eval()
     totals = {"recon_loss": 0.0, "kl_loss": 0.0, "freq_loss": 0.0}
     n = 0
@@ -139,13 +185,22 @@ def compute_test_metrics(
         x        = batch["x"].to(device)
         node_idx = batch["node_idx"].to(device)
         if is_vdt:
-            out = model(x, E, node_idx=node_idx, base_L=base_L)
+            out = model(
+                x, U_q, eigvals_q,
+                node_idx=node_idx,
+                L_f=L_f,
+                spectral_cache=eig_cache,
+            )
+            # Remap current output keys to benchmark accumulator keys.
+            totals["recon_loss"] += out["recon"].item() * x.shape[0]
+            totals["kl_loss"]    += out["kl_z"].item()  * x.shape[0]
+            totals["freq_loss"]  += out["kl_S"].item()  * x.shape[0]
         else:
             out = model(x)
-        bs = x.shape[0]
-        for k in totals:
-            totals[k] += out[k].item() * bs
-        n += bs
+            bs = x.shape[0]
+            for k in totals:
+                totals[k] += out[k].item() * bs
+        n += x.shape[0]
     return {k: v / n for k, v in totals.items()}
 
 
@@ -178,7 +233,7 @@ def main() -> None:
     args = p.parse_args()
 
     # ------------------------------------------------------------------ #
-    # Device selection — MPS → CUDA → CPU, with MPS fallback env-var set  #
+    # Device selection -- MPS -> CUDA -> CPU, with MPS fallback env-var   #
     # ------------------------------------------------------------------ #
     device = get_device(force=args.device, verbose=True)
     print(f"[Benchmark] device={device}, dataset={args.dataset}")
@@ -194,12 +249,40 @@ def main() -> None:
     D       = meta["feat_dim"]
     print(f"[Benchmark] N={meta['n_nodes']}, D={D}, classes={meta['n_classes']}")
 
-    # Base Laplacian for VDT and lambda-fingerprint
-    base_lap = DifferentiableLaplacian.from_embeddings(
-        E, knn_k=cfg["graph"]["knn_k"], sigma=cfg["graph"]["sigma"]
-    ).to(device)
+    # ------------------------------------------------------------------ #
+    # Build WiringAutoencoder and run spectral pre-computation once.      #
+    #                                                                      #
+    # WiringAutoencoder.forward() requires:                               #
+    #   U_q       -- top-q eigenvectors of the base Laplacian  (N, q)    #
+    #   eigvals_q -- corresponding eigenvalues                  (q,)      #
+    #   L_f       -- mass-weighted feature-space Laplacian      (N, N)   #
+    #   eig_cache -- full (eigvals, eigvecs) for DiffusionDecoder        #
+    #                                                                      #
+    # base_L is no longer passed to forward(); it is held internally by  #
+    # self._laplacian.base_laplacian and used by SpectralLoadingDecoder.  #
+    # ------------------------------------------------------------------ #
+    vdt = WiringAutoencoder.from_config(cfg, E).to(device)
+
+    # Full eigendecomposition of the base Laplacian (on CPU to avoid MPS
+    # linalg.eigh issues; moved to device afterwards).
+    base_lap = vdt._laplacian
     with torch.no_grad():
-        base_L = base_lap(base_lap.base_weights.unsqueeze(0)).squeeze(0)
+        base_L_dense = base_lap(base_lap.base_weights.unsqueeze(0)).squeeze(0)
+        base_L_cpu   = base_L_dense.cpu()
+        full_eigvals_cpu, full_eigvecs_cpu = torch.linalg.eigh(base_L_cpu)
+        full_eigvals = full_eigvals_cpu.to(device)
+        full_eigvecs = full_eigvecs_cpu.to(device)
+
+    q = vdt.q
+    # Top-q truncated spectral basis passed to forward() each step.
+    U_q       = full_eigvecs[:, :q]        # (N, q)
+    eigvals_q = full_eigvals[:q]           # (q,)
+
+    # Mass-weighted feature-space Laplacian built once (issue #74).
+    L_f = vdt.build_L_f(full_eigvals_cpu, full_eigvecs_cpu).to(device)  # (N, N)
+
+    # Full eigendecomposition cache for DiffusionDecoder (avoids per-step O(N^3)).
+    eig_cache = (full_eigvals, full_eigvecs)
 
     results = []
 
@@ -207,52 +290,67 @@ def main() -> None:
     # 1. Wiring Autoencoder
     # -------------------------------------------------------------------
     print("\n[1/3] Training Wiring Autoencoder...")
-    vdt = WiringAutoencoder.from_config(cfg, E).to(device)
-    vdt = train_model(vdt, loaders, E, base_L, device, args.epochs, args.lr, is_vdt=True)
-    vdt_metrics = compute_test_metrics(vdt, loaders["test"], E, base_L, device, is_vdt=True)
-    z_tr, y_tr = extract_latents(vdt, loaders["train"], E, base_L, device, is_vdt=True)
-    z_te, y_te = extract_latents(vdt, loaders["test"],  E, base_L, device, is_vdt=True)
-    vdt_acc    = linear_probe_accuracy(z_tr, y_tr, z_te, y_te)
+    vdt = train_model(
+        vdt, loaders, device, args.epochs, args.lr,
+        U_q=U_q, eigvals_q=eigvals_q, L_f=L_f, eig_cache=eig_cache,
+        is_vdt=True,
+    )
+    vdt_metrics = compute_test_metrics(
+        vdt, loaders["test"], device,
+        U_q=U_q, eigvals_q=eigvals_q, L_f=L_f, eig_cache=eig_cache,
+        is_vdt=True,
+    )
+    z_tr, y_tr = extract_latents(
+        vdt, loaders["train"], device,
+        U_q=U_q, eigvals_q=eigvals_q, L_f=L_f, eig_cache=eig_cache,
+        is_vdt=True,
+    )
+    z_te, y_te = extract_latents(
+        vdt, loaders["test"], device,
+        U_q=U_q, eigvals_q=eigvals_q, L_f=L_f, eig_cache=eig_cache,
+        is_vdt=True,
+    )
+    vdt_acc = linear_probe_accuracy(z_tr, y_tr, z_te, y_te)
     results.append({"model": "WiringAE",
-                    "recon_mse":     vdt_metrics["recon_loss"],
-                    "kl":            vdt_metrics["kl_loss"],
-                    "freq_cost":     vdt_metrics["freq_loss"],
-                    "linear_probe":  vdt_acc})
-    print(f"  VDT  → recon={vdt_metrics['recon_loss']:.4f}  kl={vdt_metrics['kl_loss']:.4f}  probe={vdt_acc:.4f}")
+                    "recon_mse":    vdt_metrics["recon_loss"],
+                    "kl":           vdt_metrics["kl_loss"],
+                    "freq_cost":    vdt_metrics["freq_loss"],
+                    "linear_probe": vdt_acc})
+    print(f"  VDT  -> recon={vdt_metrics['recon_loss']:.4f}  kl={vdt_metrics['kl_loss']:.4f}  probe={vdt_acc:.4f}")
 
     # -------------------------------------------------------------------
     # 2. Baseline VAE
     # -------------------------------------------------------------------
     print("[2/3] Training Baseline VAE...")
     vae = BaselineVAE(D, args.latent, args.hidden)
-    vae = train_model(vae, loaders, E, None, device, args.epochs, args.lr, is_vdt=False)
-    vae_metrics = compute_test_metrics(vae, loaders["test"], E, None, device, is_vdt=False)
-    z_tr, y_tr = extract_latents(vae, loaders["train"], E, None, device)
-    z_te, y_te = extract_latents(vae, loaders["test"],  E, None, device)
+    vae = train_model(vae, loaders, device, args.epochs, args.lr, is_vdt=False)
+    vae_metrics = compute_test_metrics(vae, loaders["test"], device, is_vdt=False)
+    z_tr, y_tr = extract_latents(vae, loaders["train"], device)
+    z_te, y_te = extract_latents(vae, loaders["test"],  device)
     vae_acc    = linear_probe_accuracy(z_tr, y_tr, z_te, y_te)
     results.append({"model": "BaselineVAE",
                     "recon_mse":    vae_metrics["recon_loss"],
                     "kl":           vae_metrics["kl_loss"],
                     "freq_cost":    0.0,
                     "linear_probe": vae_acc})
-    print(f"  VAE  → recon={vae_metrics['recon_loss']:.4f}  kl={vae_metrics['kl_loss']:.4f}  probe={vae_acc:.4f}")
+    print(f"  VAE  -> recon={vae_metrics['recon_loss']:.4f}  kl={vae_metrics['kl_loss']:.4f}  probe={vae_acc:.4f}")
 
     # -------------------------------------------------------------------
     # 3. Linear AE
     # -------------------------------------------------------------------
     print("[3/3] Training Linear AE (PCA baseline)...")
     lin_ae = LinearAE(D, args.latent)
-    lin_ae = train_model(lin_ae, loaders, E, None, device, args.epochs, args.lr, is_vdt=False)
-    lin_metrics = compute_test_metrics(lin_ae, loaders["test"], E, None, device)
-    z_tr, y_tr  = extract_latents(lin_ae, loaders["train"], E, None, device)
-    z_te, y_te  = extract_latents(lin_ae, loaders["test"],  E, None, device)
+    lin_ae = train_model(lin_ae, loaders, device, args.epochs, args.lr, is_vdt=False)
+    lin_metrics = compute_test_metrics(lin_ae, loaders["test"], device)
+    z_tr, y_tr  = extract_latents(lin_ae, loaders["train"], device)
+    z_te, y_te  = extract_latents(lin_ae, loaders["test"],  device)
     lin_acc     = linear_probe_accuracy(z_tr, y_tr, z_te, y_te)
     results.append({"model": "LinearAE",
                     "recon_mse":    lin_metrics["recon_loss"],
                     "kl":           0.0,
                     "freq_cost":    0.0,
                     "linear_probe": lin_acc})
-    print(f"  LinAE→ recon={lin_metrics['recon_loss']:.4f}                      probe={lin_acc:.4f}")
+    print(f"  LinAE-> recon={lin_metrics['recon_loss']:.4f}                      probe={lin_acc:.4f}")
 
     # -------------------------------------------------------------------
     # Save results
