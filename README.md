@@ -136,7 +136,8 @@ feed-forward / cross-attention value matrices.
 ```bash
 uv pip install -e ".[dev]"
 uv run train.py --config configs/default.yaml --dataset cora
-uv run benchmark.py --dataset cora --output results/
+uv run benchmark.py --dataset cora --output data/Cora/results/ --config configs/default.yaml
+# adjust config for your machine
 ```
 
 ---
