@@ -66,7 +66,7 @@ Input x (B, D)                   Embedding table E (N, D)
     v
 +----------------------------------+
 |  WiringEncoder                   |
-|  MLP + lambda-fingerprint        |
+|  VDT attention blocks            |
 |  -> (z, mu, log_var, log_a, log_b) |
 +----------------------------------+
     |
@@ -116,18 +116,28 @@ feed-forward / cross-attention value matrices.
 
 | Module | Role |
 |--------|------|
-| `vdt/encoder.py` | `WiringEncoder` -- amortised posterior with lambda-fingerprint; `ModeWeightHead` outputs `(log_a, log_b)` for tau-mode prior |
-| `vdt/wiring_decoder.py` | `SpectralLoadingDecoder` -- `z, U_q -> (W, omega, S, L_z, log_var_S)`; `W = U_q diag(omega) S`; `log_var_S` from independent head (fix #52) |
+| `vdt/encoder.py` | `WiringEncoder` -- VDT attention blocks + lambda-fingerprint; `ModeWeightHead` outputs `(log_a, log_b)` for tau-mode prior |
+| `vdt/vdt.py` | `VDTBlock` stack -- multi-head self-attention over graph eigenbasis; computes `rho_p`, `rho_m` density matrices per block |
+| `vdt/wiring_decoder.py` | `SpectralLoadingDecoder` -- `z, U_q -> (W, omega, S, L_z, log_var_S)`; `W = U_q diag(omega) S`; `log_var_S` from independent head |
 | `vdt/diffusion_decoder.py` | `L(z), E -> x_hat` via tau-mode diffusion + MLP refinement |
-| `vdt/model.py` | `WiringAutoencoder` -- three-term ELBO; `forward()` returns 9-key dict `{loss, recon, kl_z, kl_S, kl_tau, x_hat, z, mu, log_var}`; `extract_spectral_artefact()` |
-| `vdt/laplacian.py` | Differentiable Laplacian builder; `from_spectral_loading(W, L_base)` |
-| `vdt/spectral.py` | `spectral_basis_kl`, `tau_mode_kl`, `laplacian_precision_kl`, `build_knn_laplacian` |
+| `vdt/model.py` | `WiringAutoencoder` -- three-term ELBO; `forward()` returns dict `{loss, recon, kl_z, kl_S, kl_tau, x_hat, z, mu, log_var, N_active}`; `extract_spectral_artefact()` |
+| `vdt/vib_autoencoder.py` | `VibrationalAutoencoder` -- vibrational energy formulation with Rayleigh-Ritz mode selection |
+| `vdt/laplacian.py` | Differentiable Laplacian builder; `from_spectral_loading(W, L_base)`; `MassMatrix` conditioning |
+| `vdt/spectral.py` | `spectral_basis_kl`, `tau_mode_kl`, `laplacian_precision_kl`, `build_knn_laplacian`; linalg.eigh offloaded to CPU on MPS |
+| `vdt/density.py` | Density matrix utilities; positive/negative probability `rho_p`, `rho_m` |
 | `vdt/spectral_memory.py` | `SpectralAssociativeMemory` -- Hopfield memory pre-built from `A(I)`; delta-rule online updates |
-| `vdt/stability.py` | Training diagnostics; `spectral_kl_health_check` (6-level hierarchy) |
-| `vdt/dataset.py` | Dataset helpers (MNIST, CORA, PubMed, custom CSV) |
-| `train.py` | Training loop with W&B / CSV logging |
-| `benchmark.py` | Evaluation suite -- 8 metrics + ELBO Bayes factor |
-| `configs/default.yaml` | Hyperparameters |
+| `vdt/stability.py` | Training diagnostics; `spectral_kl_health_check` (6-level hierarchy); `N_active` mode counter |
+| `vdt/metrics.py` | Evaluation metrics: reconstruction MSE, linear probe accuracy, memory SNR, ELBO Bayes factor |
+| `vdt/classifier.py` | Downstream node-classification head using frozen `mu` embeddings |
+| `vdt/dataset.py` | Dataset helpers (MNIST, Cora, PubMed, custom CSV) |
+| `vdt/device.py` | Device resolution; MPS fallback env-var management |
+| `train.py` | Training loop with W&B / CSV logging; `N_active` tracked per epoch |
+| `benchmark.py` | Evaluation suite -- 8 metrics + ELBO Bayes factor; auto-selects `mps.yaml` on Apple Silicon |
+| `visualise.py` | Visualisation suite for training curves, latent space, and spectral mode shapes |
+| `configs/default.yaml` | Full-size hyperparameters (GPU / large RAM) |
+| `configs/mps.yaml` | Apple Silicon config: `hidden_dim=32`, `n_layers=2`, `batch_size=4` |
+| `configs/mnist.yaml` | MNIST dataset overrides |
+| `configs/spectral_demo.yaml` | Spectral generation demo overrides |
 
 ---
 
@@ -135,10 +145,32 @@ feed-forward / cross-attention value matrices.
 
 ```bash
 uv pip install -e ".[dev]"
+
+# Training -- config is auto-selected for your device:
+#   MPS (Apple Silicon) -> configs/mps.yaml   (small model, batch=4)
+#   otherwise           -> configs/default.yaml
+uv run train.py --dataset cora
+
+# Override config or batch size explicitly:
 uv run train.py --config configs/default.yaml --dataset cora
+uv run train.py --config configs/mps.yaml --dataset cora --batch-size 8
+
+# Benchmark -- auto-selects mps.yaml on Apple Silicon:
+uv run benchmark.py --dataset cora --output data/Cora/results/
+
+# Benchmark with explicit config or batch override:
 uv run benchmark.py --dataset cora --output data/Cora/results/ --config configs/default.yaml
-# adjust config for your machine
+uv run benchmark.py --dataset cora --output data/Cora/results/ --batch-size 16
 ```
+
+### Apple Silicon (MPS) notes
+
+- Set `PYTORCH_ENABLE_MPS_FALLBACK=1` before running (the scripts print a reminder if not set).
+- All `linalg.eigh` calls are offloaded to CPU explicitly in `vdt/spectral.py`.
+- `configs/mps.yaml` keeps `hidden_dim=32` and `batch_size=4` to avoid the ~28 GiB MHA
+  activation tensor that the full config produces on Cora (`N=2708`).
+- The `MassMatrix` conditioning warning (`ratio > 100`) is benign on regular / k-NN graphs;
+  set `mass_clip=1e3` in the config to suppress it (see `docs/04-stability.md` S7).
 
 ---
 
@@ -150,7 +182,7 @@ uv run benchmark.py --dataset cora --output data/Cora/results/ --config configs/
 | `kl_z` | Standard isotropic KL regularisation of latent `z` |
 | `kl_S` | Spectral alignment of loadings with ArrowSpace index `I` |
 | `kl_tau` | Effective frequency band selection via tau-mode prior |
-| `active_modes` | Number of modes with `E[omega_k] > 0.01` contributing to `W` |
+| `N_active` | Mean number of modes with `E[omega_k] > 0.01` per batch (logged to CSV) |
 | `memory_snr` | Retrieval quality of `SpectralAssociativeMemory` (key orthogonality) |
 | `elbo_bayes_factor` | `exp(L(I1) - L(I2))` -- comparison of competing ArrowSpace indices |
 | `linear_probe_acc` | Discriminative quality of frozen latent `mu` |
@@ -176,10 +208,10 @@ uv run demos/visualise_spectral_demo.py --results results/spectral_demo
 Outputs written to `results/spectral_demo/`:
 
 | File | Content |
-|------|---------|
+|------|---------| 
 | `spectral_demo_results.csv` | Per-sample spectral entropy + Frobenius distance to nearest training Laplacian |
 | `entropy_control_results.csv` | Entropy-targeting experiment: target vs best error vs match rate |
-| `training_log.csv` | Epoch-level ELBO, reconstruction MSE, KL terms |
+| `training_log.csv` | Epoch-level ELBO, reconstruction MSE, KL terms, N_active |
 | `figures/training_curves.png` | Loss component curves |
 | `figures/entropy_distribution.png` | Dataset vs generated spectral entropy histogram |
 | `figures/spectral_distance.png` | Distribution of nearest-neighbour spectral distances |
@@ -188,12 +220,32 @@ Outputs written to `results/spectral_demo/`:
 | `figures/entropy_target_error.png` | Entropy targeting precision across entropy range |
 | `figures/pluot_manifest.json` | Load in [pluot](https://github.com/keller-mark/pluot) for interactive view |
 
-## Full training
+---
+
+## Full Training and Visualisation
 
 ```bash
-uv run python train.py --config configs/default.yaml --epochs 50
-uv run visualise.py --mode training --checkpoint checkpoints/ --dataset data/Cora/processed/ --output data/Cora/output
+uv run train.py --config configs/default.yaml --epochs 50
+uv run visualise.py --mode training --checkpoint checkpoints/ \
+    --dataset data/Cora/processed/ --output data/Cora/output
 ```
+
+---
+
+## Config Priority in `benchmark.py` and `train.py`
+
+Both scripts resolve the config and batch size in the same order:
+
+1. `--config <path>` CLI flag (explicit override)
+2. Auto-select `configs/mps.yaml` when device resolves to `mps` (no flag needed)
+3. Fall back to `configs/default.yaml`
+
+Batch size resolves as:
+
+1. `--batch-size <n>` CLI flag
+2. `cfg['training']['mps_batch_size']` when device is `mps`
+3. `cfg['training']['batch_size']`
+4. Fallback: `4`
 
 ---
 
@@ -212,7 +264,7 @@ Index selection is made Bayesian via the ELBO Bayes factor.
 ## Documentation
 
 | File | Content |
-|------|---------|
+|------|---------| 
 | [`docs/README.md`](docs/README.md) | Concept tree, document map, implementation sequence |
 | [`docs/00-architecture.md`](docs/00-architecture.md) | Full architecture reference: modules, ELBO, data flow |
 | [`docs/01-references.md`](docs/01-references.md) | Bibliography and related work |
