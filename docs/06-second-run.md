@@ -46,7 +46,7 @@ Optionally raise `a_min` from 0.1 → 0.2 to narrow the prior and force sharper 
 ***
 
 ## [Sonnet 4.6] Recommended Fixes
-```
+```yaml
 # configs/mps.yaml changes
 lam_s: 2.0        # was 0.1
 nu: 0.5           # active-mode penalty (add if not present)
