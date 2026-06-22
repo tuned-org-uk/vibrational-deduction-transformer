@@ -358,6 +358,18 @@ def eval_epoch(
         metrics["N_active"] = n_active_sum / n_active_batches
     return metrics
 
+from pathlib import Path
+import yaml
+
+def load_training_config(config_path: str | None):
+    resolved_path = Path(config_path) if config_path else Path("configs/default.yml")
+    cfg = yaml.safe_load(resolved_path.read_text(encoding="utf-8"))
+    return cfg, resolved_path
+
+def print_training_config(cfg: dict, cfg_path: Path):
+    print(f"[VDT] Using config: {cfg_path.resolve()}")
+    print("[VDT] Effective training configuration:")
+    print(yaml.safe_dump(cfg, sort_keys=False, default_flow_style=False).rstrip())
 
 def main() -> None:
     args = parse_args()
@@ -387,6 +399,9 @@ def main() -> None:
     dc = cfg["dataset"]
     gc = cfg["graph"]
 
+    cfg, cfg_path = load_training_config(args.config)
+    print_training_config(cfg, cfg_path)
+
     data    = load_dataset(dc["name"], root=dc["root"], device=device)
     loaders = make_loaders(data, batch_size=batch_size)
     E       = data["E"]
@@ -396,6 +411,10 @@ def main() -> None:
     model   = WiringAutoencoder.from_config(cfg, E).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[VDT] trainable params: {n_params:,}")
+    total   = sum(p.numel() for p in model.parameters())
+    trained = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    buffers = sum(b.numel() for b in model.buffers())
+    print(f"trainable: {trained:,}  |  total params: {total:,}  |  buffers: {buffers:,}")
 
     # ------------------------------------------------------------------
     # Spectral pre-computation (one-time, frozen base graph)

@@ -1,6 +1,7 @@
 checkpoints/
 data/
 .DS_Store
+checkpoints-run-*/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

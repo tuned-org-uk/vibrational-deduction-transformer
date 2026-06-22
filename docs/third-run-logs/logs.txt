@@ -1,0 +1,256 @@
+$ uv run python train.py --config configs/mps.yaml --epochs 50 --seed 3047
+[VDT] MPS selected — set PYTORCH_ENABLE_MPS_FALLBACK=1.
+      All linalg.eigh calls are also offloaded to CPU explicitly in vdt/spectral.py.
+[VDT] MPS device detected -- using mps_batch_size=4 (override batch_size=4)
+[VDT] device=mps, dataset=cora, batch_size=4
+[VDT] Using config: /Users/tuned-silicon/papers/vibrational-deduction-transformer/configs/mps.yaml
+[VDT] Effective training configuration:
+model:
+  version: 2
+  latent_dim: 16
+  hidden_dim: 32
+  q: 8
+  tau_modes: 8
+  lam_s: 1.0
+  tau: 0.5
+  n_layers: 2
+  n_heads: 2
+  dropout: 0.1
+  eps: 0.3
+  mass_clip: 100.0
+  kl_z_warmup: 10
+graph:
+  knn_k: 35
+  sigma: 1.2
+  normalised: true
+  sparse: true
+training:
+  epochs: 50
+  batch_size: 4
+  mps_batch_size: 4
+  lr: 0.0003
+  weight_decay: 1.0e-05
+  scheduler: cosine
+  warmup_epochs: 5
+  grad_clip: 1.0
+  seed: 42
+  device: auto
+  density_loss_weight: 1.0
+  a_min: 0.1
+  q_min: 2
+  nu: 0.25
+  dt_init: 0.003
+dataset:
+  name: cora
+  root: ./data
+  split:
+  - 0.8
+  - 0.1
+  - 0.1
+logging:
+  save_every_n_epochs: 10
+  use_wandb: false
+  project: wiring-autoencoder
+  log_every: 1
+  save_dir: ./checkpoints
+[VDT] nodes=2708, feat_dim=1433, classes=7
+[VDT] trainable params: 129,830,761
+trainable: 129,830,761  |  total params: 129,830,761  |  buffers: 560,226
+[VDT] cached base spectral quantities in 22.3s  (q=8)
+[VDT] eps: 0.3, tau: 0.5, mass_clip: 100.0, lam_s: 1.0
+[VDT] dt_init: 0.003
+[VDT] Pre-flight stability checks passed.
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    1/50  train=-92.0790  val=-216.8257  recon=-220.4262  kl_z=0.7397  kl_S=1.9768  kl_tau=0.8840  (532.4s)
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    2/50  train=-331.3901  val=-446.4404  recon=-448.3553  kl_z=0.6306  kl_S=0.9833  kl_tau=0.3009  (532.9s)
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    3/50  train=-559.3319  val=-672.2779  recon=-673.7961  kl_z=0.6914  kl_S=0.7149  kl_tau=0.1119  (533.0s)
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    4/50  train=-783.7781  val=-894.5859  recon=-895.7266  kl_z=0.3009  kl_S=0.7752  kl_tau=0.0646  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 5 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    5/50  train=-1003.9284  val=-1111.9740  recon=-1112.8639  kl_z=0.2216  kl_S=0.6045  kl_tau=0.0638  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 6 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    6/50  train=-1218.5435  val=-1323.1537  recon=-1323.6151  kl_z=0.0598  kl_S=0.3647  kl_tau=0.0369  (532.7s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 7 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    7/50  train=-1426.0417  val=-1525.9095  recon=-1526.1189  kl_z=0.0166  kl_S=0.1528  kl_tau=0.0398  (533.3s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 8 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    8/50  train=-1624.0926  val=-1718.1356  recon=-1718.2325  kl_z=0.0104  kl_S=0.0483  kl_tau=0.0382  (532.7s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 9 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    9/50  train=-1810.4549  val=-1896.8384  recon=-1896.9106  kl_z=0.0104  kl_S=0.0109  kl_tau=0.0508  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 10 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   10/50  train=-1981.6993  val=-2059.1552  recon=-2059.2078  kl_z=0.0092  kl_S=0.0014  kl_tau=0.0420  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 11 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   11/50  train=-2134.6285  val=-2200.3450  recon=-2200.3913  kl_z=0.0085  kl_S=0.0001  kl_tau=0.0377  (533.0s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 12 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   12/50  train=-2264.8441  val=-2314.8143  recon=-2314.8840  kl_z=0.0097  kl_S=0.0000  kl_tau=0.0600  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 13 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   13/50  train=-2365.6029  val=-2398.5505  recon=-2398.6036  kl_z=0.0089  kl_S=0.0000  kl_tau=0.0442  (532.8s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 14 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   14/50  train=-2431.3562  val=-2441.3682  recon=-2441.4447  kl_z=0.0103  kl_S=0.0000  kl_tau=0.0662  (533.0s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 15 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   15/50  train=-2457.2359  val=-2450.1091  recon=-2450.1553  kl_z=0.0045  kl_S=-0.0000  kl_tau=0.0417  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 16 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   16/50  train=-2462.0245  val=-2451.4551  recon=-2451.4678  kl_z=0.0028  kl_S=-0.0000  kl_tau=0.0099  (532.8s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 17 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   17/50  train=-2462.7318  val=-2452.2644  recon=-2452.2748  kl_z=0.0025  kl_S=-0.0000  kl_tau=0.0078  (532.7s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 18 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   18/50  train=-2462.9011  val=-2452.1993  recon=-2452.2103  kl_z=0.0035  kl_S=0.0000  kl_tau=0.0075  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 19 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   19/50  train=-2463.0564  val=-2452.4514  recon=-2452.4612  kl_z=0.0025  kl_S=-0.0000  kl_tau=0.0073  (532.7s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 20 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   20/50  train=-2463.2386  val=-2452.5589  recon=-2452.5685  kl_z=0.0027  kl_S=0.0000  kl_tau=0.0070  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 21 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   21/50  train=-2463.2447  val=-2452.5378  recon=-2452.5472  kl_z=0.0024  kl_S=-0.0000  kl_tau=0.0070  (532.8s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 22 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   22/50  train=-2463.3014  val=-2452.5790  recon=-2452.5928  kl_z=0.0023  kl_S=0.0000  kl_tau=0.0116  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 23 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   23/50  train=-2463.1275  val=-2452.2598  recon=-2452.2698  kl_z=0.0021  kl_S=0.0000  kl_tau=0.0079  (533.1s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 24 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   24/50  train=-2463.2217  val=-2452.6712  recon=-2452.6785  kl_z=0.0016  kl_S=-0.0000  kl_tau=0.0057  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 25 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   25/50  train=-2463.4472  val=-2452.6509  recon=-2452.6590  kl_z=0.0014  kl_S=0.0000  kl_tau=0.0067  (533.0s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 26 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   26/50  train=-2463.5081  val=-2452.6524  recon=-2452.6579  kl_z=0.0017  kl_S=-0.0000  kl_tau=0.0038  (532.7s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 27 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   27/50  train=-2463.3286  val=-2452.6786  recon=-2452.6843  kl_z=0.0012  kl_S=-0.0000  kl_tau=0.0045  (532.8s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 28 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   28/50  train=-2463.3105  val=-2452.7980  recon=-2452.8052  kl_z=0.0014  kl_S=-0.0000  kl_tau=0.0058  (532.8s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 29 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   29/50  train=-2463.4745  val=-2452.8326  recon=-2452.8362  kl_z=0.0011  kl_S=-0.0000  kl_tau=0.0025  (533.0s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 30 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   30/50  train=-2463.3366  val=-2452.8595  recon=-2452.8626  kl_z=0.0010  kl_S=-0.0000  kl_tau=0.0021  (533.0s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 31 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   31/50  train=-2463.4781  val=-2452.9087  recon=-2452.9140  kl_z=0.0007  kl_S=-0.0000  kl_tau=0.0046  (533.0s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 32 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   32/50  train=-2463.2653  val=-2452.9077  recon=-2452.9117  kl_z=0.0009  kl_S=-0.0000  kl_tau=0.0030  (532.8s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 33 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   33/50  train=-2463.9120  val=-2452.9650  recon=-2452.9674  kl_z=0.0007  kl_S=0.0000  kl_tau=0.0017  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 34 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   34/50  train=-2463.6153  val=-2453.0151  recon=-2453.0177  kl_z=0.0008  kl_S=0.0000  kl_tau=0.0018  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 35 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   35/50  train=-2464.0283  val=-2453.0156  recon=-2453.0183  kl_z=0.0006  kl_S=-0.0000  kl_tau=0.0021  (532.8s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 36 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   36/50  train=-2464.0273  val=-2453.0416  recon=-2453.0440  kl_z=0.0007  kl_S=-0.0000  kl_tau=0.0017  (533.1s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 37 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   37/50  train=-2463.7393  val=-2453.0287  recon=-2453.0304  kl_z=0.0005  kl_S=-0.0000  kl_tau=0.0012  (532.8s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 38 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   38/50  train=-2464.1209  val=-2453.0294  recon=-2453.0313  kl_z=0.0006  kl_S=-0.0000  kl_tau=0.0012  (533.0s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 39 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   39/50  train=-2464.1733  val=-2453.0855  recon=-2453.0875  kl_z=0.0004  kl_S=-0.0000  kl_tau=0.0015  (532.8s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 40 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   40/50  train=-2463.8119  val=-2453.0776  recon=-2453.0789  kl_z=0.0004  kl_S=-0.0000  kl_tau=0.0009  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 41 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   41/50  train=-2464.2244  val=-2453.0625  recon=-2453.0647  kl_z=0.0004  kl_S=-0.0000  kl_tau=0.0018  (532.8s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 42 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   42/50  train=-2464.0511  val=-2453.0703  recon=-2453.0715  kl_z=0.0003  kl_S=-0.0000  kl_tau=0.0009  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 43 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   43/50  train=-2464.2427  val=-2453.0650  recon=-2453.0667  kl_z=0.0003  kl_S=-0.0000  kl_tau=0.0014  (533.0s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 44 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   44/50  train=-2464.0830  val=-2453.0694  recon=-2453.0708  kl_z=0.0003  kl_S=-0.0000  kl_tau=0.0011  (532.8s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 45 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   45/50  train=-2464.1500  val=-2453.0756  recon=-2453.0764  kl_z=0.0002  kl_S=-0.0000  kl_tau=0.0005  (532.8s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 46 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   46/50  train=-2464.3211  val=-2453.0789  recon=-2453.0803  kl_z=0.0003  kl_S=-0.0000  kl_tau=0.0011  (532.6s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 47 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   47/50  train=-2464.3598  val=-2453.0863  recon=-2453.0875  kl_z=0.0002  kl_S=-0.0000  kl_tau=0.0010  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 48 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   48/50  train=-2464.0906  val=-2453.0848  recon=-2453.0858  kl_z=0.0002  kl_S=-0.0000  kl_tau=0.0007  (532.8s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 49 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   49/50  train=-2464.3178  val=-2453.0853  recon=-2453.0863  kl_z=0.0002  kl_S=-0.0000  kl_tau=0.0008  (532.9s)
+/Users/tuned-silicon/papers/vibrational-deduction-transformer/train.py:561: RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 50 -- 8.0/8 modes active (>90%). Spectral selection has not yet occurred.  If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  kl_health = spectral_kl_health_check(
+  [WARN] KL health check failed: ['kl_S_ok', 'mode_collapse']
+Epoch   50/50  train=-2464.4142  val=-2453.0852  recon=-2453.0863  kl_z=0.0002  kl_S=-0.0000  kl_tau=0.0008  (532.8s)
+[VDT] Training complete. Best val loss: -2453.0863
+[VDT] Checkpoints saved to checkpoints
