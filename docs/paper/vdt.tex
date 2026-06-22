@@ -67,25 +67,22 @@
 
 \begin{abstract}
 We introduce the \emph{Vibrational Deduction Transformer} (VDT), a generative
-architecture that treats the latent space of a Variational Autoencoder (VAE) as
-a vibrational system grounded in Rayleigh's \emph{Theory of Sound}.
-The VDT decoder maps a stochastic latent code $\mathbf{z}$ to a
+architecture that treats the learning process as a vibrational system grounded
+in Rayleigh's \emph{Theory of Sound}.
+The VDT is a deductive transformer that leverages feature-space graph Laplacian:
+the learning process is guided by the Laplacian eigenbasis as harmonics of a
+spring/string vibrating system endowed with a DensityMass characteristic.
+The decoder maps a stochastic latent code $\mathbf{z}$ to a
 \emph{spectral loading matrix} $\Wmat = \Umat_{1:q}\,\mathrm{diag}(\boldsymbol{\omega})\,\Smat$,
 where $\Umat_{1:q}$ are the $q$ lowest-frequency eigenvectors of a frozen
-ArrowSpace graph-Laplacian index $\Lmat(\mathcal{I})$, $\Smat$ is a learnable
-coefficient matrix in that eigenbasis, and $\boldsymbol{\omega}$ are mode weights
-drawn from a taumode variational prior.
-Here $\Wmat \in \R^{N \times q}$ where $N$ is the number of graph nodes and
-$q$ is the number of retained spectral modes.
-This loading matrix parametrises a differentiable Laplacian $\Lmat(\mathbf{z})$
-over which a heat-kernel \emph{taumode diffusion} decoder reconstructs the input.
+ArrowSpace graph-Laplacian index $\Lmat(\mathcal{I})$, and $\Smat$ is a learnable
+coefficient matrix in that eigenbasis.
+An associative Hopfield-type memory is appended to the spectral artefact emitted
+after training, wiring the vibrational representation into a downstream transformer.
 The objective is a four-term Evidence Lower Bound (ELBO) comprising a
-Gaussian reconstruction term, an isotropic latent KL, an eigenvalue-weighted
-spectral-basis KL penalising high-frequency loadings (spectral Occam's razor),
-and a Gamma-vs-Exponential mode-frequency KL for spectral band selection.
-After training, the model emits a \emph{spectral artefact}
-$\mathcal{A}(\mathcal{I})=\{\hat{\Wmat}, \hat{\boldsymbol{\omega}}, \Smat_{\mathrm{mem}}\}$
-that initialises a Hopfield-type associative memory for a downstream transformer.
+reconstruction term, an isotropic latent KL, an eigenvalue-weighted
+spectral-basis KL (spectral Occam's razor), and a Gamma-vs-Exponential
+mode-frequency KL for spectral band selection.
 Benchmarks on CORA, PubMed, and synthetic spring-network graphs demonstrate
 entropy-controlled spectral graph generation and strong linear-probe accuracy
 of frozen latent representations.
@@ -102,6 +99,26 @@ of frozen latent representations.
 Transformer-based generative models typically organise learned representations
 in a flat isotropic Gaussian latent space, discarding the spectral structure
 of the data.  With ArrowSpace \cite{moriondo2026arrowspace} we demonstrated that any vector space can span a semantic web of relations from its feature-space via graph reconstruction algorithm (Graph Wiring \cite{moriondo2026graphwiring}); this structure carries critical semantic information that a flat prior cannot capture.
+
+The Vibrational Deduction Transformer (VDT) draws direct inspiration from the
+\emph{Lattice Deduction Transformer} (LDT) of Davis et al.~\cite{davis2026ldt}.
+The LDT is a recurrent transformer that approximates logically sound deduction
+by projecting its latent state through a lattice between forward passes.
+Grounded in abstract interpretation~\cite{cousot1977}, it models information states
+as elements of a lattice with a top element $\top$ representing no information and a
+bottom element $\bot$ representing inconsistency; each forward pass of the recurrent
+transformer constitutes a sound deduction step that descends from $\top$ toward
+more informative lattice states.
+The model is trained on-policy via a Solve loop---the same stochastic search
+used at inference---and supervised by a domain-agnostic alpha operator $\alpha$
+that aggregates the valid solutions still consistent with the current state.
+An 800K-parameter LDT achieves 100\% accuracy on Sudoku-Extreme benchmarks
+while frontier large language models score 0\%, demonstrating that structured
+iterative refinement over a discrete lattice can vastly outperform chain-of-thought
+paradigms on hard logical reasoning tasks.
+The VDT adapts this deductive, iterative-refinement philosophy to the continuous
+spectral domain: rather than refining a discrete candidate lattice, VDT refines
+a vibrational latent representation guided by the graph Laplacian eigenbasis.
 
 The Vibrational Deduction Transformer (VDT) is motivated by three converging
 lines of inquiry:
@@ -175,19 +192,6 @@ gives the frequency (smoothness cost) of signal $\mathbf{v}$ on the graph~\cite{
 This is the discrete analogue of Rayleigh's classical frequency functional for
 continuous media~\cite{rayleigh1877}.
 
-\subsection{Probabilistic PCA and Variational Autoencoders}
-\label{sec:background:ppca}
-
-Probabilistic PCA (PPCA)~\cite{tipping1999} provides a generative model
-$p(\mathbf{x}|\mathbf{z}) = \normal(\mathbf{W}\mathbf{z}+\boldsymbol{\mu}, \sigma^2\mathbf{I})$
-where $\Wmat \in \R^{D\times q}$ is the loading matrix, $D$ is the input
-feature dimension, and $\mathbf{z}\sim\normal(\mathbf{0},\mathbf{I})$.
-Variational Autoencoders (VAEs)~\cite{kingma2013} extend this to nonlinear decoders
-by maximising the Evidence Lower Bound
-$\ELBO = \E{\log p(\mathbf{x}|\mathbf{z})} - \KL{q(\mathbf{z}|\mathbf{x})}{p(\mathbf{z})}$.
-The reparameterisation trick $\mathbf{z} = \boldsymbol{\mu} + \boldsymbol{\sigma}\odot\boldsymbol{\epsilon}$,
-$\boldsymbol{\epsilon}\sim\normal(\mathbf{0},\mathbf{I})$, enables gradient-based optimisation.
-
 \subsection{Real Quantum Amplitudes and Signed Interference}
 \label{sec:background:quantum}
 
@@ -220,8 +224,9 @@ through the geometry of the learned eigenvectors.
 \subsection{Overview}
 \label{sec:architecture:overview}
 
-The VDT is a \emph{Spectral-PPCA VAE} whose generative path is mediated by a
-learned graph wiring constrained to the eigenbasis of an ArrowSpace index $\mathcal{I}$.
+The VDT is a deductive transformer that leverages feature-space graph Laplacian:
+its generative path is mediated by a learned graph wiring constrained to the
+eigenbasis of an ArrowSpace index $\mathcal{I}$.
 Figure~\ref{fig:arch} summarises the data flow.
 
 \begin{figure}[ht]
@@ -330,7 +335,7 @@ The spectral loading decoder then produces:
 In Eq.~\eqref{eq:W}, $N$ denotes the \emph{graph node count}---the row
 dimension of the eigenvector matrix $\Umat_{1:q}\in\R^{N\times q}$---and
 is \emph{distinct} from the input feature dimension $D$ used in
-Section~\ref{sec:background:ppca}.  For the PPCA loading matrix
+Section~\ref{sec:background:laplacian}.  For the PPCA loading matrix
 $\Wmat_{\text{PPCA}}\in\R^{D\times q}$ the row index ranges over feature
 coordinates; here it ranges over graph nodes.
 In CORA, for example, $N=2708$ (nodes) while $D=1433$ (bag-of-words
@@ -804,6 +809,17 @@ S.\ Aaronson.
 \newblock \emph{Quantum Computing Since Democritus}, Chapter~9: Quantum.
 \newblock Cambridge University Press, 2013.
 \newblock \url{https://scottaaronson.com/democritus/lec9.html}
+
+\bibitem{davis2026ldt}
+L.~Davis, L.~Haller, A.~Alfarano, and M.~Santolucito.
+\newblock Lattice Deduction Transformers.
+\newblock \emph{arXiv:2605.08605}, 2026.
+\newblock \url{https://arxiv.org/abs/2605.08605}
+
+\bibitem{cousot1977}
+P.~Cousot and R.~Cousot.
+\newblock Abstract interpretation: a unified lattice model for static analysis of programs by construction or approximation of fixpoints.
+\newblock In \emph{Proceedings of the 4th ACM Symposium on Principles of Programming Languages}, pages 238--252, 1977.
 
 \bibitem{moriondo2026graphwiring}
 L.~Moriondo, 
