@@ -71,11 +71,11 @@ architecture that treats the learning process as a vibrational system grounded
 in Rayleigh's \emph{Theory of Sound}.
 The VDT is a deductive transformer that leverages feature-space graph Laplacian:
 the learning process is guided by the Laplacian eigenbasis as harmonics of a
-spring/string vibrating system endowed with a DensityMass characteristic.
+spring/string vibrating system endowed with a characteristic density matrix.
 The decoder maps a stochastic latent code $\mathbf{z}$ to a
 \emph{spectral loading matrix} $\Wmat = \Umat_{1:q}\,\mathrm{diag}(\boldsymbol{\omega})\,\Smat$,
 where $\Umat_{1:q}$ are the $q$ lowest-frequency eigenvectors of a frozen
-ArrowSpace graph-Laplacian index $\Lmat(\mathcal{I})$, and $\Smat$ is a learnable
+ArrowSpace graph Laplacian index $\Lmat(\mathcal{I})$, and $\Smat$ is a learnable
 coefficient matrix in that eigenbasis.
 An associative Hopfield-type memory is appended to the spectral artefact emitted
 after training, wiring the vibrational representation into a downstream transformer.
@@ -120,7 +120,7 @@ The VDT adapts this deductive, iterative-refinement philosophy to the continuous
 spectral domain: rather than refining a discrete candidate lattice, VDT refines
 a vibrational latent representation guided by the graph Laplacian eigenbasis.
 
-The Vibrational Deduction Transformer (VDT) is motivated by three converging
+Based on this, the Vibrational Deduction Transformer (VDT) is motivated by three converging
 lines of inquiry:
 
 \begin{enumerate}
@@ -785,7 +785,7 @@ A Spectral Diffusion improvement on this architecture is work in progress.
 % -----------------------------------------------------------------------
 
 The ArrowSpace computational library and the VDT codebase are developed and
-maintained by the tuned-org-uk team.
+maintained by the \href{https://github.com/sponsors/tuned-org-uk}{tuned-org-uk team}.
 The architecture inherits the PPCA-to-VAE progression formalised in
 \emph{The Little Book of Generative AI Foundations}~\cite{chen2026}.
 
