@@ -574,7 +574,15 @@ all signs, including the sign on $\ln\Gamma(a)$.
 \label{sec:memory}
 % -----------------------------------------------------------------------
 
-After training, the model operates in a two-phase regime.
+After training, the VDT operates in a two-phase regime that separates
+\emph{spectral distillation} from \emph{associative deployment}.
+The first phase extracts a compact, graph-indexed summary of everything the
+model has learned about the vibrational structure of the data; the second phase
+injects that summary as a structured prior into the weight matrices of a
+downstream transformer, enabling fast pattern-completion without retraining.
+Together, the two phases convert the continuous variational posterior into a
+discrete, inspectable memory store whose keys are guaranteed orthogonal by
+construction---a property inherited directly from the Laplacian eigenbasis.
 
 \subsection{Phase 1: Spectral Artefact Extraction}
 \label{sec:memory:artefact}
@@ -595,6 +603,37 @@ where $\hat{\mathbf{w}}_k\in\R^N$ is the $k$-th column of $\hat{\Wmat}\in\R^{N\t
 and $d_\theta(\hat{\mathbf{w}}_k)$ is the decoder response at spectral direction $k$.
 $\Smat_{\mathrm{mem}}$ is a Hopfield outer-product memory matrix~\cite{hopfield1982}.
 
+The artefact $\mathcal{A}(\mathcal{I})$ can be understood as a three-component
+\emph{spectral certificate} of the index $\mathcal{I}$:
+
+\begin{itemize}
+  \item $\hat{\Wmat}\in\R^{N\times q}$: the MAP spectral loading matrix,
+        whose $k$-th column is the learned spectral embedding of all $N$ graph
+        nodes along the $k$-th vibrational mode.  Nodes that are spectrally
+        similar---in the sense of the frozen Laplacian---cluster in the columns
+        of $\hat{\Wmat}$, encoding the community structure of the graph as a
+        continuous vibrational pattern.
+  \item $\hat{\boldsymbol{\omega}}\in\R^q_{>0}$: the posterior mode-weight means,
+        which record which vibrational harmonics the model selected as
+        informative.  Low-frequency modes (small $\lambda_k$) receive higher
+        weight under the taumode prior; the learned $\hat{\omega}_k$ profile
+        therefore constitutes a \emph{spectral fingerprint} that distinguishes
+        graphs with different connectivity regimes.
+  \item $\Smat_{\mathrm{mem}}\in\R^{N\times N}$: the Hopfield memory matrix,
+        constructed as a weighted sum of outer products $\hat{\mathbf{w}}_k\hat{\mathbf{w}}_k\T$
+        scaled by both the mode weight $\hat{\omega}_k$ and the decoder
+        response $d_\theta(\hat{\mathbf{w}}_k)$.  This matrix encodes pairwise
+        node associations in the spectral domain: entry $(i,j)$ measures the
+        degree to which nodes $i$ and $j$ co-activate across the retained
+        vibrational modes, weighted by how strongly each mode is represented
+        in the reconstruction.
+\end{itemize}
+
+Critically, the artefact is computed in a single deterministic forward pass at
+$\mathbf{z}=\mathbf{0}$, requiring no sampling and no additional training.
+It is a \emph{frozen summary} of the posterior that can be serialised,
+transferred, or reused across different downstream tasks.
+
 \subsection{Phase 2: Spectral Memory Transformer}
 \label{sec:memory:transformer}
 
@@ -605,6 +644,38 @@ $\Smat_{\mathrm{mem}} \leftarrow \Smat_{\mathrm{mem}} + \eta\,(\mathbf{v}-\Smat_
 write new associations without corrupting spectral key orthogonality.
 Key orthogonality (inherited from Laplacian eigenvectors) maximises
 retrieval SNR by construction.
+
+The role of the associative memory is best understood as an
+\emph{inline spectral prior}: rather than treating each transformer
+forward pass as starting from a blank context, the model begins every
+query with the graph's vibrational structure already imprinted in its
+weight matrices.  This is the continuous-spectral counterpart of the
+LDT's lattice projection~\cite{davis2026ldt}: where the LDT constrains
+each recurrent step to remain within a lattice of logically consistent
+states, the VDT constrains the transformer's value space to remain
+aligned with the spectral geometry of the index $\mathcal{I}$.
+
+The delta-rule update has two important properties.  First, because the
+keys $\mathbf{k}$ are drawn from the Laplacian eigenbasis, they are mutually
+orthogonal: $\mathbf{k}_k\T\mathbf{k}_{k'} = \delta_{kk'}$.  Orthogonal keys
+eliminate cross-talk between stored patterns, so the retrieval signal-to-noise
+ratio scales as $\Theta(1)$ rather than degrading as $O(1/\sqrt{N_{\text{stored}}})$
+under a random-key assumption~\cite{hopfield1982}.
+Second, the update is \emph{local} in the spectral domain: writing a new
+association $(\mathbf{v}, \mathbf{k})$ only modifies the projection of
+$\Smat_{\mathrm{mem}}$ onto the subspace spanned by $\mathbf{k}$, leaving all
+orthogonal components---and hence all previously stored spectral patterns---intact.
+This gives the memory a \emph{non-interfering write} property that classical
+full-matrix attention updates do not enjoy.
+
+In practice, the initialisation of transformer value matrices from
+$\Smat_{\mathrm{mem}}$ acts as a \emph{warm start}: the model does not need
+to rediscover the spectral geometry of the graph from context tokens;
+instead, it inherits that geometry as a structural bias that can be refined
+but not easily overwritten.  This is particularly valuable in low-data regimes
+or when the downstream task involves the same graph index $\mathcal{I}$ used
+during VDT training, as the spectral prior concentrates probability mass on
+graph-consistent patterns before any task-specific supervision is applied.
 
 \subsection{Entropy-Controlled Generation}
 \label{sec:memory:generation}
@@ -620,6 +691,33 @@ The spectral entropy of the generated Laplacian~\cite{jaynes1957}:
 can be steered by conditioning $\mathbf{z}$ on a target entropy level,
 enabling \emph{entropy-controlled spectral graph generation}---a capability
 absent in flat-prior VAEs.
+
+The spectral entropy $H(\Lmat(\mathbf{z}))$ serves as a coarse-grained
+\emph{order parameter} for the generated graph: a low-entropy Laplacian
+corresponds to a graph whose eigenvalue mass is concentrated in a few
+low-frequency modes, indicating a highly structured, community-like
+connectivity; a high-entropy Laplacian corresponds to a near-uniform
+eigenspectrum, indicating a more random or expander-like wiring.
+Because the latent code $\mathbf{z}$ parametrises the loading matrix $\Wmat$
+and hence the full eigenspectrum of $\Lmat(\mathbf{z})$, the encoder learns
+a direct mapping from input graphs to entropy levels during training,
+and at generation time the decoder can be queried at any
+$\mathbf{z}$ whose expected entropy---computed from the variational
+posterior---matches a desired target.
+
+The associative memory $\Smat_{\mathrm{mem}}$ interacts with this
+entropy-control mechanism in a complementary way.  Each memory matrix is
+extracted at the prior mean $\mathbf{z}=\mathbf{0}$, which corresponds to
+the \emph{average} spectral configuration of the training distribution.
+When a downstream transformer is initialised from $\Smat_{\mathrm{mem}}$
+and then presented with a query latent $\mathbf{z}^*$ associated with a
+particular entropy level, the delta-rule updates shift the memory toward
+the spectral patterns characteristic of that entropy regime without
+erasing the baseline structure.
+This allows the same memory module to serve as a \emph{spectral prior
+library}: a single trained VDT can support multiple downstream tasks
+operating at different entropy levels, each refining the shared prior
+rather than training from scratch.
 
 % -----------------------------------------------------------------------
 \section{Stability Analysis}
