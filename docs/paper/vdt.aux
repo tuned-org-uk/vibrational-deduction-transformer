@@ -27,8 +27,9 @@
 \newlabel{sec:architecture}{{3}{4}{Architecture}{section.3}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Overview}{4}{subsection.3.1}\protected@file@percent }
 \newlabel{sec:architecture:overview}{{3.1}{4}{Overview}{subsection.3.1}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces VDT v2 data flow (forward signature: \texttt  {(x, U\_q, eigvals\_q, node\_idx, spectral\_cache)}). The index $\mathcal  {I}$ enters only through the frozen eigenpair $(\mathbf  {U}_q, \bm  {\lambda }_q)$ precomputed once before training; no Laplacian eigendecomposition is performed at training time. The eigenvalue fingerprint is derived \emph  {internally} by \texttt  {WiringEncoder} from \texttt  {eigvals\_q}. \texttt  {log\_var\_S} is a separate output of \texttt  {SpectralLoadingDecoder} required for the $\mathrm  {KL}_S$ computation (fix~\#52). Note: $N$ is the graph node count; $D$ is the input feature dimension. These differ in practice (e.g.\ CORA: $N{=}2708$, $D{=}1433$).}}{5}{figure.1}\protected@file@percent }
-\newlabel{fig:arch}{{1}{5}{VDT v2 data flow (forward signature: \texttt {(x, U\_q, eigvals\_q, node\_idx, spectral\_cache)}). The index $\mathcal {I}$ enters only through the frozen eigenpair $(\Umat _q, \boldsymbol {\lambda }_q)$ precomputed once before training; no Laplacian eigendecomposition is performed at training time. The eigenvalue fingerprint is derived \emph {internally} by \texttt {WiringEncoder} from \texttt {eigvals\_q}. \texttt {log\_var\_S} is a separate output of \texttt {SpectralLoadingDecoder} required for the $\mathrm {KL}_S$ computation (fix~\#52). Note: $N$ is the graph node count; $D$ is the input feature dimension. These differ in practice (e.g.\ CORA: $N{=}2708$, $D{=}1433$)}{figure.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces VDT v2 data flow (forward signature: \texttt  {(x, U\_q, eigvals\_q, node\_idx, spectral\_cache)}). The index $\mathcal  {I}$ enters only through the frozen eigenpair $(\mathbf  {U}_q, \bm  {\lambda }_q)$ precomputed once before training; no Laplacian eigendecomposition is performed at training time. The eigenvalue fingerprint is derived \emph  {internally} by \texttt  {WiringEncoder} from \texttt  {eigvals\_q}. \texttt  {log\_var\_S} is a separate output of \texttt  {SpectralLoadingDecoder} required for the $\mathrm  {KL}_S$ computation (fix~\#52). Note: $N$ is the graph node count; $D$ is the input feature dimension. These differ in practice (e.g.\ CORA: $N{=}2708$, $D{=}1433$).}}{5}{figure.caption.2}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{fig:arch}{{1}{5}{VDT v2 data flow (forward signature: \texttt {(x, U\_q, eigvals\_q, node\_idx, spectral\_cache)}). The index $\mathcal {I}$ enters only through the frozen eigenpair $(\Umat _q, \boldsymbol {\lambda }_q)$ precomputed once before training; no Laplacian eigendecomposition is performed at training time. The eigenvalue fingerprint is derived \emph {internally} by \texttt {WiringEncoder} from \texttt {eigvals\_q}. \texttt {log\_var\_S} is a separate output of \texttt {SpectralLoadingDecoder} required for the $\mathrm {KL}_S$ computation (fix~\#52). Note: $N$ is the graph node count; $D$ is the input feature dimension. These differ in practice (e.g.\ CORA: $N{=}2708$, $D{=}1433$)}{figure.caption.2}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.2}WiringEncoder}{5}{subsection.3.2}\protected@file@percent }
 \newlabel{sec:architecture:encoder}{{3.2}{5}{WiringEncoder}{subsection.3.2}{}}
 \newlabel{eq:fingerprint}{{2}{5}{WiringEncoder}{equation.2}{}}
@@ -71,8 +72,8 @@
 \newlabel{eq:kltau}{{16}{8}{Term 4: taumode Frequency KL}{equation.16}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.5}Comparison with the Base Wiring AE}{8}{subsection.4.5}\protected@file@percent }
 \newlabel{sec:elbo:comparison}{{4.5}{8}{Comparison with the Base Wiring AE}{subsection.4.5}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces ELBO structure: Base Wiring AE vs.\ VDT.}}{8}{table.1}\protected@file@percent }
-\newlabel{tab:elbo}{{1}{8}{ELBO structure: Base Wiring AE vs.\ VDT}{table.1}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces ELBO structure: Base Wiring AE vs.\ VDT.}}{8}{table.caption.3}\protected@file@percent }
+\newlabel{tab:elbo}{{1}{8}{ELBO structure: Base Wiring AE vs.\ VDT}{table.caption.3}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {5}Spectral Artefact and Associative Memory}{8}{section.5}\protected@file@percent }
 \newlabel{sec:memory}{{5}{8}{Spectral Artefact and Associative Memory}{section.5}{}}
 \citation{hopfield1982}
@@ -94,14 +95,14 @@
 \newlabel{sec:stability:hierarchy}{{6.1}{10}{Six-Level Hierarchy}{subsection.6.1}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {6.2}CFL Geometry Check (Levels 1--2)}{11}{subsection.6.2}\protected@file@percent }
 \newlabel{sec:stability:cfl}{{6.2}{11}{CFL Geometry Check (Levels 1--2)}{subsection.6.2}{}}
-\@writefile{toc}{\contentsline {paragraph}{Graph connectivity (Level 1).}{11}{section*.2}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{CFL constraint (Level 2).}{11}{section*.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Graph connectivity (Level 1).}{11}{section*.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{CFL constraint (Level 2).}{11}{section*.5}\protected@file@percent }
 \newlabel{eq:cfl}{{19}{11}{CFL constraint (Level 2)}{equation.19}{}}
 \newlabel{eq:cfl-margin}{{20}{11}{CFL constraint (Level 2)}{equation.20}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {6.3}Damping and Modal Energy (Levels 2--3)}{11}{subsection.6.3}\protected@file@percent }
 \newlabel{sec:stability:damping}{{6.3}{11}{Damping and Modal Energy (Levels 2--3)}{subsection.6.3}{}}
-\@writefile{toc}{\contentsline {paragraph}{Damping positivity (Level 2).}{11}{section*.4}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Modal energy monotonicity (Level 3).}{11}{section*.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Damping positivity (Level 2).}{11}{section*.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Modal energy monotonicity (Level 3).}{11}{section*.7}\protected@file@percent }
 \newlabel{eq:spectral-entropy-diag}{{21}{11}{Modal energy monotonicity (Level 3)}{equation.21}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {6.4}Density Matrix Validity (Level 4)}{12}{subsection.6.4}\protected@file@percent }
 \newlabel{sec:stability:rho}{{6.4}{12}{Density Matrix Validity (Level 4)}{subsection.6.4}{}}
@@ -111,9 +112,9 @@
 \newlabel{eq:eta}{{23}{12}{Optimiser Landscape (Level 5)}{equation.23}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {6.6}Mode Weight Collapse and Explosion (Level 6)}{12}{subsection.6.6}\protected@file@percent }
 \newlabel{sec:stability:modeweights}{{6.6}{12}{Mode Weight Collapse and Explosion (Level 6)}{subsection.6.6}{}}
-\@writefile{toc}{\contentsline {paragraph}{Collapse (retained + extended).}{12}{section*.6}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Mode explosion (new).}{12}{section*.7}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{ELBO KL health.}{12}{section*.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Collapse (retained + extended).}{12}{section*.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Mode explosion (new).}{12}{section*.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{ELBO KL health.}{12}{section*.10}\protected@file@percent }
 \citation{kipf2016}
 \citation{kipf2016}
 \citation{hu2020}
@@ -121,34 +122,34 @@
 \newlabel{sec:stability:floor}{{6.7}{13}{Spectral Eigenvalue Floor}{subsection.6.7}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {6.8}Diagnostic Key Mapping}{13}{subsection.6.8}\protected@file@percent }
 \newlabel{sec:stability:keys}{{6.8}{13}{Diagnostic Key Mapping}{subsection.6.8}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Stability diagnostic keys and their theoretical counterparts.}}{13}{table.2}\protected@file@percent }
-\newlabel{tab:stability-keys}{{2}{13}{Stability diagnostic keys and their theoretical counterparts}{table.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Stability diagnostic keys and their theoretical counterparts.}}{13}{table.caption.11}\protected@file@percent }
+\newlabel{tab:stability-keys}{{2}{13}{Stability diagnostic keys and their theoretical counterparts}{table.caption.11}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {7}Experiments}{13}{section.7}\protected@file@percent }
 \newlabel{sec:experiments}{{7}{13}{Experiments}{section.7}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {7.1}Datasets}{13}{subsection.7.1}\protected@file@percent }
 \newlabel{sec:experiments:data}{{7.1}{13}{Datasets}{subsection.7.1}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {7.2}Evaluation Metrics}{13}{subsection.7.2}\protected@file@percent }
 \newlabel{sec:experiments:metrics}{{7.2}{13}{Evaluation Metrics}{subsection.7.2}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces VDT benchmark metrics with values from Runs 2, 3, and 4 (CORA, epoch 50).}}{14}{table.3}\protected@file@percent }
-\newlabel{tab:metrics}{{3}{14}{VDT benchmark metrics with values from Runs 2, 3, and 4 (CORA, epoch 50)}{table.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces VDT benchmark metrics with values from Runs 2, 3, and 4 (CORA, epoch 50).}}{14}{table.caption.12}\protected@file@percent }
+\newlabel{tab:metrics}{{3}{14}{VDT benchmark metrics with values from Runs 2, 3, and 4 (CORA, epoch 50)}{table.caption.12}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {7.3}Training Protocol}{14}{subsection.7.3}\protected@file@percent }
 \newlabel{sec:experiments:protocol}{{7.3}{14}{Training Protocol}{subsection.7.3}{}}
-\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Hyperparameter comparison across Runs 2, 3, and 4.}}{14}{table.4}\protected@file@percent }
-\newlabel{tab:runs}{{4}{14}{Hyperparameter comparison across Runs 2, 3, and 4}{table.4}{}}
-\@writefile{toc}{\contentsline {paragraph}{Run 2 (\texttt  {lam\_s=0.1}, \texttt  {mass\_clip=1000}, \texttt  {dt\_init=0.001}, $q=8$).}{14}{section*.9}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Run 3 (\texttt  {lam\_s=1.0}, \texttt  {mass\_clip=100}, \texttt  {dt\_init=0.003}, $q=8$).}{14}{section*.10}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Run 4 (\texttt  {lam\_s=0.2}, \texttt  {mass\_clip=100}, \texttt  {dt\_init=0.001}, $q=4$).}{14}{section*.11}\protected@file@percent }
-\citation{rayleigh1877}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Hyperparameter comparison across Runs 2, 3, and 4.}}{14}{table.caption.13}\protected@file@percent }
+\newlabel{tab:runs}{{4}{14}{Hyperparameter comparison across Runs 2, 3, and 4}{table.caption.13}{}}
+\@writefile{toc}{\contentsline {paragraph}{Run 2 (\texttt  {lam\_s=0.1}, \texttt  {mass\_clip=1000}, \texttt  {dt\_init=0.001}, $q=8$).}{14}{section*.14}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Run 3 (\texttt  {lam\_s=1.0}, \texttt  {mass\_clip=100}, \texttt  {dt\_init=0.003}, $q=8$).}{14}{section*.15}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Run 4 (\texttt  {lam\_s=0.2}, \texttt  {mass\_clip=100}, \texttt  {dt\_init=0.001}, $q=4$).}{14}{section*.16}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {7.4}Mode Selection and KL Dynamics}{15}{subsection.7.4}\protected@file@percent }
 \newlabel{sec:experiments:modes}{{7.4}{15}{Mode Selection and KL Dynamics}{subsection.7.4}{}}
-\@writefile{toc}{\contentsline {paragraph}{Persistent mode collapse.}{15}{section*.12}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Simultaneous mode explosion.}{15}{section*.13}\protected@file@percent }
-\@writefile{toc}{\contentsline {subsection}{\numberline {7.5}ELBO Learning Curves}{15}{subsection.7.5}\protected@file@percent }
-\newlabel{sec:experiments:curves}{{7.5}{15}{ELBO Learning Curves}{subsection.7.5}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Training and validation ELBO for Run~2 (left, \texttt  {lam\_s=0.1}, $q=8$), Run~3 (centre, \texttt  {lam\_s=1.0}, $q=8$), and Run~4 (right, \texttt  {lam\_s=0.2}, $q=4$). Annotations: (1) \texttt  {mode\_collapse} fires from epoch~1 in all runs; (2) $\mathrm  {KL}_S$ first reaches zero at epoch~10 in Run~3 only; (3) Run~4 shows no plateau at epoch~50, suggesting continued improvement is achievable with more epochs.}}{15}{figure.2}\protected@file@percent }
-\newlabel{fig:curves}{{2}{15}{Training and validation ELBO for Run~2 (left, \texttt {lam\_s=0.1}, $q=8$), Run~3 (centre, \texttt {lam\_s=1.0}, $q=8$), and Run~4 (right, \texttt {lam\_s=0.2}, $q=4$). Annotations: (1) \texttt {mode\_collapse} fires from epoch~1 in all runs; (2) $\mathrm {KL}_S$ first reaches zero at epoch~10 in Run~3 only; (3) Run~4 shows no plateau at epoch~50, suggesting continued improvement is achievable with more epochs}{figure.2}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {7.6}Flagship Demo: Entropy-Controlled Spectral Generation}{15}{subsection.7.6}\protected@file@percent }
-\newlabel{sec:experiments:demo}{{7.6}{15}{Flagship Demo: Entropy-Controlled Spectral Generation}{subsection.7.6}{}}
+\@writefile{toc}{\contentsline {paragraph}{Persistent mode collapse.}{15}{section*.17}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Simultaneous mode explosion.}{15}{section*.18}\protected@file@percent }
+\citation{rayleigh1877}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.5}ELBO Learning Curves}{16}{subsection.7.5}\protected@file@percent }
+\newlabel{sec:experiments:curves}{{7.5}{16}{ELBO Learning Curves}{subsection.7.5}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Training and validation ELBO for Run~2 (top), Run~3 (centre), and Run~4 (bottom). Each panel shows ELBO, KL$_z$, KL$_S$, and KL$_\tau $ over epochs. Run~3 shows KL$_S$ collapse to zero at epoch~10; Run~4 shows no plateau at epoch~50, suggesting continued improvement.}}{16}{figure.caption.19}\protected@file@percent }
+\newlabel{fig:curves}{{2}{16}{Training and validation ELBO for Run~2 (top), Run~3 (centre), and Run~4 (bottom). Each panel shows ELBO, KL$_z$, KL$_S$, and KL$_\tau $ over epochs. Run~3 shows KL$_S$ collapse to zero at epoch~10; Run~4 shows no plateau at epoch~50, suggesting continued improvement}{figure.caption.19}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {7.6}Flagship Demo: Entropy-Controlled Spectral Generation}{16}{subsection.7.6}\protected@file@percent }
+\newlabel{sec:experiments:demo}{{7.6}{16}{Flagship Demo: Entropy-Controlled Spectral Generation}{subsection.7.6}{}}
 \citation{kipf2016}
 \citation{belkin2003}
 \citation{coifman2006}
@@ -161,15 +162,15 @@
 \citation{openai_gpt5}
 \citation{nvidia_nemotron}
 \citation{anthropic_claude46}
-\@writefile{toc}{\contentsline {section}{\numberline {8}Related Work}{16}{section.8}\protected@file@percent }
-\newlabel{sec:related}{{8}{16}{Related Work}{section.8}{}}
-\@writefile{toc}{\contentsline {paragraph}{Spectral graph autoencoders.}{16}{section*.14}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Probabilistic PCA on graphs.}{16}{section*.15}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{NVIB.}{16}{section*.16}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Beta-VAE and disentanglement.}{16}{section*.17}\protected@file@percent }
-\@writefile{toc}{\contentsline {paragraph}{Real quantum mechanics.}{16}{section*.18}\protected@file@percent }
-\@writefile{toc}{\contentsline {section}{\numberline {9}Discussion and Future Work}{16}{section.9}\protected@file@percent }
-\newlabel{sec:conclusion}{{9}{16}{Discussion and Future Work}{section.9}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {8}Related Work}{17}{section.8}\protected@file@percent }
+\newlabel{sec:related}{{8}{17}{Related Work}{section.8}{}}
+\@writefile{toc}{\contentsline {paragraph}{Spectral graph autoencoders.}{17}{section*.20}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Probabilistic PCA on graphs.}{17}{section*.21}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{NVIB.}{17}{section*.22}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Beta-VAE and disentanglement.}{17}{section*.23}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Real quantum mechanics.}{17}{section*.24}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {9}Discussion and Future Work}{17}{section.9}\protected@file@percent }
+\newlabel{sec:conclusion}{{9}{17}{Discussion and Future Work}{section.9}{}}
 \bibstyle{plain}
 \bibcite{rayleigh1877}{1}
 \bibcite{aaronson2013}{2}

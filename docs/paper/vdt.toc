@@ -21,35 +21,35 @@
 \contentsline {section}{\numberline {6}Stability Analysis}{10}{section.6}%
 \contentsline {subsection}{\numberline {6.1}Six-Level Hierarchy}{10}{subsection.6.1}%
 \contentsline {subsection}{\numberline {6.2}CFL Geometry Check (Levels 1--2)}{11}{subsection.6.2}%
-\contentsline {paragraph}{Graph connectivity (Level 1).}{11}{section*.2}%
-\contentsline {paragraph}{CFL constraint (Level 2).}{11}{section*.3}%
+\contentsline {paragraph}{Graph connectivity (Level 1).}{11}{section*.4}%
+\contentsline {paragraph}{CFL constraint (Level 2).}{11}{section*.5}%
 \contentsline {subsection}{\numberline {6.3}Damping and Modal Energy (Levels 2--3)}{11}{subsection.6.3}%
-\contentsline {paragraph}{Damping positivity (Level 2).}{11}{section*.4}%
-\contentsline {paragraph}{Modal energy monotonicity (Level 3).}{11}{section*.5}%
+\contentsline {paragraph}{Damping positivity (Level 2).}{11}{section*.6}%
+\contentsline {paragraph}{Modal energy monotonicity (Level 3).}{11}{section*.7}%
 \contentsline {subsection}{\numberline {6.4}Density Matrix Validity (Level 4)}{12}{subsection.6.4}%
 \contentsline {subsection}{\numberline {6.5}Optimiser Landscape (Level 5)}{12}{subsection.6.5}%
 \contentsline {subsection}{\numberline {6.6}Mode Weight Collapse and Explosion (Level 6)}{12}{subsection.6.6}%
-\contentsline {paragraph}{Collapse (retained + extended).}{12}{section*.6}%
-\contentsline {paragraph}{Mode explosion (new).}{12}{section*.7}%
-\contentsline {paragraph}{ELBO KL health.}{12}{section*.8}%
+\contentsline {paragraph}{Collapse (retained + extended).}{12}{section*.8}%
+\contentsline {paragraph}{Mode explosion (new).}{12}{section*.9}%
+\contentsline {paragraph}{ELBO KL health.}{12}{section*.10}%
 \contentsline {subsection}{\numberline {6.7}Spectral Eigenvalue Floor}{13}{subsection.6.7}%
 \contentsline {subsection}{\numberline {6.8}Diagnostic Key Mapping}{13}{subsection.6.8}%
 \contentsline {section}{\numberline {7}Experiments}{13}{section.7}%
 \contentsline {subsection}{\numberline {7.1}Datasets}{13}{subsection.7.1}%
 \contentsline {subsection}{\numberline {7.2}Evaluation Metrics}{13}{subsection.7.2}%
 \contentsline {subsection}{\numberline {7.3}Training Protocol}{14}{subsection.7.3}%
-\contentsline {paragraph}{Run 2 (\texttt {lam\_s=0.1}, \texttt {mass\_clip=1000}, \texttt {dt\_init=0.001}, $q=8$).}{14}{section*.9}%
-\contentsline {paragraph}{Run 3 (\texttt {lam\_s=1.0}, \texttt {mass\_clip=100}, \texttt {dt\_init=0.003}, $q=8$).}{14}{section*.10}%
-\contentsline {paragraph}{Run 4 (\texttt {lam\_s=0.2}, \texttt {mass\_clip=100}, \texttt {dt\_init=0.001}, $q=4$).}{14}{section*.11}%
+\contentsline {paragraph}{Run 2 (\texttt {lam\_s=0.1}, \texttt {mass\_clip=1000}, \texttt {dt\_init=0.001}, $q=8$).}{14}{section*.14}%
+\contentsline {paragraph}{Run 3 (\texttt {lam\_s=1.0}, \texttt {mass\_clip=100}, \texttt {dt\_init=0.003}, $q=8$).}{14}{section*.15}%
+\contentsline {paragraph}{Run 4 (\texttt {lam\_s=0.2}, \texttt {mass\_clip=100}, \texttt {dt\_init=0.001}, $q=4$).}{14}{section*.16}%
 \contentsline {subsection}{\numberline {7.4}Mode Selection and KL Dynamics}{15}{subsection.7.4}%
-\contentsline {paragraph}{Persistent mode collapse.}{15}{section*.12}%
-\contentsline {paragraph}{Simultaneous mode explosion.}{15}{section*.13}%
-\contentsline {subsection}{\numberline {7.5}ELBO Learning Curves}{15}{subsection.7.5}%
-\contentsline {subsection}{\numberline {7.6}Flagship Demo: Entropy-Controlled Spectral Generation}{15}{subsection.7.6}%
-\contentsline {section}{\numberline {8}Related Work}{16}{section.8}%
-\contentsline {paragraph}{Spectral graph autoencoders.}{16}{section*.14}%
-\contentsline {paragraph}{Probabilistic PCA on graphs.}{16}{section*.15}%
-\contentsline {paragraph}{NVIB.}{16}{section*.16}%
-\contentsline {paragraph}{Beta-VAE and disentanglement.}{16}{section*.17}%
-\contentsline {paragraph}{Real quantum mechanics.}{16}{section*.18}%
-\contentsline {section}{\numberline {9}Discussion and Future Work}{16}{section.9}%
+\contentsline {paragraph}{Persistent mode collapse.}{15}{section*.17}%
+\contentsline {paragraph}{Simultaneous mode explosion.}{15}{section*.18}%
+\contentsline {subsection}{\numberline {7.5}ELBO Learning Curves}{16}{subsection.7.5}%
+\contentsline {subsection}{\numberline {7.6}Flagship Demo: Entropy-Controlled Spectral Generation}{16}{subsection.7.6}%
+\contentsline {section}{\numberline {8}Related Work}{17}{section.8}%
+\contentsline {paragraph}{Spectral graph autoencoders.}{17}{section*.20}%
+\contentsline {paragraph}{Probabilistic PCA on graphs.}{17}{section*.21}%
+\contentsline {paragraph}{NVIB.}{17}{section*.22}%
+\contentsline {paragraph}{Beta-VAE and disentanglement.}{17}{section*.23}%
+\contentsline {paragraph}{Real quantum mechanics.}{17}{section*.24}%
+\contentsline {section}{\numberline {9}Discussion and Future Work}{17}{section.9}%
