@@ -752,21 +752,165 @@ failures at lower levels must be resolved before diagnosing higher ones:
         $\|\hat{\Wmat}\|_F$ non-degenerate.
 \end{enumerate}
 
-\subsection{Mode Weight Collapse}
-\label{sec:stability:collapse}
+The executable form of this hierarchy is \texttt{pre\_training\_checks} in
+\texttt{vdt/stability.py}, which runs Levels 1--2 before any training step
+begins and raises a \texttt{RuntimeError} on hard failures.
+Soft per-epoch diagnostics are reported by \texttt{stability\_diagnostics}.
+The ordering is strict: the CFL bound at Level~1 is meaningless on a
+disconnected graph, so graph connectivity is asserted first; damping
+positivity at Level~2 is meaningless if the CFL bound is violated; and so on.
 
-For high-frequency modes with large $\tau\lambda_k$, the Exponential prior pushes
-$q(\omega_k)$ towards a point mass near zero.  This is \emph{correct behaviour}
-(mode selection), but if it extends to low-frequency modes the loading matrix
-degenerates.  Two mitigations are applied:
+% ---
 
+\subsection{CFL Geometry Check (Levels 1--2)}
+\label{sec:stability:cfl}
+
+\paragraph{Graph connectivity (Level 1).}
+The Laplacian $\Lmat$ must have exactly one zero eigenvalue, i.e.\ the
+Fiedler value $\lambda_2 > 0$.  \texttt{pre\_training\_checks} counts
+eigenvalues below the threshold $\varepsilon_0 = 10^{-3}$; more than one
+sub-threshold eigenvalue triggers an immediate \texttt{RuntimeError} before
+any gradient step.  This hard failure is intentional: subsequent CFL and
+damping checks produce meaningless bounds on a disconnected graph, and
+proceeding would silently corrupt all higher-level diagnostics.
+
+\paragraph{CFL constraint (Level 2).}
+Numerical stability of the wave update requires the time step to satisfy
+\begin{equation}
+  \Delta t \;\leq\; \sqrt{\frac{2}{\lambda_{\max}(\Lmat_f)}}.
+  \label{eq:cfl}
+\end{equation}
+\texttt{stability\_diagnostics} computes \emph{two} CFL bounds at each epoch:
+a base-Laplacian bound from the pre-computed eigenvalues (\texttt{CFL\_ok},
+\texttt{dt\_max\_CFL}) and a tighter \emph{dynamic} bound using the
+Gershgorin upper estimate of $\lambda_{\max}(\Lmat_f)$
+(\texttt{cfl\_Lf\_ok}, \texttt{dt\_max\_CFL\_Lf}).
+The ratio
+\begin{equation}
+  r_{\mathrm{CFL}} = \frac{\lambda_{\max}(\Lmat_f)}{\lambda_{\max}(\Lmat)}
+  \label{eq:cfl-margin}
+\end{equation}
+quantifies how much the feature-space Laplacian has sharpened beyond the base
+graph; $r_{\mathrm{CFL}} > 1$ means the base-only check produces a false
+negative.  The authoritative flag is \texttt{cfl\_Lf\_ok}.
+
+% ---
+
+\subsection{Damping and Modal Energy (Levels 2--3)}
+\label{sec:stability:damping}
+
+\paragraph{Damping positivity (Level 2).}
+Each feature dimension carries a damping coefficient $\gamma_k$ produced by a
+\texttt{softplus} activation, guaranteeing $\gamma_k > 0$ by construction.
+\texttt{stability\_diagnostics} classifies mode $k$ as \emph{underdamped} when
+$\sqrt{\lambda_k} > \overline{\gamma}$ (mean damping), reporting
+\texttt{n\_underdamped\_modes} and \texttt{frac\_underdamped}.
+A high fraction of underdamped modes indicates that the damping vector is too
+small relative to the spectral bandwidth of $\Lmat_f$: energy will oscillate
+rather than decay, destabilising the recurrent VDT stack.
+
+\paragraph{Modal energy monotonicity (Level 3).}
+For each consecutive pair of VDT depth steps $(Q_k, Q_{k+1})$,
+\texttt{stability\_diagnostics} checks whether the Frobenius energy satisfies
+$\|Q_{k+1}\|_F^2 > 1.05\,\|Q_k\|_F^2$.
+Any amplification across the recurrent stack sets \texttt{energy\_amplified = True}.
+The spectral entropy is computed from the normalised eigenvalue distribution
+of $\Lmat_f$ as
+\begin{equation}
+  H_{\text{spectral}}
+  = -\sum_i p_i \log p_i, \qquad
+  p_i = \frac{\lambda_i}{\sum_j \lambda_j}.
+  \label{eq:spectral-entropy-diag}
+\end{equation}
+A stable model shows gently declining $H_{\text{spectral}}$ as modes are pruned;
+a sudden drop signals mode collapse (see Section~\ref{sec:stability:modeweights}).
+
+% ---
+
+\subsection{Density Matrix Validity (Level 4)}
+\label{sec:stability:rho}
+
+The signed density matrix $\boldsymbol{\rho} = \boldsymbol{\rho}^+ - \boldsymbol{\rho}^-$
+must satisfy three conditions:
 \begin{itemize}
-  \item \textbf{Shape-parameter floor}: $a_k \geq a_{\min} = 0.1$ prevents
-        full collapse.
-  \item \textbf{Active-mode penalty}: a soft Lagrange term
-        $\nu\cdot\mathrm{relu}(q_{\min} - N_{\text{active}})$ maintains
-        a minimum number of active modes.
+  \item \textbf{Positive semi-definiteness of $\boldsymbol{\rho}^+$}:
+        $\lambda_{\min}(\boldsymbol{\rho}^+) \geq -10^{-5}$.
+  \item \textbf{Positive semi-definiteness of $\boldsymbol{\rho}^-$}:
+        $\lambda_{\min}(\boldsymbol{\rho}^-) \geq -10^{-5}$.
+  \item \textbf{Frobenius bound}: $\|\boldsymbol{\rho}\|_F =
+        \|\boldsymbol{\rho}^+ - \boldsymbol{\rho}^-\|_F$ bounded,
+        reported as \texttt{max\_frob\_signed}.
 \end{itemize}
+\texttt{stability\_diagnostics} iterates over every VDT block and takes the
+minimum eigenvalue across all \texttt{rho\_plus\_list} and
+\texttt{rho\_minus\_list} tensors; the flag \texttt{rho\_psd\_ok} is set
+\texttt{False} if either minimum falls below $-10^{-5}$.
+A PSD violation at this level typically indicates numerical overflow in the
+outer-product construction of the density matrices; it should be resolved
+before diagnosing any optimiser or mode-weight pathologies at Levels~5--6.
+
+% ---
+
+\subsection{Optimiser Landscape (Level 5)}
+\label{sec:stability:optimiser}
+
+\texttt{log\_preconditioner\_stability} approximates the preconditioned Hessian as
+\begin{equation}
+  \mathbf{H}_{\mathrm{prec}} = \sigma\,\mathbf{M}_{\mathrm{diag}}\,\mathbf{I} + \Lmat_f,
+  \label{eq:hprec}
+\end{equation}
+where $\mathbf{M}_{\mathrm{diag}}$ is the diagonal Rayleigh-damping mass matrix
+and $\sigma$ is the Tikhonov regularisation coefficient.
+The condition number $\kappa(\mathbf{H}_{\mathrm{prec}}) = L_{\sigma,M}/\mu_{\sigma,M}$
+should be substantially smaller than $\kappa(\Lmat_f)$; the convergence-rate
+estimate $({\kappa-1})/({\kappa+1})$ bounds the worst-case geometric decay of
+the gradient error.
+The learning rate must satisfy
+\begin{equation}
+  \eta \;<\; \frac{2}{L_{\sigma,M}},
+  \label{eq:eta}
+\end{equation}
+enforced by the flag \texttt{eta\_ok}.
+\textbf{Important}: if $\mathbf{M}_{\mathrm{diag}}$ is constructed without
+\texttt{mass\_clip}, the Rayleigh-damping singularity at $\lambda = 1$ inflates
+$L_{\sigma,M}$ and produces a spuriously large $\kappa$.
+The recommended construction is
+\texttt{MassMatrix(eigvals, tau=0.5, mass\_clip=1e3)}.
+
+% ---
+
+\subsection{Mode Weight Collapse and Explosion (Level 6)}
+\label{sec:stability:modeweights}
+
+\paragraph{Collapse (retained + extended).}
+The shape-parameter floor $a_k \geq a_{\min} = 0.1$ and the active-mode penalty
+prevent full collapse.
+\texttt{spectral\_kl\_health\_check} flags \texttt{mode\_collapse = True} when
+\texttt{active\_modes} $< 0.1\,q$ (fewer than 10\% of modes remain above the
+relevance threshold) and emits a \texttt{RuntimeWarning} immediately.
+
+\paragraph{Mode explosion (new).}
+The symmetric pathology occurs when \texttt{active\_modes} $> 0.9\,q$ after the
+warm-up period, indicating that spectral selection has not yet occurred.
+This is expected at epoch~0 (all \texttt{log\_a} parameters initialised near
+zero), so the warning is gated by \texttt{warmup\_epochs} (default 5; larger
+graphs may require 10--20).
+The flag \texttt{mode\_explosion} is always written to the log regardless of
+the warm-up guard.
+
+\paragraph{ELBO KL health.}
+Three KL terms are monitored per forward pass:
+\begin{itemize}
+  \item \texttt{kl\_z}: isotropic KL from the encoder; must be positive and
+        below $10^4$.
+  \item \texttt{kl\_S}: spectral basis KL (Section~\ref{sec:elbo:kls}); must
+        be positive.
+  \item \texttt{kl\_tau}: mode-weight KL (Section~\ref{sec:elbo:kltau}); must
+        be positive.
+\end{itemize}
+A non-finite \texttt{kl\_z} or \texttt{kl\_S} $> 10^4$ is flagged as a KL
+explosion; the practitioner should inspect the \texttt{log\_var} range and the
+\texttt{tau\_mode\_kl} inputs.
 
 \subsection{Spectral Eigenvalue Floor}
 \label{sec:stability:floor}
@@ -776,6 +920,36 @@ the spectral-basis KL prior becomes nearly flat and produces high gradient
 variance.  A floor applied in the KL computation only
 ($\lambda_k \leftarrow \max(\lambda_k, 10^{-3})$) prevents numerical
 instability without affecting the spectral geometry.
+
+\subsection{Diagnostic Key Mapping}
+\label{sec:stability:keys}
+
+Table~\ref{tab:stability-keys} maps each key logged under the
+\texttt{stability/} prefix (Weights \& Biases / stdout) to its theoretical
+quantity, enabling reproduction of the hierarchy checks from logs alone.
+
+\begin{table}[ht]
+  \centering
+  \caption{Stability diagnostic keys and their theoretical counterparts.}
+  \label{tab:stability-keys}
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Log key} & \textbf{Theoretical quantity} & \textbf{Level} \\
+    \midrule
+    \texttt{CFL\_ok} & $\Delta t \leq \sqrt{2/\lambda_{\max}(\Lmat)}$ & 1 \\
+    \texttt{cfl\_Lf\_ok} & $\Delta t \leq \sqrt{2/\lambda_{\max}(\Lmat_f)}$ & 2 \\
+    \texttt{cfl\_margin} & $r_{\mathrm{CFL}}$ (Eq.~\ref{eq:cfl-margin}) & 2 \\
+    \texttt{n\_underdamped\_modes} & $|\{k:\sqrt{\lambda_k}>\overline{\gamma}\}|$ & 2 \\
+    \texttt{energy\_amplified} & $\|Q_{k+1}\|_F^2 > 1.05\|Q_k\|_F^2$ & 3 \\
+    \texttt{H\_spectral} & Eq.~\eqref{eq:spectral-entropy-diag} & 3 \\
+    \texttt{rho\_psd\_ok} & $\lambda_{\min}(\boldsymbol{\rho}^\pm) \geq -10^{-5}$ & 4 \\
+    \texttt{eta\_ok} & $\eta < 2/L_{\sigma,M}$ & 5 \\
+    \texttt{mode\_collapse} & \texttt{active\_modes} $< 0.1q$ & 6 \\
+    \texttt{mode\_explosion} & \texttt{active\_modes} $> 0.9q$ & 6 \\
+    \texttt{kl\_z}, \texttt{kl\_S}, \texttt{kl\_tau} & ELBO KL terms & 6 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
 
 % -----------------------------------------------------------------------
 \section{Experiments}
