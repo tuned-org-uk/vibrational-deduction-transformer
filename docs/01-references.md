@@ -147,6 +147,44 @@ The entropy framing (low-entropy oscillating state vs. high-entropy rest/collaps
 
 ---
 
+## 8. Deductive / Recurrent Architecture — LDT
+
+The VDT's recurrent wave-step architecture is directly inspired by the **Lattice Deduction
+Transformer (LDT)**, which demonstrated that iterative refinement through a structured
+space can vastly outperform chain-of-thought on hard logical reasoning tasks.
+
+- **Davis, L., Haller, L., Alfarano, A., and Santolucito, M.** (2026).
+  *Lattice Deduction Transformers.*
+  arXiv:2605.08605. https://arxiv.org/abs/2605.08605
+  BibTeX key: `davis2026ldt`
+
+  The LDT is a recurrent transformer that approximates logically sound deduction by
+  projecting its hidden state through a **lattice** between forward passes, trained
+  on-policy via a Solve loop supervised by a domain-agnostic alpha operator α.
+  An 800K-parameter LDT achieves 100% accuracy on Sudoku-Extreme while frontier LLMs
+  score 0%.
+
+  The VDT adapts this paradigm to the continuous spectral domain:
+
+  | LDT mechanism | VDT counterpart | Code location |
+  |---|---|---|
+  | Recurrent lattice descent | Discrete damped-wave recurrence `Q_{t+1}` | `vdt/vdt.py` `VibrationalStateBlock.forward()` |
+  | Lattice alpha-projection | Modal projection onto eigenvectors `U_m` | `vdt/vdt.py` `VDT.modal_projection()` |
+  | Transformer forcing inside recurrence | Self-attention forcing term `B_t` | `vdt/vdt.py` `VibrationalStateBlock` |
+  | Consistency / validity tracking | Signed density matrix `ρ_plus − ρ_minus` | `vdt/density.py` `SignedDensityMatrix.update()` |
+
+  Where the LDT constrains each step to a **lattice of logically consistent states**,
+  the VDT constrains the value space to the **spectral geometry of the ArrowSpace index** I.
+  The on-policy solve loop (self-supervising on generated candidate wirings) remains an
+  open extension for future work.
+
+- **Cousot, P. & Cousot, R.** (1977). Abstract interpretation: a unified lattice model
+  for static analysis of programs. *POPL 1977*, 238–252.
+  https://doi.org/10.1145/512950.512973
+  (The abstract interpretation framework underlying the LDT lattice semantics.)
+
+---
+
 ## See Also
 
 - `docs/architecture.md` — full data-flow diagram and module derivations
