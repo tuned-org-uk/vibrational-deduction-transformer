@@ -37,11 +37,18 @@
 \contentsline {section}{\numberline {7}Experiments}{12}{section.7}%
 \contentsline {subsection}{\numberline {7.1}Datasets}{12}{subsection.7.1}%
 \contentsline {subsection}{\numberline {7.2}Evaluation Metrics}{12}{subsection.7.2}%
-\contentsline {subsection}{\numberline {7.3}Flagship Demo: Entropy-Controlled Spectral Generation}{12}{subsection.7.3}%
-\contentsline {section}{\numberline {8}Related Work}{13}{section.8}%
-\contentsline {paragraph}{Spectral graph autoencoders.}{13}{section*.9}%
-\contentsline {paragraph}{Probabilistic PCA on graphs.}{13}{section*.10}%
-\contentsline {paragraph}{NVIB.}{13}{section*.11}%
-\contentsline {paragraph}{Beta-VAE and disentanglement.}{13}{section*.12}%
-\contentsline {paragraph}{Real quantum mechanics.}{13}{section*.13}%
-\contentsline {section}{\numberline {9}Discussion and Future Work}{13}{section.9}%
+\contentsline {subsection}{\numberline {7.3}Training Protocol}{13}{subsection.7.3}%
+\contentsline {paragraph}{Run 2 (\texttt {lam\_s=0.1}, \texttt {mass\_clip=1000}, \texttt {dt\_init=0.001}).}{13}{section*.9}%
+\contentsline {paragraph}{Run 3 (\texttt {lam\_s=1.0}, \texttt {mass\_clip=100}, \texttt {dt\_init=0.003}).}{13}{section*.10}%
+\contentsline {subsection}{\numberline {7.4}Mode Selection and KL Dynamics}{14}{subsection.7.4}%
+\contentsline {paragraph}{Persistent mode collapse.}{14}{section*.11}%
+\contentsline {paragraph}{Simultaneous mode explosion.}{14}{section*.12}%
+\contentsline {subsection}{\numberline {7.5}ELBO Learning Curves}{14}{subsection.7.5}%
+\contentsline {subsection}{\numberline {7.6}Flagship Demo: Entropy-Controlled Spectral Generation}{14}{subsection.7.6}%
+\contentsline {section}{\numberline {8}Related Work}{14}{section.8}%
+\contentsline {paragraph}{Spectral graph autoencoders.}{14}{section*.13}%
+\contentsline {paragraph}{Probabilistic PCA on graphs.}{14}{section*.14}%
+\contentsline {paragraph}{NVIB.}{15}{section*.15}%
+\contentsline {paragraph}{Beta-VAE and disentanglement.}{15}{section*.16}%
+\contentsline {paragraph}{Real quantum mechanics.}{15}{section*.17}%
+\contentsline {section}{\numberline {9}Discussion and Future Work}{15}{section.9}%

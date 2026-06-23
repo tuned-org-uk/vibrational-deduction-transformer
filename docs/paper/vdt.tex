@@ -959,16 +959,23 @@ quantity, enabling reproduction of the hierarchy checks from logs alone.
 \subsection{Datasets}
 \label{sec:experiments:data}
 
-We evaluate on three benchmarks:
+We evaluate on the following benchmarks; PubMed and OGB results are deferred
+to a future run:
 
 \begin{itemize}
   \item \textbf{CORA}~\cite{kipf2016}: 2708 nodes, 5429 edges, 7 classes,
-        1433-dim bag-of-words features.
+        1433-dim bag-of-words features.  For these experiments the graph is
+        constructed as a $k$-NN graph with $k=35$, a Gaussian kernel
+        ($\sigma=1.2$), and a normalised symmetric Laplacian.
+        The dataset is split 80/10/10 into train, validation, and test sets.
   \item \textbf{PubMed}~\cite{kipf2016}: 19717 nodes, 44338 edges, 3 classes.
+        \emph{Deferred to a future run.}
   \item \textbf{Synthetic spring networks}: 400 randomly generated spring
         graphs with controllable spectral entropy.
+        \emph{Deferred to a future run.}
   \item \textbf{Open Graph Benchmark (OGB)}~\cite{hu2020}: standardised
         large-scale graph datasets used for held-out evaluation.
+        \emph{Deferred to a future run.}
 \end{itemize}
 
 \subsection{Evaluation Metrics}
@@ -976,23 +983,153 @@ We evaluate on three benchmarks:
 
 \begin{table}[ht]
   \centering
-  \caption{VDT benchmark metrics.}
+  \caption{VDT benchmark metrics with values from Runs 2 and 3 (CORA, epoch 50).}
   \label{tab:metrics}
-  \begin{tabular}{lll}
+  \begin{tabular}{lllll}
     \toprule
-    \textbf{Metric} & \textbf{Symbol} & \textbf{Measures} \\
+    \textbf{Metric} & \textbf{Symbol} & \textbf{Measures}
+      & \textbf{Run 2} & \textbf{Run 3} \\
     \midrule
-    Reconstruction MSE & $\|\mathbf{x}-\hat{\mathbf{x}}\|^2$ & Wiring path fidelity \\
-    Latent KL & $\mathrm{KL}_z$ & Isotropic regularisation \\
-    Spectral basis KL & $\mathrm{KL}_S$ & Alignment with index $\mathcal{I}$ \\
-    taumode KL & $\mathrm{KL}_\tau$ & Frequency band selection \\
-    Active modes & $N_{\mathrm{active}}$ & Modes with $\E{\omega_k}>0.01$ \\
-    Memory SNR & $d_k / N_{\text{stored}}$ & Hopfield retrieval quality \\
-    ELBO Bayes factor & $\exp(\mathcal{L}(\mathcal{I}_1)-\mathcal{L}(\mathcal{I}_2))$ & Index comparison \\
-    Linear probe acc. & $\mathrm{Acc}_{\text{probe}}$ & Latent discriminability \\
+    Reconstruction MSE & $\|\mathbf{x}-\hat{\mathbf{x}}\|^2$
+      & Wiring path fidelity & $-2453.09$ & $-2453.09$ \\
+    Latent KL & $\mathrm{KL}_z$
+      & Isotropic regularisation & $1.46$ & $0.0002$ \\
+    Spectral basis KL & $\mathrm{KL}_S$
+      & Alignment with $\mathcal{I}$ & $\sim 0.53$ & $\sim 0$ (collapsed) \\
+    taumode KL & $\mathrm{KL}_\tau$
+      & Frequency band selection & $0.0018$ & $0.0008$ \\
+    Val ELBO (best) & $\mathcal{L}_{\mathrm{VDT}}$
+      & Overall objective & $-2451.16$ & $-2453.09$ \\
+    Active modes & $N_{\mathrm{active}}$
+      & Modes with $\E{\omega_k}>0.01$ & $<1$ & $<1$ \\
+    \texttt{kl\_z\_ok} & --- & KL$_z$ health flag & \checkmark & $\times$ (ep.\ 9) \\
+    \texttt{kl\_S\_ok} & --- & KL$_S$ health flag & \checkmark & $\times$ (ep.\ 10) \\
+    Memory SNR & $d_k / N_{\text{stored}}$ & Hopfield retrieval quality
+      & \multicolumn{2}{c}{\emph{not yet evaluated}} \\
+    Linear probe acc. & $\mathrm{Acc}_{\text{probe}}$
+      & Latent discriminability
+      & \multicolumn{2}{c}{\emph{not yet evaluated}} \\
+    ELBO Bayes factor & $\exp(\mathcal{L}_2 - \mathcal{L}_3)$
+      & Index comparison & \multicolumn{2}{c}{$\approx 0.145$ (favours Run 2)} \\
     \bottomrule
   \end{tabular}
 \end{table}
+
+Linear probe accuracy and Memory SNR require a separate evaluation script and
+are deferred.
+The ELBO Bayes factor between Run 2 and Run 3 at epoch 50 is estimated as
+$\exp(-2453.09 - (-2451.16)) = \exp(-1.93) \approx 0.145$, slightly favouring
+Run 2; convergence is not fully resolved at 50 epochs.
+
+\subsection{Training Protocol}
+\label{sec:experiments:protocol}
+
+Both runs use the CORA graph described above, the \texttt{configs/mps.yaml}
+configuration on Apple MPS, $q=8$ spectral modes, and 50 epochs.
+Table~\ref{tab:runs} summarises the key hyperparameter differences.
+
+\begin{table}[ht]
+  \centering
+  \caption{Hyperparameter comparison between Run 2 and Run 3.}
+  \label{tab:runs}
+  \begin{tabular}{lll}
+    \toprule
+    \textbf{Parameter} & \textbf{Run 2} & \textbf{Run 3} \\
+    \midrule
+    \texttt{lam\_s}       & 0.1   & 1.0 \\
+    \texttt{dt\_init}     & 0.001 & 0.003 \\
+    \texttt{mass\_clip}   & 1000  & 100 \\
+    \texttt{kl\_z\_warmup} & ---  & 10 epochs \\
+    Seed                  & 3047  & 42 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\paragraph{Run 2 (\texttt{lam\_s=0.1}, \texttt{mass\_clip=1000},
+  \texttt{dt\_init=0.001}).}
+The low spectral basis regulariser weight allows the reconstruction loss to
+dominate from epoch~1.
+A MassMatrix conditioning warning fires (\texttt{ratio=999.2 > 100}) due to
+the Rayleigh-damping singularity near $\lambda=1$ in the normalised Laplacian
+with \texttt{mass\_clip=1000}; this is resolved in Run~3 by reducing
+\texttt{mass\_clip} to 100.
+$\mathrm{KL}_z$ decays from 6.49 (epoch~1) to 1.46 (epoch~50), confirming
+that the isotropic regularisation remains active throughout.
+$\mathrm{KL}_S$ decays from 4.30 to ${\approx}0.53$ without collapsing to
+zero, suggesting residual spectral structure in the latent representation.
+$\mathrm{KL}_\tau$ falls below 0.002 by epoch~20.
+Best val ELBO: $\mathbf{-2451.1630}$ at epoch~46.
+
+\paragraph{Run 3 (\texttt{lam\_s=1.0}, \texttt{mass\_clip=100},
+  \texttt{dt\_init=0.003}).}
+Increasing \texttt{lam\_s} by $10\times$ strengthens spectral basis
+regularisation; the pre-flight stability check passes cleanly with no
+MassMatrix warning.
+However, $\mathrm{KL}_S$ collapses to numerical zero by epoch~10 and
+$\mathrm{KL}_z$ collapses below 0.001 by epoch~9, indicating that both
+regularisers are over-suppressed after the KL warm-up period ends.
+\texttt{kl\_S\_ok=False} warnings appear from epoch~15 onwards.
+Train and val ELBO converge to the same plateau as Run~2 ($-2464$/$-2453$)
+but with qualitatively different latent behaviour: the latent space encodes no
+residual spectral structure.
+Best val ELBO: $\mathbf{-2453.0863}$ at epoch~50.
+
+\subsection{Mode Selection and KL Dynamics}
+\label{sec:experiments:modes}
+
+\paragraph{Persistent mode collapse.}
+Both runs report \texttt{mode\_collapse=True} at every epoch, meaning that
+$N_{\text{active}} < 0.1\,q = 0.8$, i.e.\ effectively no modes survive
+spectral selection.
+This is consistent with $\mathrm{KL}_\tau$ collapsing to near-zero: the
+Exponential prior pushes all $q=8$ mode weights toward zero rather than
+selecting a sparse subset.
+Three probable causes are:\\
+(i) the \texttt{a\_min=0.1} shape-parameter floor does not provide a strong
+enough ELBO gradient to maintain active modes;\\
+(ii) the active-mode soft penalty ($\nu=0.25$, $q_{\min}=2$) is insufficient
+at this scale; and\\
+(iii) in Run~3, the \texttt{kl\_z\_warmup=10} schedule suppresses the
+isotropic KL early, but spectral KL collapse begins simultaneously, suggesting
+an interaction between the two KL terms.
+
+\paragraph{Simultaneous mode explosion.}
+Both runs also report \texttt{mode\_explosion=True} from epoch~5 onward,
+creating an apparent paradox in which collapse and explosion flags fire
+simultaneously.
+The explanation is a threshold discontinuity: \texttt{active\_modes}
+counts modes above \texttt{a\_min}, which are nominally all $q$ modes,
+satisfying the $>90\%$ explosion criterion; simultaneously, $\E{\omega_k}$
+for all modes falls below the 0.01 relevance threshold, satisfying the
+$<10\%$ collapse criterion.
+The two flags should be mutually exclusive by construction; the
+\texttt{active\_modes} counter requires a unified threshold and will be fixed
+in a future issue.
+
+\subsection{ELBO Learning Curves}
+\label{sec:experiments:curves}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.48\textwidth]{../../docs/second-run-logs/training_curves.png}
+  \hfill
+  \includegraphics[width=0.48\textwidth]{../../docs/third-run-logs/training_curves.png}
+  \caption{Training and validation ELBO for Run~2 (left, \texttt{lam\_s=0.1})
+    and Run~3 (right, \texttt{lam\_s=1.0}).
+    Annotations: (1) \texttt{mode\_collapse} fires from epoch~1 in both runs;
+    (2) $\mathrm{KL}_S$ first reaches zero at epoch~10 in Run~3 (never in
+    Run~2); (3) ELBO plateau values: train ${\approx}-2464$, val
+    ${\approx}-2453$.}
+  \label{fig:curves}
+\end{figure}
+
+Both runs show rapid ELBO improvement in epochs 1--15 followed by plateau
+behaviour (Figure~\ref{fig:curves}).
+The train--val gap narrows to fewer than 12 ELBO units by epoch~20 and
+stabilises, indicating no significant overfitting.
+The reconstruction loss accounts for more than 99\% of the total ELBO at
+convergence, confirming that KL regularisation becomes negligible relative
+to the reconstruction objective at this scale and dataset size.
 
 \subsection{Flagship Demo: Entropy-Controlled Spectral Generation}
 \label{sec:experiments:demo}
@@ -1001,8 +1138,21 @@ Standard VAEs decode $\mathbf{z}$ into flat feature vectors; the VDT decodes
 $\mathbf{z}$ into a \emph{graph wiring}---a Laplacian whose eigenvalues are
 vibrational modes of the spring network (cf.\ Rayleigh~\cite{rayleigh1877}).
 The latent space directly encodes spectral geometry, enabling samples whose
-spectral entropy matches a target level.  This capability is unique to the
-VDT's vibrational latent representation and is unavailable in flat-prior models.
+spectral entropy matches a target level.
+This capability is unique to the VDT's vibrational latent representation and
+is unavailable in flat-prior models.
+
+Quantitative evaluation of entropy-controlled generation has not yet been
+performed on these two runs: neither run includes the synthetic spring network
+benchmark, which is the natural test bed because spectral diversity is
+controllable by construction.
+Furthermore, the persistent mode collapse observed in both runs indicates that
+the current latent space does not yet perform discriminative spectral selection;
+meaningful entropy-controlled sampling requires either a longer training run,
+a tuned \texttt{lam\_s} between 0.1 and 1.0, or evaluation on the spring
+dataset where the generation target is unambiguous.
+This evaluation is deferred to a future issue together with the PubMed and OGB
+benchmarks.
 
 % -----------------------------------------------------------------------
 \section{Related Work}
