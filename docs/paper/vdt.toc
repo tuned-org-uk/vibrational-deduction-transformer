@@ -45,11 +45,11 @@
 \contentsline {paragraph}{Persistent mode collapse.}{15}{section*.17}%
 \contentsline {paragraph}{Simultaneous mode explosion.}{15}{section*.18}%
 \contentsline {subsection}{\numberline {7.5}ELBO Learning Curves}{16}{subsection.7.5}%
-\contentsline {subsection}{\numberline {7.6}Flagship Demo: Entropy-Controlled Spectral Generation}{16}{subsection.7.6}%
-\contentsline {section}{\numberline {8}Related Work}{17}{section.8}%
-\contentsline {paragraph}{Spectral graph autoencoders.}{17}{section*.20}%
-\contentsline {paragraph}{Probabilistic PCA on graphs.}{17}{section*.21}%
-\contentsline {paragraph}{NVIB.}{17}{section*.22}%
-\contentsline {paragraph}{Beta-VAE and disentanglement.}{17}{section*.23}%
-\contentsline {paragraph}{Real quantum mechanics.}{17}{section*.24}%
-\contentsline {section}{\numberline {9}Discussion and Future Work}{17}{section.9}%
+\contentsline {subsection}{\numberline {7.6}Flagship Demo: Entropy-Controlled Spectral Generation}{18}{subsection.7.6}%
+\contentsline {section}{\numberline {8}Related Work}{19}{section.8}%
+\contentsline {paragraph}{Spectral graph autoencoders.}{19}{section*.23}%
+\contentsline {paragraph}{Probabilistic PCA on graphs.}{19}{section*.24}%
+\contentsline {paragraph}{NVIB.}{19}{section*.25}%
+\contentsline {paragraph}{Beta-VAE and disentanglement.}{19}{section*.26}%
+\contentsline {paragraph}{Real quantum mechanics.}{19}{section*.27}%
+\contentsline {section}{\numberline {9}Discussion and Future Work}{19}{section.9}%

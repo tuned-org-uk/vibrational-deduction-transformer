@@ -18,7 +18,8 @@
 \usepackage{algpseudocode}
 \usepackage{geometry}
 \geometry{margin=2.5cm}
-\usepackage{subcaption}   % add to preamble
+\usepackage{subcaption}
+\usepackage{float}
 
 % -----------------------------------------------------------------------
 % Theorem environments
@@ -1122,25 +1123,29 @@ issue.
 \subsection{ELBO Learning Curves}
 \label{sec:experiments:curves}
 
+% ---- Run 2 ----
 \begin{figure}[H]
   \centering
-  \begin{subfigure}[t]{\textwidth}
-    \centering
-    \includegraphics[width=0.72\textwidth]{../../docs/second-run-logs/training_curves.png}
-    \caption*{Run 2: \texttt{lam\_s=0.1}, $q=8$, 45 epochs}
-  \end{subfigure}
-  \vspace{0.5em}
-  \begin{subfigure}[t]{\textwidth}
-    \centering
-    \includegraphics[width=0.72\textwidth]{../../docs/third-run-logs/training_curves.png}
-    \caption*{Run 3: \texttt{lam\_s=1.0}, $q=8$, \texttt{kl\_z\_warmup=10}, 45 epochs}
-  \end{subfigure}
-  \vspace{0.5em}
-  \begin{subfigure}[t]{\textwidth}
-    \centering
-    \includegraphics[width=0.72\textwidth]{../../docs/fourth-run-logs/training_curves.png}
-    \caption*{Run 4: \texttt{lam\_s=0.2}, $q=4$, \texttt{kl\_z\_warmup=25}, 50 epochs}
-  \end{subfigure}
+  \includegraphics[width=0.65\textwidth]{../../docs/second-run-logs/training_curves.png}
+  \caption*{\textbf{Run 2:} \texttt{lam\_s=0.1}, $q=8$, 45 epochs}
+\end{figure}
+
+% ---- Run 3 ----
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.65\textwidth]{../../docs/third-run-logs/training_curves.png}
+  \caption*{\textbf{Run 3:} \texttt{lam\_s=1.0}, $q=8$, \texttt{kl\_z\_warmup=10}, 45 epochs}
+\end{figure}
+
+% ---- Run 4 ----
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.65\textwidth]{../../docs/fourth-run-logs/training_curves.png}
+  \caption*{\textbf{Run 4:} \texttt{lam\_s=0.2}, $q=4$, \texttt{kl\_z\_warmup=25}, 50 epochs}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
   \caption{Training and validation ELBO for Run~2 (top), Run~3 (centre),
     and Run~4 (bottom). Each panel shows ELBO, KL$_z$, KL$_S$, and KL$_\tau$
     over epochs. Run~3 shows KL$_S$ collapse to zero at epoch~10;
