@@ -39,6 +39,31 @@ $$L(I)$$, $$S$$ are learnable loadings in that eigenbasis, and $$\omega$$ are mo
 from a tau-mode prior. $$W$$ then parametrises a differentiable Laplacian $$L(z)$$, over
 which a tau-mode diffusion reconstructs $$x_hat$$ from the embedding table $$E$$.
 
+### Relationship to the Lattice Deduction Transformer (LDT)
+
+The VDT adapts the **deductive, iterative-refinement philosophy** of the
+*Lattice Deduction Transformer* (Davis et al., 2026, arXiv:2605.08605) to the
+continuous spectral domain. The LDT is a recurrent transformer that approximates
+logically sound deduction by projecting its latent state through a discrete lattice
+between forward passes; an 800K-parameter LDT achieves 100% accuracy on Sudoku-Extreme
+while frontier LLMs score 0%.
+
+The VDT implements the same pattern in four corresponding mechanisms:
+
+| LDT mechanism | VDT implementation | Code location |
+|---|---|---|
+| Recurrent lattice descent | Discrete damped-wave recurrence `Q_{t+1} = 2Q_t - Q_{t-1} - dt² L_f Q_t - γΔQ + dt² B_t` | `vdt/vdt.py` `VibrationalStateBlock.forward()` |
+| Lattice alpha-projection | Modal projection onto leading eigenvectors `z = mean(Q_K ᵀ U_m)` | `vdt/vdt.py` `VDT.modal_projection()` |
+| Transformer forcing inside recurrence | Self-attention + FFN producing forcing term `B_t` at each wave step | `vdt/vdt.py` `VibrationalStateBlock` |
+| Consistency / validity tracking | Signed density matrix `ρ = ρ_plus − ρ_minus` updated from consecutive wave states | `vdt/density.py` `SignedDensityMatrix.update()` |
+
+Where the LDT constrains each recurrent step to remain within a **lattice of logically
+consistent states**, the VDT constrains the transformer's value space to remain aligned
+with the **spectral geometry of the index** $$I$$. The natural next step toward full parity
+with LDT is a *solve loop*: running the recurrent VDT stack at training time to generate
+candidate spectral wirings and self-supervising on them, mirroring LDT's on-policy
+training via the alpha operator.
+
 ---
 
 ## The Three-Term ELBO
@@ -177,7 +202,7 @@ uv run benchmark.py --dataset cora --output data/Cora/results/ --batch-size 16
 ## Evaluation Metrics
 
 | Metric | What it measures |
-|--------|-----------------|
+|--------|-----------------| 
 | Reconstruction MSE | Quality of `x_hat` recovered through the wiring path |
 | `kl_z` | Standard isotropic KL regularisation of latent `z` |
 | `kl_S` | Spectral alignment of loadings with ArrowSpace index `I` |
@@ -208,7 +233,7 @@ uv run demos/visualise_spectral_demo.py --results results/spectral_demo
 Outputs written to `results/spectral_demo/`:
 
 | File | Content |
-|------|---------| 
+|------|---------|
 | `spectral_demo_results.csv` | Per-sample spectral entropy + Frobenius distance to nearest training Laplacian |
 | `entropy_control_results.csv` | Entropy-targeting experiment: target vs best error vs match rate |
 | `training_log.csv` | Epoch-level ELBO, reconstruction MSE, KL terms, N_active |
@@ -264,7 +289,7 @@ Index selection is made Bayesian via the ELBO Bayes factor.
 ## Documentation
 
 | File | Content |
-|------|---------| 
+|------|---------|
 | [`docs/README.md`](docs/README.md) | Concept tree, document map, implementation sequence |
 | [`docs/00-architecture.md`](docs/00-architecture.md) | Full architecture reference: modules, ELBO, data flow |
 | [`docs/01-references.md`](docs/01-references.md) | Bibliography and related work |
@@ -275,6 +300,10 @@ Index selection is made Bayesian via the ELBO Bayes factor.
 
 ## References
 
+- **Davis, L., Haller, L., Alfarano, A., and Santolucito, M.** (2026).
+  *Lattice Deduction Transformers.* arXiv:2605.08605.
+  <https://arxiv.org/abs/2605.08605> — primary architectural inspiration for the
+  recurrent deductive refinement loop in `vdt/vdt.py`.
 - *The Little Book of Generative AI Foundations*, T. Chen, 2026
 - VDT paper (Moriondo, 2026) -- ArrowSpace / Graph Wiring
 - ArrowSpace technical report (Moriondo, 2026) -- see `docs/01-references.md`
