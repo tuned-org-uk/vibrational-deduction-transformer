@@ -1,0 +1,211 @@
+$ uv run python train.py --config configs/mps.yaml --epochs 50 --seed 3047
+[VDT] MPS selected — set PYTORCH_ENABLE_MPS_FALLBACK=1.
+      All linalg.eigh calls are also offloaded to CPU explicitly in vdt/spectral.py.
+[VDT] MPS device detected -- using mps_batch_size=4 (override batch_size=4)
+[VDT] device=mps, dataset=cora, batch_size=4
+[VDT] Using config: /Users/tuned-silicon/papers/vibrational-deduction-transformer/configs/mps.yaml
+[VDT] Effective training configuration:
+model:
+  version: 2
+  latent_dim: 16
+  hidden_dim: 32
+  q: 4
+  tau_modes: 4
+  lam_s: 0.2
+  tau: 0.5
+  n_layers: 2
+  n_heads: 2
+  dropout: 0.2
+  eps: 0.3
+  mass_clip: 100.0
+  kl_z_warmup: 25
+graph:
+  knn_k: 35
+  sigma: 1.2
+  normalised: true
+  sparse: true
+training:
+  epochs: 50
+  batch_size: 4
+  mps_batch_size: 4
+  lr: 0.0001
+  weight_decay: 1.0e-05
+  scheduler: cosine
+  warmup_epochs: 10
+  grad_clip: 1.0
+  seed: 42
+  device: auto
+  density_loss_weight: 1.0
+  a_min: 0.1
+  q_min: 2
+  nu: 0.05
+  dt_init: 0.001
+dataset:
+  name: cora
+  root: ./data
+  split:
+  - 0.8
+  - 0.1
+  - 0.1
+logging:
+  save_every_n_epochs: 10
+  use_wandb: false
+  project: wiring-autoencoder
+  log_every: 1
+  save_dir: ./checkpoints
+[VDT] nodes=2708, feat_dim=1433, classes=7
+[VDT] trainable params: 129,829,389
+trainable: 129,829,389  |  total params: 129,829,389  |  buffers: 560,226
+[VDT] cached base spectral quantities in 22.5s  (q=4)
+[VDT] eps: 0.3, tau: 0.5, mass_clip: 100.0, lam_s: 0.2
+[VDT] dt_init: 0.001
+[VDT] Pre-flight stability checks passed.
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    1/50  train=-5.1378  val=-58.3698  recon=-66.9440  kl_z=0.4498  kl_S=6.4836  kl_tau=1.6409  (535.1s)
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    2/50  train=-98.0016  val=-137.1280  recon=-143.8512  kl_z=0.2724  kl_S=6.0881  kl_tau=0.3626  (534.2s)
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    3/50  train=-175.4246  val=-213.9324  recon=-219.9784  kl_z=0.2112  kl_S=5.6245  kl_tau=0.2104  (534.2s)
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    4/50  train=-252.0231  val=-290.1333  recon=-295.5438  kl_z=0.3293  kl_S=4.9557  kl_tau=0.1254  (534.3s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 5 -- 4.0/4 modes active (>90%). Spectral selection has not yet occurred. If this persists beyond epoch 5, consider increasing lam_s or the active-mode penalty weight nu.
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    5/50  train=-328.0627  val=-366.0052  recon=-370.4100  kl_z=0.9318  kl_S=3.3854  kl_tau=0.0875  (534.4s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 6 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    6/50  train=-403.8586  val=-441.1603  recon=-444.4129  kl_z=1.4238  kl_S=1.7510  kl_tau=0.0778  (534.6s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 7 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    7/50  train=-478.0746  val=-514.2597  recon=-517.4340  kl_z=0.9924  kl_S=2.1118  kl_tau=0.0700  (537.5s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 8 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    8/50  train=-550.6560  val=-586.4261  recon=-589.2962  kl_z=1.3547  kl_S=1.4614  kl_tau=0.0539  (533.3s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 9 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch    9/50  train=-622.0833  val=-657.3314  recon=-659.8728  kl_z=0.9084  kl_S=1.5894  kl_tau=0.0436  (534.9s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 10 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   10/50  train=-692.1742  val=-726.5481  recon=-729.0059  kl_z=0.8496  kl_S=1.5711  kl_tau=0.0371  (539.8s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 11 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   11/50  train=-760.7369  val=-794.0152  recon=-796.6154  kl_z=1.0677  kl_S=1.5008  kl_tau=0.0317  (538.1s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 12 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   12/50  train=-827.4739  val=-860.1975  recon=-862.4901  kl_z=1.0592  kl_S=1.2066  kl_tau=0.0269  (535.6s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 13 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   13/50  train=-892.6358  val=-924.2152  recon=-926.5575  kl_z=0.9568  kl_S=1.3589  kl_tau=0.0267  (534.8s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 14 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   14/50  train=-955.8269  val=-986.7149  recon=-988.7098  kl_z=0.8244  kl_S=1.1469  kl_tau=0.0235  (535.4s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 15 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   15/50  train=-1017.1123  val=-1046.6573  recon=-1048.8477  kl_z=0.7562  kl_S=1.4146  kl_tau=0.0197  (536.8s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 16 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   16/50  train=-1076.4076  val=-1104.8882  recon=-1106.8630  kl_z=0.7685  kl_S=1.1885  kl_tau=0.0178  (538.6s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 17 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   17/50  train=-1133.4345  val=-1160.8104  recon=-1162.6448  kl_z=0.6741  kl_S=1.1445  kl_tau=0.0158  (537.3s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 18 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   18/50  train=-1188.2985  val=-1214.3974  recon=-1216.1937  kl_z=0.6474  kl_S=1.1332  kl_tau=0.0157  (537.8s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 19 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   19/50  train=-1240.7246  val=-1265.6448  recon=-1267.4110  kl_z=0.6135  kl_S=1.1354  kl_tau=0.0172  (535.3s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 20 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   20/50  train=-1290.9301  val=-1314.5544  recon=-1316.2483  kl_z=0.6327  kl_S=1.0452  kl_tau=0.0159  (535.2s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 21 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   21/50  train=-1338.7356  val=-1361.0475  recon=-1362.6732  kl_z=0.5182  kl_S=1.0937  kl_tau=0.0138  (531.2s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 22 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   22/50  train=-1384.0672  val=-1405.2698  recon=-1406.6779  kl_z=0.4860  kl_S=0.9113  kl_tau=0.0108  (531.4s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 23 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   23/50  train=-1426.9808  val=-1446.7623  recon=-1448.2130  kl_z=0.4422  kl_S=0.9982  kl_tau=0.0102  (532.1s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 24 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   24/50  train=-1467.4339  val=-1486.0492  recon=-1487.3031  kl_z=0.4466  kl_S=0.7980  kl_tau=0.0093  (532.2s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 25 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   25/50  train=-1505.5225  val=-1522.6511  recon=-1523.9899  kl_z=0.3750  kl_S=0.9510  kl_tau=0.0127  (532.4s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 26 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   26/50  train=-1541.0237  val=-1556.8912  recon=-1558.2025  kl_z=0.3265  kl_S=0.9756  kl_tau=0.0091  (533.0s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 27 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   27/50  train=-1574.2188  val=-1588.7839  recon=-1590.0673  kl_z=0.3658  kl_S=0.9082  kl_tau=0.0094  (533.6s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 28 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   28/50  train=-1605.0513  val=-1618.4742  recon=-1619.6197  kl_z=0.3340  kl_S=0.8026  kl_tau=0.0088  (533.4s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 29 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   29/50  train=-1633.6143  val=-1645.8641  recon=-1646.8854  kl_z=0.3007  kl_S=0.7141  kl_tau=0.0064  (529.9s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 30 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   30/50  train=-1659.8317  val=-1670.9271  recon=-1671.9102  kl_z=0.2936  kl_S=0.6810  kl_tau=0.0085  (530.2s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 31 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   31/50  train=-1683.8220  val=-1693.8131  recon=-1694.7995  kl_z=0.2554  kl_S=0.7254  kl_tau=0.0057  (536.0s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 32 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   32/50  train=-1705.8047  val=-1714.6263  recon=-1715.5721  kl_z=0.2564  kl_S=0.6830  kl_tau=0.0064  (544.3s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 33 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   33/50  train=-1725.6929  val=-1733.3074  recon=-1734.3576  kl_z=0.2398  kl_S=0.8035  kl_tau=0.0068  (542.4s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 34 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   34/50  train=-1743.5377  val=-1750.2779  recon=-1751.1753  kl_z=0.2289  kl_S=0.6627  kl_tau=0.0059  (534.6s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 35 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   35/50  train=-1759.5682  val=-1765.3279  recon=-1766.2160  kl_z=0.2166  kl_S=0.6643  kl_tau=0.0073  (533.9s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 36 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   36/50  train=-1773.8138  val=-1778.5863  recon=-1779.4955  kl_z=0.2163  kl_S=0.6871  kl_tau=0.0058  (533.0s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 37 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   37/50  train=-1786.2812  val=-1790.2393  recon=-1791.1120  kl_z=0.1979  kl_S=0.6681  kl_tau=0.0067  (531.2s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 38 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   38/50  train=-1797.1940  val=-1800.3617  recon=-1801.1592  kl_z=0.1994  kl_S=0.5924  kl_tau=0.0057  (531.3s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 39 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   39/50  train=-1806.5990  val=-1809.0006  recon=-1809.8083  kl_z=0.1777  kl_S=0.6248  kl_tau=0.0052  (531.3s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 40 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   40/50  train=-1814.6388  val=-1816.2154  recon=-1817.0657  kl_z=0.1736  kl_S=0.6709  kl_tau=0.0058  (531.8s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 41 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   41/50  train=-1821.3024  val=-1822.2719  recon=-1823.1004  kl_z=0.1728  kl_S=0.6508  kl_tau=0.0049  (531.5s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 42 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   42/50  train=-1826.8326  val=-1827.2164  recon=-1827.9957  kl_z=0.1729  kl_S=0.6014  kl_tau=0.0051  (531.4s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 43 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   43/50  train=-1831.1703  val=-1831.1215  recon=-1831.9042  kl_z=0.1599  kl_S=0.6180  kl_tau=0.0048  (534.9s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 44 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   44/50  train=-1834.6743  val=-1834.1165  recon=-1834.9049  kl_z=0.1623  kl_S=0.6215  kl_tau=0.0046  (536.3s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 45 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   45/50  train=-1837.3318  val=-1836.3443  recon=-1837.0807  kl_z=0.1537  kl_S=0.5789  kl_tau=0.0038  (530.4s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 46 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   46/50  train=-1839.1703  val=-1837.9286  recon=-1838.6536  kl_z=0.1551  kl_S=0.5648  kl_tau=0.0050  (530.5s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 47 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   47/50  train=-1840.3946  val=-1838.8734  recon=-1839.6271  kl_z=0.1564  kl_S=0.5928  kl_tau=0.0045  (530.6s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 48 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   48/50  train=-1841.2804  val=-1839.3967  recon=-1840.1513  kl_z=0.1495  kl_S=0.6007  kl_tau=0.0044  (530.8s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 49 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   49/50  train=-1841.5946  val=-1839.6904  recon=-1840.3758  kl_z=0.1546  kl_S=0.5264  kl_tau=0.0045  (530.6s)
+RuntimeWarning: spectral_kl_health_check: mode explosion at epoch 50 -- 4.0/4 modes active (>90%).
+  [WARN] KL health check failed: ['mode_collapse']
+Epoch   50/50  train=-1841.7709  val=-1839.7128  recon=-1840.4507  kl_z=0.1550  kl_S=0.5783  kl_tau=0.0046  (530.6s)
+[VDT] Training complete. Best val loss: -1839.7128
+[VDT] Checkpoints saved to checkpoints
+[VDT] Log saved to checkpoints/training_log.csv
