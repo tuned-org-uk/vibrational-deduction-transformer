@@ -19,9 +19,9 @@ model:                    # taken from default.yml
   version: 2              # use canonical v2 from_config() path
   latent_dim: 16          # reduced from 32 -- enough for Cora 7-class
   hidden_dim: 32          # reduced from 256 -- cuts MHA activation by 16x
-  q: 4                    # spectral modes -- half of default; covers low-freq structure
-  tau_modes: 4            # keep == q as recommended
-  lam_s: 0.8             # spectral basis KL weight, changed from 0.01 
+  q: 2                    # spectral modes -- half of default; covers low-freq structure
+  tau_modes: 2            # keep == q as recommended
+  lam_s: 0.4             # spectral basis KL weight, changed from 0.01 
   tau: 0.5                # diffusion time scale -- unchanged
   n_layers: 2             # VDT blocks -- reduced from 4; exercises stack without OOM
   n_heads: 2              # attention heads -- matches small hidden_dim
@@ -50,7 +50,7 @@ training:
   density_loss_weight: 1.0
   a_min: 0.1              # prevent mode-weight collapse
   q_min: 2                # minimum active modes (reduced from 4, matches q=8)
-  nu: 0.2                 # active-mode penalty weight
+  nu: 0.3                 # active-mode penalty weight
   dt_init: 0.001          # conservative CFL-safe value (well below dynamic bound ~0.012)
 
 dataset:
