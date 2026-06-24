@@ -29,6 +29,13 @@ of the VDT training loop:
                           Used by model.forward() to populate out['N_active']
                           for spectral_kl_health_check (issue #77).
 
+ Option D entropy ceiling (issue #82):
+
+    mode_entropy_penalty  nu_entropy * mean_batch(H) where H is the Shannon
+                          entropy of softmax(log_a - log_b) over modes.
+                          Penalises HIGH entropy (uniform activation),
+                          complementing the active_mode_penalty floor.
+
  DC-mode precision floor (issue #24 follow-up):
 
     spectral_basis_kl     The DC eigenvalue lambda_0 = 0 previously caused
@@ -844,3 +851,70 @@ def active_mode_penalty(
     n_active = (expected_omega > delta).float().sum(dim=-1).mean()  # scalar
 
     return nu * torch.relu(torch.tensor(float(q_min), device=log_a.device) - n_active)
+
+
+# ---------------------------------------------------------------------------
+# mode_entropy_penalty  --  Option D entropy ceiling (issue #82)
+# ---------------------------------------------------------------------------
+
+def mode_entropy_penalty(
+    log_a: torch.Tensor,
+    log_b: torch.Tensor,
+    nu_entropy: float,
+) -> torch.Tensor:
+    """
+    Active-mode entropy ceiling penalty (Option D, issue #82).
+
+    Computes the Shannon entropy of the softmax-normalised Gamma shape/rate
+    contrast across modes and penalises HIGH entropy (i.e. uniform mode
+    activation).  This complements the existing active_mode_penalty floor
+    (relu(q_min - N_active)) by adding an upper-bound pressure toward
+    sparse, low-entropy mode distributions.
+
+    The penalty is added to the total loss (subtracted from the ELBO)::
+
+        loss = recon + kl_z + kl_S + kl_tau + floor_penalty + entropy_penalty
+
+    Mathematical form::
+
+        pi_k  = softmax_k(log_a - log_b)       normalised mode-weight proxy
+        H     = -sum_k pi_k * log(pi_k + eps)  Shannon entropy over q modes
+        loss +=  nu_entropy * mean_batch(H)
+
+    When nu_entropy=0.0 the function returns a zero tensor and no gradient
+    flows through it.  The penalty is logged as 'entropy_S' in the training
+    diagnostics dict and the per-epoch CSV.
+
+    Design note (Rayleigh analogy)
+    ------------------------------
+    In Rayleigh's theory of sound, each vibrational mode k carries energy
+    proportional to its eigenfrequency lambda_k.  The Gamma posterior ratio
+    E[omega_k] = a_k / b_k acts as the estimated modal energy.  Uniform
+    distribution across modes (high H) corresponds to equipartition -- a
+    thermodynamic equilibrium that suppresses mode selection.  The entropy
+    ceiling penalty breaks equipartition and drives the system toward a
+    sparse, low-entropy mode spectrum, analogous to a physical oscillator
+    forced to resonate in a dominant mode.
+
+    Parameters
+    ----------
+    log_a : torch.Tensor
+        Log shape parameters of the Gamma mode posterior.  Shape (B, q).
+    log_b : torch.Tensor
+        Log rate parameters of the Gamma mode posterior.  Shape (B, q).
+    nu_entropy : float
+        Penalty weight (config key training.nu_entropy, default 0.5).
+        Set to 0.0 to disable.  Larger values push the mode distribution
+        toward sparser activation more aggressively.
+
+    Returns
+    -------
+    torch.Tensor
+        Scalar: nu_entropy * mean_batch(H).  Add to total loss.
+        Returns a zero tensor (no gradient) when nu_entropy == 0.0.
+    """
+    if nu_entropy == 0.0:
+        return torch.zeros(1, device=log_a.device).squeeze()
+    pi = (log_a - log_b).softmax(dim=-1)          # (B, q)
+    H  = -(pi * (pi + 1e-8).log()).sum(dim=-1)     # (B,)
+    return nu_entropy * H.mean()
