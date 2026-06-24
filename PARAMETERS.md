@@ -320,6 +320,37 @@ which `lam_s` is the relevant parameter.  Set to `0.0` to disable.
 
 ---
 
+### `nu_entropy`
+
+Weight for the mode-entropy ceiling penalty (Option D, issue #82).  Penalises HIGH
+Shannon entropy across the softmax-normalised mode-weight proxy `pi_k`, pushing the
+posterior toward sparse, low-entropy mode selection and breaking the uniform-mode
+attractor observed in runs 4 and 5.
+
+The penalty is subtracted from the ELBO (i.e. added to the total loss)::
+
+```
+pi_k    = softmax(log_a - log_b)       normalised mode-weight proxy
+H       = -sum_k pi_k * log(pi_k + eps)  Shannon entropy over q modes
+penalty = nu_entropy * mean_batch(H)
+```
+
+This complements the `nu` / `q_min` floor (which fires when too few modes are active)
+by adding an upper-bound pressure.  Set to `0.0` to disable entirely.  The resulting
+penalty is logged as `entropy_S` in `training_log.csv` and in the per-epoch console
+output alongside the KL terms.
+
+In Rayleigh's analogy: uniform mode activation corresponds to spectral equipartition
+(a thermodynamic equilibrium suppressing selection).  The entropy ceiling penalty
+breaks equipartition and drives the system toward a dominant resonant mode.
+
+- **YAML key:** `training.nu_entropy`
+- **Default:** `0.5`
+- **Disable:** set to `0.0`
+- **Code:** [`vdt/spectral.py` -- `mode_entropy_penalty`](vdt/spectral.py), [`vdt/model.py` -- `WiringAutoencoder.forward`](vdt/model.py)
+
+---
+
 ### `dt_init`
 
 Initial diffusion time for `TauModeDiffusion.log_t`.  The parameter is stored as
@@ -428,17 +459,19 @@ progressively tighter for high-frequency modes.  This is the mechanism by which
 | `kl_S` | `KL(q(S) || p(S|I))` | Penalises spectral basis away from eigenvalue-weighted prior | `lam_s` |
 | `kl_tau` | `KL(q(omega) || p(omega|tau, Lambda))` | Pushes high-frequency mode weights toward zero | `tau` |
 | `penalty` | `nu * relu(q_min - N_active)` | Prevents too few modes from being active | `nu`, `q_min` |
+| `entropy_S` | `nu_entropy * mean(H)` | Ceiling penalty -- breaks uniform-mode attractor | `nu_entropy` |
 
 ### Mode collapse vs. mode explosion
 
 | Symptom | Meaning | Fix |
 |---------|---------|-----|
 | `N_active < q_min` | Too many modes dormant (true collapse) | Reduce `lam_s`; lower `q_min`; check `nu` |
-| `N_active == q` all training long, `kl_S` does not converge | Mode explosion -- no selection has occurred | **Increase `lam_s`** (primary); increase `nu`; reduce `kl_z_warmup` |
+| `N_active == q` all training long, `kl_S` does not converge | Mode explosion -- no selection has occurred | **Increase `lam_s`** (primary); increase `nu_entropy`; reduce `kl_z_warmup` |
+| `entropy_S` stays near `log(q)` throughout training | Equipartition attractor -- mode distribution too uniform | Increase `nu_entropy` (try 1.0 or 2.0) |
 
 Runs 1-4 on Cora all exhibit mode explosion (`N_active = 4/4` throughout) with
 `lam_s = 0.2` and `nu = 0.05`.  The recommended next experiment uses
-`lam_s = 0.8`, `nu = 0.20`, and `kl_z_warmup = 10`.
+`lam_s = 0.8`, `nu = 0.20`, `nu_entropy = 0.5`, and `kl_z_warmup = 10`.
 
 ---
 
@@ -463,7 +496,8 @@ Runs 1-4 on Cora all exhibit mode explosion (`N_active = 4/4` throughout) with
 | `training.grad_clip` | training | 1.0 | Gradient norm clip |
 | `training.a_min` | training | 0.1 | Gamma shape floor (prevents NaN) |
 | `training.q_min` | training | 2 | Min active modes before penalty fires |
-| `training.nu` | training | 0.05 | Active-mode penalty weight |
+| `training.nu` | training | 0.05 | Active-mode floor penalty weight |
+| `training.nu_entropy` | training | 0.5 | Mode-entropy ceiling penalty weight (Option D, issue #82) |
 | `training.dt_init` | training | 0.001 | Initial diffusion time |
 | `graph.knn_k` | graph | 15 | Neighbours per node in kNN graph |
 | `graph.sigma` | graph | 0.5 | Gaussian edge-weight bandwidth |
