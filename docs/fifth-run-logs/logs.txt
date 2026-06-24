@@ -1,0 +1,56 @@
+$ uv run python train.py --config configs/mps.yaml --epochs 50 --seed 3047
+[VDT] lam_s: 0.8, nu: 0.2, kl_z_warmup: 10
+[VDT] nodes=2708, feat_dim=1433, classes=7
+[VDT] trainable params: 129,829,389
+
+Epoch    1/50  train=-10.1495  val=-63.3120  recon=-66.9441  kl_z=0.4390  kl_S=1.5480  kl_tau=1.6451
+Epoch    2/50  train=-102.8493  val=-141.8930  recon=-143.8512  kl_z=0.2518  kl_S=1.3435  kl_tau=0.3630
+Epoch    3/50  train=-180.0758  val=-218.4625  recon=-219.9786  kl_z=0.1425  kl_S=1.1635  kl_tau=0.2101
+Epoch    4/50  train=-256.4016  val=-294.2968  recon=-295.5442  kl_z=0.1084  kl_S=1.0147  kl_tau=0.1242
+Epoch    5/50  train=-331.9178  val=-369.3588  recon=-370.4104  kl_z=0.0755  kl_S=0.8898  kl_tau=0.0863
+Epoch    6/50  train=-406.5604  val=-443.5118  recon=-444.4277  kl_z=0.0647  kl_S=0.7789  kl_tau=0.0724
+Epoch    7/50  train=-480.2563  val=-516.6714  recon=-517.4622  kl_z=0.0516  kl_S=0.6766  kl_tau=0.0625
+Epoch    8/50  train=-552.8545  val=-588.6480  recon=-589.3368  kl_z=0.0485  kl_S=0.5824  kl_tau=0.0579
+Epoch    9/50  train=-624.2103  val=-659.3205  recon=-659.9161  kl_z=0.0461  kl_S=0.4972  kl_tau=0.0523
+Epoch   10/50  train=-694.2089  val=-728.5271  recon=-729.0488  kl_z=0.0405  kl_S=0.4273  kl_tau=0.0539
+Epoch   11/50  train=-762.7136  val=-796.2208  recon=-796.6701  kl_z=0.0317  kl_S=0.3687  kl_tau=0.0489
+Epoch   12/50  train=-829.5645  val=-862.1775  recon=-862.5446  kl_z=0.0288  kl_S=0.3017  kl_tau=0.0366
+Epoch   13/50  train=-894.6466  val=-926.3029  recon=-926.6116  kl_z=0.0237  kl_S=0.2509  kl_tau=0.0341
+Epoch   14/50  train=-957.8350  val=-988.5081  recon=-988.7636  kl_z=0.0231  kl_S=0.2007  kl_tau=0.0318
+Epoch   15/50  train=-1019.0811  val=-1048.6902  recon=-1048.9047  kl_z=0.0204  kl_S=0.1672  kl_tau=0.0270
+Epoch   16/50  train=-1078.2665  val=-1106.7453  recon=-1106.9198  kl_z=0.0181  kl_S=0.1320  kl_tau=0.0244
+Epoch   17/50  train=-1135.2610  val=-1162.5622  recon=-1162.7012  kl_z=0.0156  kl_S=0.1020  kl_tau=0.0214
+Epoch   18/50  train=-1190.0342  val=-1216.1351  recon=-1216.2498  kl_z=0.0142  kl_S=0.0786  kl_tau=0.0219
+Epoch   19/50  train=-1242.4956  val=-1267.3752  recon=-1267.4668  kl_z=0.0132  kl_S=0.0585  kl_tau=0.0200
+Epoch   20/50  train=-1292.6023  val=-1316.2305  recon=-1316.3037  kl_z=0.0121  kl_S=0.0433  kl_tau=0.0179
+Epoch   21/50  train=-1340.3212  val=-1362.6675  recon=-1362.7281  kl_z=0.0124  kl_S=0.0312  kl_tau=0.0171
+Epoch   22/50  train=-1385.6003  val=-1406.6858  recon=-1406.7326  kl_z=0.0107  kl_S=0.0211  kl_tau=0.0151
+Epoch   23/50  train=-1428.4590  val=-1448.2291  recon=-1448.2675  kl_z=0.0110  kl_S=0.0141  kl_tau=0.0132
+Epoch   24/50  train=-1468.8553  val=-1487.3296  recon=-1487.3572  kl_z=0.0084  kl_S=0.0088  kl_tau=0.0104
+Epoch   25/50  train=-1506.8334  val=-1524.0140  recon=-1524.0436  kl_z=0.0084  kl_S=0.0053  kl_tau=0.0159
+Epoch   26/50  train=-1542.3329  val=-1558.2344  recon=-1558.2558  kl_z=0.0081  kl_S=0.0029  kl_tau=0.0103
+Epoch   27/50  train=-1575.4680  val=-1590.1018  recon=-1590.1201  kl_z=0.0069  kl_S=0.0015  kl_tau=0.0099
+Epoch   28/50  train=-1606.2523  val=-1619.6545  recon=-1619.6722  kl_z=0.0063  kl_S=0.0007  kl_tau=0.0108
+Epoch   29/50  train=-1634.7700  val=-1646.9233  recon=-1646.9375  kl_z=0.0061  kl_S=0.0003  kl_tau=0.0078
+Epoch   30/50  train=-1660.9485  val=-1671.9456  recon=-1671.9620  kl_z=0.0057  kl_S=0.0001  kl_tau=0.0105
+Epoch   31/50  train=-1684.9087  val=-1694.8388  recon=-1694.8509  kl_z=0.0051  kl_S=0.0000  kl_tau=0.0069
+Epoch   32/50  train=-1706.8355  val=-1715.6107  recon=-1715.6232  kl_z=0.0051  kl_S=0.0000  kl_tau=0.0074
+Epoch   33/50  train=-1726.7036  val=-1734.3957  recon=-1734.4084  kl_z=0.0047  kl_S=0.0000  kl_tau=0.0081
+Epoch   34/50  train=-1744.5068  val=-1751.2150  recon=-1751.2258  kl_z=0.0044  kl_S=0.0000  kl_tau=0.0065
+Epoch   35/50  train=-1760.5133  val=-1766.2550  recon=-1766.2663  kl_z=0.0040  kl_S=-0.0000  kl_tau=0.0072
+Epoch   36/50  train=-1774.7128  val=-1779.5360  recon=-1779.5457  kl_z=0.0039  kl_S=-0.0000  kl_tau=0.0057
+Epoch   37/50  train=-1787.1610  val=-1791.1513  recon=-1791.1618  kl_z=0.0036  kl_S=0.0000  kl_tau=0.0069
+Epoch   38/50  train=-1798.0837  val=-1801.2000  recon=-1801.2089  kl_z=0.0035  kl_S=-0.0000  kl_tau=0.0053
+Epoch   39/50  train=-1807.4436  val=-1809.8499  recon=-1809.8579  kl_z=0.0033  kl_S=-0.0000  kl_tau=0.0047
+Epoch   40/50  train=-1815.4721  val=-1817.1065  recon=-1817.1151  kl_z=0.0031  kl_S=-0.0000  kl_tau=0.0056
+Epoch   41/50  train=-1822.1160  val=-1823.1417  recon=-1823.1496  kl_z=0.0031  kl_S=0.0000  kl_tau=0.0048
+Epoch   42/50  train=-1827.6444  val=-1828.0370  recon=-1828.0450  kl_z=0.0030  kl_S=0.0000  kl_tau=0.0050
+Epoch   43/50  train=-1831.9630  val=-1831.9454  recon=-1831.9532  kl_z=0.0029  kl_S=0.0000  kl_tau=0.0049
+Epoch   44/50  train=-1835.4836  val=-1834.9461  recon=-1834.9539  kl_z=0.0028  kl_S=0.0000  kl_tau=0.0050
+Epoch   45/50  train=-1838.1249  val=-1837.1232  recon=-1837.1298  kl_z=0.0028  kl_S=0.0000  kl_tau=0.0038
+Epoch   46/50  train=-1839.9492  val=-1838.6948  recon=-1838.7026  kl_z=0.0027  kl_S=0.0000  kl_tau=0.0052
+Epoch   47/50  train=-1841.1780  val=-1839.6688  recon=-1839.6761  kl_z=0.0027  kl_S=0.0000  kl_tau=0.0046
+Epoch   48/50  train=-1842.0308  val=-1840.1931  recon=-1840.2002  kl_z=0.0027  kl_S=0.0000  kl_tau=0.0044
+Epoch   49/50  train=-1842.4062  val=-1840.4175  recon=-1840.4248  kl_z=0.0027  kl_S=0.0000  kl_tau=0.0046
+Epoch   50/50  train=-1842.5706  val=-1840.4923  recon=-1840.4997  kl_z=0.0027  kl_S=0.0000  kl_tau=0.0047
+[VDT] Training complete. Best val loss: -1840.4923

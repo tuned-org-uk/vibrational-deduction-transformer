@@ -1,0 +1,1 @@
+{"note": "See attached training_curves.json from user session for parsed curves. Raw log below.", "config": {"lam_s": 0.8, "nu": 0.2, "kl_z_warmup": 10, "q": 4, "tau_modes": 4, "seed": 3047}, "best_val": -1840.4923, "epochs": 50}
