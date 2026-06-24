@@ -1,9 +1,10 @@
 """
-Spectral KL helpers for the Wiring Autoencoder.
+Spectral KL helpers, diffusion, and fingerprint utilities for the Wiring Autoencoder.
 
 This module contains all penalty and KL-divergence functions that
 operate on the Gamma-distributed spectral mode posterior (log_a, log_b)
-and on the spectral loading matrix S.
+and on the spectral loading matrix S, plus the heat-kernel diffusion
+decoder and lambda-fingerprint helpers.
 
 Public API
 ----------
@@ -13,11 +14,18 @@ tau_mode_kl              -- KL( q(w) || p(w|tau,Lambda) ), Term 4
 mode_entropy_penalty     -- Option D active-mode entropy ceiling penalty (#82)
 active_mode_penalty      -- active-mode floor penalty (#68)
 count_active_modes       -- diagnostic: mean E[omega_k] > delta count
-spectral_kl_health_check -- health check dict: mode_collapse / mode_explosion / kl_S_ok
+spectral_kl_health_check -- health-check dict: mode_collapse / mode_explosion / kl_S_ok
+TauModeDiffusion         -- learnable heat-kernel decoder nn.Module
+spectral_freq_cost       -- frequency regularisation scalar for L(z)
+lambda_fingerprint_hard  -- non-differentiable Laplacian spectrum histogram
+lambda_fingerprint_soft  -- differentiable (KDE) Laplacian spectrum histogram
+lambda_fingerprint       -- backwards-compat alias for lambda_fingerprint_hard
 """
 from __future__ import annotations
 
+import math
 import torch
+import torch.nn as nn
 
 
 # ---------------------------------------------------------------------------
@@ -79,8 +87,7 @@ def tau_mode_kl(
     KL divergence for mode frequencies: KL( q(w) || p(w|tau, Lambda) ).
 
     Both q(w) and p(w) are Gamma distributions parameterised by shape (a)
-    and rate (b).  The KL between two Gammas Gamma(a, b) and Gamma(a0, b0)
-    is::
+    and rate (b).  The KL between two Gammas Gamma(a, b) and Gamma(a0, b0) is::
 
         KL = (a - a0) * psi(a) - log_gamma(a) + log_gamma(a0)
              + a0 * (log_b - log_b0) + a * (b0/b - 1)
@@ -150,10 +157,6 @@ def mode_entropy_penalty(
     The penalty is subtracted from the ELBO, i.e. added to the total loss::
 
         loss = recon + kl_z + kl_S + kl_tau + floor_penalty + entropy_penalty
-
-    where::
-
-        ELBO = recon - kl_z - kl_S - kl_tau - nu_entropy * H
 
     Mathematical form::
 
@@ -296,23 +299,29 @@ def count_active_modes(
 def spectral_kl_health_check(
     kl_z: float,
     kl_S: float,
-    N_active: int,
-    q: int,
-    epoch: int,
+    kl_tau: float = 0.0,
+    active_modes: int = -1,
+    q: int = 1,
+    epoch: int = 0,
+    warmup_epochs: int = 5,
     kl_S_min: float = 0.05,
 ) -> dict:
     """
     Health check for the spectral KL terms after each training epoch.
 
-    Returns a dict with three boolean flags that can be printed or
-    forwarded to a logging system::
+    Returns a dict with boolean flags that can be printed or forwarded to a
+    logging system::
 
         {
-            'mode_collapse':   bool,  -- all modes collapsed to zero
-            'mode_explosion':  bool,  -- more active modes than q (impossible by design,
-                                         but guards against float rounding)
-            'kl_S_ok':         bool,  -- kl_S > kl_S_min (posterior non-trivial)
+            'mode_collapse':   bool,
+            'mode_explosion':  bool,
+            'kl_S_ok':         bool,
         }
+
+    The 'mode_explosion' flag is suppressed during early training
+    (epoch < warmup_epochs) because all modes are typically active at
+    initialisation and should not trigger a warning before the KL pressure
+    has had time to prune them.
 
     Parameters
     ----------
@@ -320,33 +329,310 @@ def spectral_kl_health_check(
         Isotropic latent KL scalar from the epoch.
     kl_S : float
         Spectral basis KL scalar from the epoch.
-    N_active : int
+    kl_tau : float
+        Tau-mode frequency KL scalar (unused in logic, present for logging).
+    active_modes : int
         Mean active-mode count from count_active_modes / out['N_active'].
+        Pass -1 to skip mode collapse / explosion checks.
     q : int
         Total number of spectral modes in the model.
     epoch : int
-        Current epoch index (0-based).  Used for logging context.
+        Current 1-based epoch index.  mode_explosion is suppressed before
+        warmup_epochs.
+    warmup_epochs : int
+        Number of warmup epochs before mode_explosion is flagged.
     kl_S_min : float
         Minimum acceptable kl_S value.  Default 0.05.
 
     Returns
     -------
     dict
-        Health-check result dict.
+        Health-check result dict with boolean values.
     """
+    in_warmup = epoch < warmup_epochs
     return {
-        "mode_collapse":  N_active == 0,
-        "mode_explosion": N_active > q,
+        "mode_collapse":  (active_modes == 0) if active_modes >= 0 else False,
+        "mode_explosion": (active_modes >= q) and not in_warmup if active_modes >= 0 else False,
         "kl_S_ok":        kl_S > kl_S_min,
     }
+
+
+# ---------------------------------------------------------------------------
+# TauModeDiffusion  -- learnable heat-kernel decoder
+# ---------------------------------------------------------------------------
+
+class TauModeDiffusion(nn.Module):
+    """
+    Learnable heat-kernel diffusion over the leading tau_modes eigenvectors.
+
+    Implements the truncated modal expansion from Rayleigh's Theory of Sound.
+    Given the leading k = tau_modes eigenpairs (U_k, lambda_k) of the base
+    graph Laplacian L(I), the diffusion kernel is::
+
+        K_tau = U_k diag(exp(-t * lambda_k)) U_k^T
+
+    where the scalar diffusion time t = exp(log_t) is a learnable parameter
+    initialised to log(dt_init).  Applying K_tau to a node signal E
+    smooths it along the graph's lowest-frequency eigenvectors, reconstructing
+    the input x from the embedding table.
+
+    Only the tau_modes lowest-frequency modes participate in the kernel;
+    higher-frequency modes are implicitly set to zero weight.  When
+    tau_modes == q, every retained mode contributes.
+
+    Parameters
+    ----------
+    tau_modes : int
+        Number of leading eigenvectors kept in the heat kernel.  Default 4.
+    dt_init : float
+        Initial diffusion time.  Stored as log_t = log(dt_init).  Default 0.01.
+    """
+
+    def __init__(self, tau_modes: int = 4, dt_init: float = 0.01) -> None:
+        super().__init__()
+        self.tau_modes = tau_modes
+        self.log_t = nn.Parameter(torch.tensor(math.log(dt_init)))
+
+    def forward(
+        self,
+        E: torch.Tensor,
+        eigvals: torch.Tensor,
+        eigvecs: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Apply the heat-kernel diffusion to the embedding table E.
+
+        Parameters
+        ----------
+        E : torch.Tensor
+            Node embedding table.  Shape (N, D).
+        eigvals : torch.Tensor
+            Eigenvalues of the base Laplacian.  Shape (N,) or (q,).
+            Only the first tau_modes values are used.
+        eigvecs : torch.Tensor
+            Eigenvectors of the base Laplacian.  Shape (N, K) with K >= tau_modes.
+
+        Returns
+        -------
+        torch.Tensor
+            Smoothed embedding matrix.  Shape (N, D).
+        """
+        k   = self.tau_modes
+        t   = self.log_t.exp()                            # scalar > 0
+        lam = eigvals[:k]                                 # (k,)
+        U_k = eigvecs[:, :k]                              # (N, k)
+        diag = torch.exp(-t * lam)                        # (k,)
+        # K_tau = U_k diag(exp(-t*lam)) U_k^T;  apply to E
+        return U_k @ (diag.unsqueeze(-1) * (U_k.T @ E))  # (N, D)
+
+
+# ---------------------------------------------------------------------------
+# spectral_freq_cost
+# ---------------------------------------------------------------------------
+
+def spectral_freq_cost(
+    L_z: torch.Tensor,
+    tau_modes: int = 4,
+) -> torch.Tensor:
+    """
+    Frequency regularisation scalar for the decoded Laplacian L(z).
+
+    Computes the mean of the leading tau_modes eigenvalues of L(z) as a
+    soft measure of the spectral frequency of the decoded graph.  Used as
+    an auxiliary regularisation term to penalise high-frequency wirings.
+
+    For a batched Laplacian L_z of shape (B, N, N), the cost is::
+
+        cost = mean_batch( mean_k( lambda_k(L_z) ) )   k = 1 ... tau_modes
+
+    The eigendecomposition is offloaded to CPU for MPS compatibility.
+
+    Parameters
+    ----------
+    L_z : torch.Tensor
+        Batched decoded Laplacian.  Shape (B, N, N).
+    tau_modes : int
+        Number of leading eigenvalues to average.  Default 4.
+
+    Returns
+    -------
+    torch.Tensor
+        Scalar cost value.
+    """
+    dev = L_z.device
+    # Offload to CPU: linalg.eigh on MPS has accuracy issues for large N.
+    eigvals = torch.linalg.eigvalsh(L_z.cpu())  # (B, N)
+    eigvals = eigvals.to(dev)
+    return eigvals[:, :tau_modes].mean()
+
+
+# ---------------------------------------------------------------------------
+# lambda_fingerprint_hard  (non-differentiable)
+# ---------------------------------------------------------------------------
+
+def lambda_fingerprint_hard(
+    L: torch.Tensor,
+    tau_modes: int = 16,
+    n_bins: int = 16,
+    lam_min: float = 0.0,
+    lam_max: float = 2.0,
+    eigvals: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """
+    Non-differentiable Laplacian spectrum histogram (hard bins).
+
+    Computes a fixed-bin histogram of the leading tau_modes eigenvalues
+    of L as a compact spectral fingerprint.  The histogram is normalised
+    to a probability vector (sums to 1).
+
+    This is the original 'lambda_fingerprint' implementation.  It is NOT
+    differentiable with respect to L or the eigenvalues because it uses
+    torch.histc, which has no gradient support.  Use lambda_fingerprint_soft
+    when gradients through the fingerprint are required (issue #56).
+
+    The eigensolver is offloaded to CPU for MPS compatibility.
+
+    Parameters
+    ----------
+    L : torch.Tensor
+        Laplacian matrix or batch.  Shape (N, N) or (B, N, N).
+        Ignored when eigvals is provided.
+    tau_modes : int
+        Number of leading eigenvalues to include.  Default 16.
+    n_bins : int
+        Number of histogram bins.  Default 16.
+    lam_min : float
+        Left edge of the histogram range.  Default 0.0.
+    lam_max : float
+        Right edge of the histogram range.  Default 2.0 (normalised Laplacian).
+    eigvals : torch.Tensor or None
+        Pre-computed eigenvalues of shape (tau_modes,) or (B, tau_modes).
+        When provided, the eigensolver is skipped.  Default None.
+
+    Returns
+    -------
+    torch.Tensor
+        Normalised histogram.  Shape (1, n_bins) for unbatched input or
+        (B, n_bins) for batched input.  Each row sums to 1.
+    """
+    dev = L.device
+    if eigvals is None:
+        L_cpu = L.cpu()
+        if L_cpu.ndim == 2:
+            L_cpu = L_cpu.unsqueeze(0)
+        ev = torch.linalg.eigvalsh(L_cpu)          # (B, N)
+        ev = ev[:, :tau_modes]                     # (B, k)
+    else:
+        ev = eigvals.cpu()
+        if ev.ndim == 1:
+            ev = ev.unsqueeze(0)
+
+    B = ev.shape[0]
+    hists = []
+    for b in range(B):
+        h = torch.histc(
+            ev[b].float(), bins=n_bins, min=lam_min, max=lam_max
+        )  # (n_bins,)
+        total = h.sum().clamp(min=1.0)
+        hists.append(h / total)
+    return torch.stack(hists, dim=0).to(dev)       # (B, n_bins)
+
+
+# ---------------------------------------------------------------------------
+# lambda_fingerprint_soft  (differentiable KDE, issue #56)
+# ---------------------------------------------------------------------------
+
+def lambda_fingerprint_soft(
+    eigvals: torch.Tensor,
+    n_bins: int = 16,
+    lam_min: float = 0.0,
+    lam_max: float = 2.0,
+    bandwidth: float = 0.1,
+) -> torch.Tensor:
+    """
+    Differentiable Laplacian spectrum histogram using Gaussian KDE.
+
+    Replaces the hard torch.histc histogram with a soft assignment that
+    supports gradient flow through the eigenvalues (issue #56).  Each
+    eigenvalue contributes to each bin proportionally to a Gaussian kernel
+    centred at the eigenvalue's position::
+
+        bin_centres_j = lam_min + (j + 0.5) * bin_width,  j = 0 ... n_bins-1
+        phi_kj        = exp( -0.5 * ((lambda_k - centre_j) / bandwidth)^2 )
+        row_j         = sum_k phi_kj
+        fingerprint   = row / row.sum()    (normalised to probability vector)
+
+    The bandwidth parameter controls the kernel width in eigenvalue units.
+    Smaller bandwidth gives sharper bins (closer to hard histogram); larger
+    bandwidth gives smoother interpolation.
+
+    This function is differentiable with respect to eigvals: gradients from
+    downstream losses can flow back through the soft histogram into the
+    eigensolver (or an amortised approximation thereof).
+
+    Parameters
+    ----------
+    eigvals : torch.Tensor
+        Eigenvalues.  Shape (q,) for unbatched or (B, q) for batched.
+        The function auto-detects the shape.
+    n_bins : int
+        Number of histogram bins.  Default 16.
+    lam_min : float
+        Left edge of the spectral range.  Default 0.0.
+    lam_max : float
+        Right edge of the spectral range.  Default 2.0.
+    bandwidth : float
+        Gaussian kernel bandwidth in eigenvalue units.  Default 0.1.
+
+    Returns
+    -------
+    torch.Tensor
+        Normalised soft histogram.  Shape (n_bins,) for unbatched input or
+        (B, n_bins) for batched input.  Each row sums to 1.
+    """
+    unbatched = eigvals.ndim == 1
+    if unbatched:
+        eigvals = eigvals.unsqueeze(0)   # (1, q)
+
+    bin_width = (lam_max - lam_min) / n_bins
+    centres = torch.linspace(
+        lam_min + 0.5 * bin_width,
+        lam_max - 0.5 * bin_width,
+        n_bins,
+        device=eigvals.device,
+        dtype=eigvals.dtype,
+    )  # (n_bins,)
+
+    # Gaussian KDE: (B, q, 1) vs (1, 1, n_bins) -> (B, q, n_bins)
+    diff = eigvals.unsqueeze(-1) - centres.unsqueeze(0).unsqueeze(0)
+    phi  = torch.exp(-0.5 * (diff / bandwidth) ** 2)  # (B, q, n_bins)
+    hist = phi.sum(dim=1)                              # (B, n_bins)
+    fp   = hist / hist.sum(dim=-1, keepdim=True).clamp(min=1e-8)  # normalise
+
+    return fp.squeeze(0) if unbatched else fp
+
+
+# ---------------------------------------------------------------------------
+# lambda_fingerprint  -- backwards-compat alias for lambda_fingerprint_hard
+# ---------------------------------------------------------------------------
+
+lambda_fingerprint = lambda_fingerprint_hard
+"""
+Backwards-compatibility alias.  All new code should use
+lambda_fingerprint_hard or lambda_fingerprint_soft explicitly.
+"""
 
 
 # ---------------------------------------------------------------------------
 # build_laplacian  (convenience wrapper)
 # ---------------------------------------------------------------------------
 
-def build_laplacian(x: torch.Tensor, k: int = 15, sigma: float = 1.0,
-                    normalised: bool = True) -> "DifferentiableLaplacian":
+def build_laplacian(
+    x: torch.Tensor,
+    k: int = 15,
+    sigma: float = 1.0,
+    normalised: bool = True,
+) -> "DifferentiableLaplacian":
     """
     Convenience wrapper: build a DifferentiableLaplacian from a feature
     matrix x using k-nearest-neighbour graph construction.
