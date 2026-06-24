@@ -11,7 +11,7 @@ current package:
 
   Current (v2):
     model(x, U_q, eigvals_q, node_idx, spectral_cache, L_f)
-    returns: loss, recon, kl_z, kl_S, kl_tau, x_hat, z, mu, log_var
+    returns: loss, recon, kl_z, kl_S, kl_tau, entropy_S, x_hat, z, mu, log_var, N_active
 
 Spectral pre-computation builds (eigvals, eigvecs) from the base Laplacian
 once at startup and passes them as spectral_cache=(eigvals, eigvecs) into
@@ -49,6 +49,18 @@ spectral_kl_health_check accepts epoch and warmup_epochs so the
 mode_explosion warning is suppressed during early training when all modes
 are still active by initialisation.  warmup_epochs is read from
 cfg['training']['kl_warmup_epochs'] (default 5).
+
+entropy_S logging (Option D, issue #82)
+-----------------------------------------
+train_one_epoch and eval_epoch now accumulate 'entropy_S' from
+WiringAutoencoder.forward() output and return it in the metrics dict.
+The per-epoch CSV log (training_log.csv) has two new columns:
+  train_entropy_S  -- mode-entropy ceiling penalty, training split
+  val_entropy_S    -- mode-entropy ceiling penalty, validation split
+The per-epoch print line also includes entropy_S=<val> so it is visible
+in the console log without opening the CSV.  nu_entropy is read from
+cfg['training']['nu_entropy'] (default 0.5) and forwarded to
+WiringAutoencoder.from_config() via the config dict.
 
 Checkpoint strategy
 -------------------
@@ -253,16 +265,20 @@ def train_one_epoch(
 
     Returns
     -------
-    dict with mean loss, recon, kl_z, kl_S, kl_tau, log_var_saturations,
-    and N_active over the epoch.  log_var_saturations counts the number of
-    batches that emitted a 'log_var clamp active' RuntimeWarning from
-    WiringEncoder (issue #75).  N_active is the mean number of spectrally
-    active modes per batch as returned by the model forward pass; it is
-    present in the dict only when the model exposes out['N_active']
-    (issue #77).
+    dict with mean loss, recon, kl_z, kl_S, kl_tau, entropy_S,
+    log_var_saturations, and N_active over the epoch.
+    log_var_saturations counts the number of batches that emitted a
+    'log_var clamp active' RuntimeWarning from WiringEncoder (issue #75).
+    entropy_S is the mean mode-entropy ceiling penalty (Option D, issue #82);
+    it is zero when nu_entropy=0.0 in the config.
+    N_active is the mean number of spectrally active modes per batch as
+    returned by the model forward pass (issue #77).
     """
     model.train()
-    totals = {"loss": 0.0, "recon": 0.0, "kl_z": 0.0, "kl_S": 0.0, "kl_tau": 0.0}
+    totals = {
+        "loss": 0.0, "recon": 0.0, "kl_z": 0.0,
+        "kl_S": 0.0, "kl_tau": 0.0, "entropy_S": 0.0,
+    }
     n = 0
     log_var_saturations = 0
     n_active_sum = 0
@@ -326,12 +342,16 @@ def eval_epoch(
 
     Returns
     -------
-    dict with mean loss, recon, kl_z, kl_S, kl_tau over the epoch.
+    dict with mean loss, recon, kl_z, kl_S, kl_tau, entropy_S over the epoch.
+    entropy_S is the mean mode-entropy ceiling penalty (Option D, issue #82).
     N_active is included when the model forward pass exposes out['N_active']
     (issue #77); the value is the mean over batches in this split.
     """
     model.eval()
-    totals = {"loss": 0.0, "recon": 0.0, "kl_z": 0.0, "kl_S": 0.0, "kl_tau": 0.0}
+    totals = {
+        "loss": 0.0, "recon": 0.0, "kl_z": 0.0,
+        "kl_S": 0.0, "kl_tau": 0.0, "entropy_S": 0.0,
+    }
     n = 0
     n_active_sum = 0
     n_active_batches = 0
@@ -455,9 +475,6 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Resume from checkpoint (--resume flag)
     # ------------------------------------------------------------------
-    # start_epoch is 1 for a fresh run; load_checkpoint() returns
-    # ckpt['epoch'] + 1 so training continues from the next epoch.
-    # best_val is also restored so the best.pt gate is not reset to inf.
     start_epoch = 1
     best_val    = float("inf")
     if args.resume:
@@ -512,10 +529,11 @@ def main() -> None:
     save_dir.mkdir(parents=True, exist_ok=True)
     log_path = save_dir / "training_log.csv"
 
+    # entropy_S columns added for Option D mode-entropy ceiling penalty (#82).
     csv_fields = [
         "epoch",
-        "train_loss", "train_recon", "train_kl_z", "train_kl_S", "train_kl_tau",
-        "val_loss",   "val_recon",   "val_kl_z",   "val_kl_S",   "val_kl_tau",
+        "train_loss", "train_recon", "train_kl_z", "train_kl_S", "train_kl_tau", "train_entropy_S",
+        "val_loss",   "val_recon",   "val_kl_z",   "val_kl_S",   "val_kl_tau",   "val_entropy_S",
         "log_var_saturations",
         "N_active",
     ]
@@ -529,6 +547,9 @@ def main() -> None:
     _q          = cfg["model"].get("q", 16)
     _kl_warmup  = int(tc.get("kl_warmup_epochs", 5))
     save_every  = int(lc.get("save_every_n_epochs", 0))  # 0 = disabled
+    # nu_entropy is read here for the console log; the value is already
+    # forwarded into the model via from_config() above.
+    _nu_entropy = float(tc.get("nu_entropy", 0.5))
 
     # ------------------------------------------------------------------
     # Training loop
@@ -583,11 +604,13 @@ def main() -> None:
             "train_kl_z":           train_metrics["kl_z"],
             "train_kl_S":           train_metrics["kl_S"],
             "train_kl_tau":         train_metrics["kl_tau"],
+            "train_entropy_S":      train_metrics.get("entropy_S", 0.0),
             "val_loss":             val_metrics["loss"],
             "val_recon":            val_metrics["recon"],
             "val_kl_z":             val_metrics["kl_z"],
             "val_kl_S":             val_metrics["kl_S"],
             "val_kl_tau":           val_metrics["kl_tau"],
+            "val_entropy_S":        val_metrics.get("entropy_S", 0.0),
             "log_var_saturations":  log_var_sat,
             "N_active":             val_metrics.get("N_active", ""),
         }
@@ -608,19 +631,19 @@ def main() -> None:
                 f"kl_z={val_metrics['kl_z']:.4f}  "
                 f"kl_S={val_metrics['kl_S']:.4f}  "
                 f"kl_tau={val_metrics['kl_tau']:.4f}  "
+                f"entropy_S={val_metrics.get('entropy_S', 0.0):.4f}  "
+                f"N_active={val_metrics.get('N_active', '?')}  "
                 f"({dt:.1f}s)"
             )
 
         # --------------------------------------------------------------
         # Checkpoint saves
         # --------------------------------------------------------------
-        # 1. Always write last.pt (atomic rename via .tmp).
         save_checkpoint(
             save_dir / "last.pt",
             epoch, model, optimizer, scheduler, cfg, best_val,
         )
 
-        # 2. Write best.pt when val_loss strictly improves.
         if val_metrics["loss"] < best_val:
             best_val = val_metrics["loss"]
             save_checkpoint(
@@ -628,7 +651,6 @@ def main() -> None:
                 epoch, model, optimizer, scheduler, cfg, best_val,
             )
 
-        # 3. Periodic snapshot (optional; controlled by save_every_n_epochs).
         if save_every > 0 and epoch % save_every == 0:
             save_checkpoint(
                 save_dir / f"epoch_{epoch:04d}.pt",
