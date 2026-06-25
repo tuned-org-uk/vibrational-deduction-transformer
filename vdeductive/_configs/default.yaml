@@ -1,5 +1,5 @@
-# vdt default configuration -- bundled with the package.
-# Override any section by passing --config /path/to/your.yaml to vdt-train.
+# vdeductive default configuration -- bundled with the package.
+# Override any section by passing --config /path/to/your.yaml to vdeductive-train.
 # This file is resolved via importlib.resources so it works after pip install.
 model:
   version: 2
@@ -50,6 +50,6 @@ dataset:
 logging:
   save_every_n_epochs: 10
   use_wandb: false
-  project: vdt
+  project: vdeductive
   log_every: 1
   save_dir: ./checkpoints

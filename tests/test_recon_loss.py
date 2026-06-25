@@ -15,7 +15,7 @@ These tests verify three properties of the NLL reconstruction loss:
 
 See also
 --------
-vdt/diffusion_decoder.py : DiffusionDecoder.recon_loss() -- NLL formula.
+vdeductive/diffusion_decoder.py : DiffusionDecoder.recon_loss() -- NLL formula.
 issue #54 : docstring sign-convention fix.
 """
 from __future__ import annotations
@@ -59,10 +59,10 @@ class _MinimalDecoder(nn.Module):
 # Try importing the real DiffusionDecoder; fall back to the stub if the
 # spectral deps are not installed in the test environment.
 try:
-    from vdt.diffusion_decoder import DiffusionDecoder as _Real
+    from vdeductive.diffusion_decoder import DiffusionDecoder as _Real
 
     class DiffusionDecoder(_Real):  # type: ignore[misc]
-        """Real decoder, used when vdt is importable."""
+        """Real decoder, used when vdeductive is importable."""
 except ImportError:
     DiffusionDecoder = _MinimalDecoder  # type: ignore[misc,assignment]
 

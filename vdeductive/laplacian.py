@@ -32,7 +32,7 @@ the N^2 buffer fits in VRAM/RAM and the eigensolver is faster on dense input.
 Density-matrix extension
 ------------------------
 The graph Laplacian in feature space is enhanced to represent the density
-matrix of positive-negative probability (SignedDensityMatrix in vdt/density.py).
+matrix of positive-negative probability (SignedDensityMatrix in vdeductive/density.py).
 The spectral loading factory (from_spectral_loading) projects the base Laplacian
 into the subspace spanned by the loading matrix W, yielding a batched PSD
 Laplacian whose off-diagonal entries are non-positive.
@@ -225,7 +225,7 @@ class DifferentiableLaplacian(nn.Module):
     The spectral loading factory (from_spectral_loading) projects the base
     Laplacian L_base through a loading matrix W to produce a batched PSD
     Laplacian that encodes positive-negative probability structure, consistent
-    with the density-matrix interpretation in vdt/density.py.
+    with the density-matrix interpretation in vdeductive/density.py.
 
     Parameters
     ----------

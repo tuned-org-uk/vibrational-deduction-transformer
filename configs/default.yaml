@@ -6,7 +6,7 @@
 #     use_lambda_features) with the v2 keys (q, lam_s, tau, n_layers,
 #     n_heads, dropout) that WiringAutoencoder.from_config() actually reads.
 #   - Added density_loss_weight under training: placeholder for the
-#     vdt/density.py wiring work (issue #62, point 3).
+#     vdeductive/density.py wiring work (issue #62, point 3).
 #
 # Stability mitigations (issue #68):
 #   - Added a_min, q_min, nu under training: to configure the two
@@ -50,7 +50,7 @@ training:
   grad_clip: 1.0
   seed: 42
   device: auto            # auto | cpu | cuda | mps
-  density_loss_weight: 1.0  # weight for density-matrix loss from vdt/density.py (issue #62)
+  density_loss_weight: 1.0  # weight for density-matrix loss from vdeductive/density.py (issue #62)
   # -- Stability mitigations (issue #68) ------------------------------------
   a_min: 0.1   # floor for Gamma shape a = exp(log_a) in tau_mode_kl;
                # prevents full shape collapse.  Set to 0.0 to disable.

@@ -1,6 +1,6 @@
 """
-Unit tests for vdt/vdt.py (VibrationalStateBlock, VDT) and the
-WiringEncoder / ModeWeightHead additions to vdt/encoder.py  (issue #17).
+Unit tests for vdeductive/vdeductive.py (VibrationalStateBlock, VDT) and the
+WiringEncoder / ModeWeightHead additions to vdeductive/encoder.py  (issue #17).
 
 Acceptance criteria
 -------------------
@@ -14,7 +14,7 @@ AC5  WiringEncoder regression: full API, correct shapes, grad flow,
 AC6  Unit tests: shape checks, CFL clamp, Q_states length K.
 
 Run with:
-    pytest tests/test_vdt.py -v
+    pytest tests/test_vdeductive.py -v
 """
 from __future__ import annotations
 
@@ -22,9 +22,9 @@ import pytest
 import torch
 import torch.nn as nn
 
-from vdt.vdt import VDT, VibrationalStateBlock
-from vdt.encoder import ModeWeightHead, WiringEncoder
-from vdt.laplacian import DifferentiableLaplacian
+from vdeductive.vdt import VDT, VibrationalStateBlock
+from vdeductive.encoder import ModeWeightHead, WiringEncoder
+from vdeductive.laplacian import DifferentiableLaplacian
 
 
 # ---------------------------------------------------------------------------
@@ -73,12 +73,12 @@ def eigvecs():
 
 
 @pytest.fixture
-def vdt_block(lap):
+def vdeductive_block(lap):
     return VibrationalStateBlock(n_nodes=N, feat_dim=D, n_heads=2)
 
 
 @pytest.fixture
-def vdt_model():
+def vdeductive_model():
     return VDT(n_nodes=N, feat_dim=D, n_layers=3, m_modes=2, n_heads=2)
 
 
@@ -100,51 +100,51 @@ def enc():
 class TestVibrationalStateBlock:
     """Shape, CFL clamp, gamma positivity, density shapes."""
 
-    def test_output_shape_batched(self, vdt_block, L_f, lap):
+    def test_output_shape_batched(self, vdeductive_block, L_f, lap):
         Q_t   = torch.randn(B, N, D)
         Q_tm1 = torch.zeros(B, N, D)
-        Q_tp1, rp, rm = vdt_block(Q_t, Q_tm1, L_f, lap)
+        Q_tp1, rp, rm = vdeductive_block(Q_t, Q_tm1, L_f, lap)
         assert Q_tp1.shape == (B, N, D)
 
-    def test_output_shape_unbatched(self, vdt_block, L_f, lap):
+    def test_output_shape_unbatched(self, vdeductive_block, L_f, lap):
         Q_t   = torch.randn(N, D)
         Q_tm1 = torch.zeros(N, D)
-        Q_tp1, rp, rm = vdt_block(Q_t, Q_tm1, L_f[0], lap)
+        Q_tp1, rp, rm = vdeductive_block(Q_t, Q_tm1, L_f[0], lap)
         assert Q_tp1.shape == (N, D)
 
-    def test_cfl_clamp_dt_le_dt_max(self, vdt_block, lap):
+    def test_cfl_clamp_dt_le_dt_max(self, vdeductive_block, lap):
         """AC2: dt must be <= dt_max_cfl after clamping."""
-        dt    = vdt_block._cfl_dt(lap).item()
+        dt    = vdeductive_block._cfl_dt(lap).item()
         dtmax = lap.dt_max_cfl()
         assert dt <= dtmax + 1e-6, (
             f"CFL violated: dt={dt:.4f} > dt_max={dtmax:.4f}"
         )
 
-    def test_cfl_clamp_large_log_dt(self, vdt_block, lap):
+    def test_cfl_clamp_large_log_dt(self, vdeductive_block, lap):
         """Force log_dt very large; dt must still be <= dt_max_cfl."""
         with torch.no_grad():
-            vdt_block.log_dt.fill_(10.0)   # exp(10) >> dt_max
-        dt    = vdt_block._cfl_dt(lap).item()
+            vdeductive_block.log_dt.fill_(10.0)   # exp(10) >> dt_max
+        dt    = vdeductive_block._cfl_dt(lap).item()
         dtmax = lap.dt_max_cfl()
         assert dt <= dtmax + 1e-6
 
-    def test_gamma_positive_at_init(self, vdt_block):
+    def test_gamma_positive_at_init(self, vdeductive_block):
         """AC3: gamma > 0 via softplus."""
-        assert (vdt_block.gamma > 0).all()
+        assert (vdeductive_block.gamma > 0).all()
 
-    def test_gamma_positive_after_updates(self, vdt_block, L_f, lap):
+    def test_gamma_positive_after_updates(self, vdeductive_block, L_f, lap):
         """AC3: gamma stays > 0 after 5 gradient steps."""
-        opt = torch.optim.SGD(vdt_block.parameters(), lr=0.1)
+        opt = torch.optim.SGD(vdeductive_block.parameters(), lr=0.1)
         Q_t   = torch.randn(B, N, D)
         Q_tm1 = torch.zeros(B, N, D)
         for _ in range(5):
             opt.zero_grad()
-            out, _, _ = vdt_block(Q_t, Q_tm1, L_f, lap)
+            out, _, _ = vdeductive_block(Q_t, Q_tm1, L_f, lap)
             out.sum().backward()
             opt.step()
-        assert (vdt_block.gamma > 0).all()
+        assert (vdeductive_block.gamma > 0).all()
 
-    def test_density_shapes(self, vdt_block, L_f, lap):
+    def test_density_shapes(self, vdeductive_block, L_f, lap):
         """
         rho_plus and rho_minus are (feat_dim, feat_dim), NOT (n_nodes, n_nodes).
 
@@ -155,7 +155,7 @@ class TestVibrationalStateBlock:
         """
         Q_t   = torch.randn(B, N, D)
         Q_tm1 = torch.zeros(B, N, D)
-        _, rp, rm = vdt_block(Q_t, Q_tm1, L_f, lap)
+        _, rp, rm = vdeductive_block(Q_t, Q_tm1, L_f, lap)
         assert rp.shape == (D, D), (
             f"rho_plus shape {rp.shape} != (feat_dim, feat_dim) = ({D}, {D})"
         )
@@ -171,35 +171,35 @@ class TestVibrationalStateBlock:
 class TestVDT:
     """AC1 return type, Q_states length K+1, shapes."""
 
-    def test_forward_return_type(self, vdt_model, L_f, eigvecs, lap):
+    def test_forward_return_type(self, vdeductive_model, L_f, eigvecs, lap):
         """AC1: returns (Q_K, Q_states, (rho_plus_list, rho_minus_list))."""
         X0 = torch.randn(B, N, D)
-        result = vdt_model(X0, L_f, eigvecs, lap)
+        result = vdeductive_model(X0, L_f, eigvecs, lap)
         assert len(result) == 3
         Q_K, Q_states, (rp_list, rm_list) = result
         assert isinstance(Q_states, list)
         assert isinstance(rp_list, list)
         assert isinstance(rm_list, list)
 
-    def test_q_states_length(self, vdt_model, L_f, eigvecs, lap):
+    def test_q_states_length(self, vdeductive_model, L_f, eigvecs, lap):
         """AC6: Q_states has length K+1."""
         X0 = torch.randn(B, N, D)
-        _, Q_states, _ = vdt_model(X0, L_f, eigvecs, lap)
-        assert len(Q_states) == vdt_model.n_layers + 1
+        _, Q_states, _ = vdeductive_model(X0, L_f, eigvecs, lap)
+        assert len(Q_states) == vdeductive_model.n_layers + 1
 
-    def test_rho_lists_length(self, vdt_model, L_f, eigvecs, lap):
+    def test_rho_lists_length(self, vdeductive_model, L_f, eigvecs, lap):
         """rho_plus_list and rho_minus_list each have length K."""
         X0 = torch.randn(B, N, D)
-        _, _, (rp_list, rm_list) = vdt_model(X0, L_f, eigvecs, lap)
-        assert len(rp_list) == vdt_model.n_layers
-        assert len(rm_list) == vdt_model.n_layers
+        _, _, (rp_list, rm_list) = vdeductive_model(X0, L_f, eigvecs, lap)
+        assert len(rp_list) == vdeductive_model.n_layers
+        assert len(rm_list) == vdeductive_model.n_layers
 
-    def test_Q_K_shape_batched(self, vdt_model, L_f, eigvecs, lap):
+    def test_Q_K_shape_batched(self, vdeductive_model, L_f, eigvecs, lap):
         X0 = torch.randn(B, N, D)
-        Q_K, _, _ = vdt_model(X0, L_f, eigvecs, lap)
+        Q_K, _, _ = vdeductive_model(X0, L_f, eigvecs, lap)
         assert Q_K.shape == (B, N, D)
 
-    def test_Q_K_shape_unbatched(self, vdt_model, eigvecs, lap):
+    def test_Q_K_shape_unbatched(self, vdeductive_model, eigvecs, lap):
         """Unbatched (N, d) input."""
         edge_index, bw = _make_ring(N)
         L_f_unb = DifferentiableLaplacian(
@@ -207,18 +207,18 @@ class TestVDT:
             base_weights=bw, normalised=True,
         )(torch.zeros(edge_index.shape[1])).detach()  # (N, N)
         X0 = torch.randn(N, D)
-        Q_K, _, _ = vdt_model(X0, L_f_unb, eigvecs, lap)
+        Q_K, _, _ = vdeductive_model(X0, L_f_unb, eigvecs, lap)
         assert Q_K.shape == (N, D)
 
-    def test_modal_projection_shape(self, vdt_model, L_f, eigvecs, lap):
+    def test_modal_projection_shape(self, vdeductive_model, L_f, eigvecs, lap):
         X0 = torch.randn(B, N, D)
-        Q_K, _, _ = vdt_model(X0, L_f, eigvecs, lap)
-        z = vdt_model.modal_projection(Q_K, eigvecs)
+        Q_K, _, _ = vdeductive_model(X0, L_f, eigvecs, lap)
+        z = vdeductive_model.modal_projection(Q_K, eigvecs)
         assert z.shape == (B, D)
 
-    def test_gradient_flows_to_X0(self, vdt_model, L_f, eigvecs, lap):
+    def test_gradient_flows_to_X0(self, vdeductive_model, L_f, eigvecs, lap):
         X0 = torch.randn(B, N, D, requires_grad=True)
-        Q_K, _, _ = vdt_model(X0, L_f, eigvecs, lap)
+        Q_K, _, _ = vdeductive_model(X0, L_f, eigvecs, lap)
         Q_K.sum().backward()
         assert X0.grad is not None
         assert X0.grad.shape == X0.shape

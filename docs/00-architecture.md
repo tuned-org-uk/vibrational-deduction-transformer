@@ -76,7 +76,7 @@ Diffusion / Flows      ->    (future) VDT-Diffusion     ->  unchanged
 The prior Wiring AE objective:
 
 ```
-L_vdt = E_q[log p(x|z)]  -  beta*KL(q(z) || N(0,I))  -  alpha*J_freq(L(z))
+L_vdeductive = E_q[log p(x|z)]  -  beta*KL(q(z) || N(0,I))  -  alpha*J_freq(L(z))
 ```
 
 is replaced in the VDT by the Spectral-PPCA ELBO:
@@ -148,7 +148,7 @@ KL(Gamma(a,b) || Exp(r)) = log(b) - log(r) + lgamma(a)
 
 ## Module Reference
 
-### `vdt/laplacian.py` -- `DifferentiableLaplacian`
+### `vdeductive/laplacian.py` -- `DifferentiableLaplacian`
 
 The entry point `from_spectral_loading(W, L_base)` is a class method:
 
@@ -156,7 +156,7 @@ The entry point `from_spectral_loading(W, L_base)` is a class method:
 - Synthesises edge weights as `w_ij = base_w_ij * sigmoid(||W_i - W_j||^2)`.
 - Fully differentiable through `W` back to the spectral decoder.
 
-### `vdt/spectral.py` -- updated
+### `vdeductive/spectral.py` -- updated
 
 **`TauModeDiffusion`** -- unchanged from base Wiring AE.
 
@@ -175,7 +175,7 @@ The entry point `from_spectral_loading(W, L_base)` is a class method:
 - Fully closed-form, no MC sampling.
 - `eigvals_q` same frozen constant as above.
 
-### `vdt/encoder.py` -- `WiringEncoder`
+### `vdeductive/encoder.py` -- `WiringEncoder`
 
 - **`kl_loss`**: standard isotropic `KL(q(z) || N(0,I))`. No Laplacian-precision
   term; no runtime graph construction. Laplacian-precision KL removed in PR #35.
@@ -185,7 +185,7 @@ The entry point `from_spectral_loading(W, L_base)` is a class method:
   the fixed `L(I)` -- it is not rebuilt from data at runtime.
 - Outputs `(z, mu, log_var, log_a, log_b)`.
 
-### `vdt/wiring_decoder.py` -- `SpectralLoadingDecoder` (default)
+### `vdeductive/wiring_decoder.py` -- `SpectralLoadingDecoder` (default)
 
 Maps `z (B, q)` and `U_q (d, q)` to `(W, omega, S, L_z, log_var_S)`.
 
@@ -216,11 +216,11 @@ and raises `ValueError` with a diagnostic message if the shape does not match.
 `WiringDecoder` is retained for ablation.
 Config flag: `decoder_type: spectral | mixture_of_experts`.
 
-### `vdt/diffusion_decoder.py` -- `DiffusionDecoder` (unchanged)
+### `vdeductive/diffusion_decoder.py` -- `DiffusionDecoder` (unchanged)
 
 No changes. `TauModeDiffusion` is already the Spectral-PPCA decoder.
 
-### `vdt/model.py` -- `WiringAutoencoder`
+### `vdeductive/model.py` -- `WiringAutoencoder`
 
 - Assembles `WiringEncoder`, `SpectralLoadingDecoder`, `DiffusionDecoder`.
 - `forward()` returns a **9-key dict**:
@@ -232,14 +232,14 @@ No changes. `TauModeDiffusion` is already the Spectral-PPCA decoder.
 - `generate()` unchanged.
 - `from_config()` factory reads the YAML config.
 
-### `vdt/spectral_memory.py` -- `SpectralAssociativeMemory`
+### `vdeductive/spectral_memory.py` -- `SpectralAssociativeMemory`
 
 - Wraps a pre-built Hopfield/linear associative memory initialised from the
   spectral artefact `A(I)`.
 - `forward(query)`: Hopfield retrieval via softmax-weighted spectral keys.
 - `delta_update(key, value)`: online delta-rule write without corrupting spectral
   key structure.
-- `from_vdt(vdt, U_q, eigvals_q, d_model)`: class method for post-training
+- `from_vdeductive(vdeductive, U_q, eigvals_q, d_model)`: class method for post-training
   construction from a trained `WiringAutoencoder`.
 
 ---

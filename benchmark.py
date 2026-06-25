@@ -41,11 +41,11 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
 import numpy as np
 
-from vdt import WiringAutoencoder, get_device
-from vdt.encoder import WiringEncoder
-from vdt.dataset import load_dataset, make_loaders
-from vdt.laplacian import DifferentiableLaplacian
-from vdt.spectral import spectral_freq_cost
+from vdeductive import WiringAutoencoder, get_device
+from vdeductive.encoder import WiringEncoder
+from vdeductive.dataset import load_dataset, make_loaders
+from vdeductive.laplacian import DifferentiableLaplacian
+from vdeductive.spectral import spectral_freq_cost
 
 
 # ---------------------------------------------------------------------------
@@ -107,11 +107,11 @@ def train_model(
     model, loaders, device, epochs, lr,
     # VDT-only spectral arguments (None for baselines)
     U_q=None, eigvals_q=None, L_f=None, eig_cache=None,
-    is_vdt=False,
+    is_vdeductive=False,
 ):
     """Train model for the given number of epochs.
 
-    For VDT (is_vdt=True) the current WiringAutoencoder.forward() signature
+    For VDT (is_vdeductive=True) the current WiringAutoencoder.forward() signature
     is used::
 
         model(x, U_q, eigvals_q, node_idx=node_idx,
@@ -129,7 +129,7 @@ def train_model(
             x        = batch["x"].to(device)
             node_idx = batch["node_idx"].to(device)
             optimizer.zero_grad()
-            if is_vdt:
+            if is_vdeductive:
                 out = model(
                     x, U_q, eigvals_q,
                     node_idx=node_idx,
@@ -148,7 +148,7 @@ def train_model(
 def extract_latents(
     model, loader, device,
     U_q=None, eigvals_q=None, L_f=None, eig_cache=None,
-    is_vdt=False,
+    is_vdeductive=False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract latent means (mu) and labels for a linear probe.
 
@@ -160,7 +160,7 @@ def extract_latents(
     for batch in loader:
         x        = batch["x"].to(device)
         node_idx = batch["node_idx"].to(device)
-        if is_vdt:
+        if is_vdeductive:
             out = model(
                 x, U_q, eigvals_q,
                 node_idx=node_idx,
@@ -178,7 +178,7 @@ def extract_latents(
 def compute_test_metrics(
     model, loader, device,
     U_q=None, eigvals_q=None, L_f=None, eig_cache=None,
-    is_vdt=False,
+    is_vdeductive=False,
 ) -> dict[str, float]:
     """Accumulate per-batch metrics over a loader and return means.
 
@@ -197,7 +197,7 @@ def compute_test_metrics(
     for batch in loader:
         x        = batch["x"].to(device)
         node_idx = batch["node_idx"].to(device)
-        if is_vdt:
+        if is_vdeductive:
             out = model(
                 x, U_q, eigvals_q,
                 node_idx=node_idx,
@@ -326,9 +326,9 @@ def main() -> None:
     # linalg.eigh runs on CPU to avoid the MPS linalg restriction; the   #
     # results are moved to device afterwards.                             #
     # ------------------------------------------------------------------ #
-    vdt = WiringAutoencoder.from_config(cfg, E).to(device)
+    vdeductive = WiringAutoencoder.from_config(cfg, E).to(device)
 
-    base_lap = vdt._laplacian
+    base_lap = vdeductive._laplacian
     with torch.no_grad():
         base_L_dense = base_lap(base_lap.base_weights.unsqueeze(0)).squeeze(0)
         base_L_cpu   = base_L_dense.cpu()
@@ -336,12 +336,12 @@ def main() -> None:
         full_eigvals = full_eigvals_cpu.to(device)
         full_eigvecs = full_eigvecs_cpu.to(device)
 
-    q = vdt.q
+    q = vdeductive.q
     U_q       = full_eigvecs[:, :q]   # (N, q)
     eigvals_q = full_eigvals[:q]      # (q,)
 
     # Mass-weighted feature-space Laplacian, built once (issue #74).
-    L_f = vdt.build_L_f(full_eigvals_cpu, full_eigvecs_cpu).to(device)  # (N, N)
+    L_f = vdeductive.build_L_f(full_eigvals_cpu, full_eigvecs_cpu).to(device)  # (N, N)
 
     # Full eigdecomposition cache for DiffusionDecoder.
     eig_cache = (full_eigvals, full_eigvecs)
@@ -352,43 +352,43 @@ def main() -> None:
     # 1. Wiring Autoencoder
     # -------------------------------------------------------------------
     print("\n[1/3] Training Wiring Autoencoder...")
-    vdt = train_model(
-        vdt, loaders, device, args.epochs, args.lr,
+    vdeductive = train_model(
+        vdeductive, loaders, device, args.epochs, args.lr,
         U_q=U_q, eigvals_q=eigvals_q, L_f=L_f, eig_cache=eig_cache,
-        is_vdt=True,
+        is_vdeductive=True,
     )
-    vdt_metrics = compute_test_metrics(
-        vdt, loaders["test"], device,
+    vdeductive_metrics = compute_test_metrics(
+        vdeductive, loaders["test"], device,
         U_q=U_q, eigvals_q=eigvals_q, L_f=L_f, eig_cache=eig_cache,
-        is_vdt=True,
+        is_vdeductive=True,
     )
     z_tr, y_tr = extract_latents(
-        vdt, loaders["train"], device,
+        vdeductive, loaders["train"], device,
         U_q=U_q, eigvals_q=eigvals_q, L_f=L_f, eig_cache=eig_cache,
-        is_vdt=True,
+        is_vdeductive=True,
     )
     z_te, y_te = extract_latents(
-        vdt, loaders["test"], device,
+        vdeductive, loaders["test"], device,
         U_q=U_q, eigvals_q=eigvals_q, L_f=L_f, eig_cache=eig_cache,
-        is_vdt=True,
+        is_vdeductive=True,
     )
-    vdt_acc = linear_probe_accuracy(z_tr, y_tr, z_te, y_te)
+    vdeductive_acc = linear_probe_accuracy(z_tr, y_tr, z_te, y_te)
     results.append({"model": "WiringAE",
-                    "recon_mse":    vdt_metrics["recon_loss"],
-                    "kl":           vdt_metrics["kl_loss"],
-                    "freq_cost":    vdt_metrics["freq_loss"],
-                    "linear_probe": vdt_acc})
-    print(f"  VDT  -> recon={vdt_metrics['recon_loss']:.4f}  "
-          f"kl={vdt_metrics['kl_loss']:.4f}  probe={vdt_acc:.4f}")
+                    "recon_mse":    vdeductive_metrics["recon_loss"],
+                    "kl":           vdeductive_metrics["kl_loss"],
+                    "freq_cost":    vdeductive_metrics["freq_loss"],
+                    "linear_probe": vdeductive_acc})
+    print(f"  VDT  -> recon={vdeductive_metrics['recon_loss']:.4f}  "
+          f"kl={vdeductive_metrics['kl_loss']:.4f}  probe={vdeductive_acc:.4f}")
 
     # -------------------------------------------------------------------
     # 2. Baseline VAE  -- uses same hidden_dim as VDT config for fairness
     # -------------------------------------------------------------------
-    vdt_hidden = cfg["model"].get("hidden_dim", args.hidden)
+    vdeductive_hidden = cfg["model"].get("hidden_dim", args.hidden)
     print("[2/3] Training Baseline VAE...")
-    vae = BaselineVAE(D, args.latent, vdt_hidden)
-    vae = train_model(vae, loaders, device, args.epochs, args.lr, is_vdt=False)
-    vae_metrics = compute_test_metrics(vae, loaders["test"], device, is_vdt=False)
+    vae = BaselineVAE(D, args.latent, vdeductive_hidden)
+    vae = train_model(vae, loaders, device, args.epochs, args.lr, is_vdeductive=False)
+    vae_metrics = compute_test_metrics(vae, loaders["test"], device, is_vdeductive=False)
     z_tr, y_tr = extract_latents(vae, loaders["train"], device)
     z_te, y_te = extract_latents(vae, loaders["test"],  device)
     vae_acc    = linear_probe_accuracy(z_tr, y_tr, z_te, y_te)
@@ -405,7 +405,7 @@ def main() -> None:
     # -------------------------------------------------------------------
     print("[3/3] Training Linear AE (PCA baseline)...")
     lin_ae = LinearAE(D, args.latent)
-    lin_ae = train_model(lin_ae, loaders, device, args.epochs, args.lr, is_vdt=False)
+    lin_ae = train_model(lin_ae, loaders, device, args.epochs, args.lr, is_vdeductive=False)
     lin_metrics = compute_test_metrics(lin_ae, loaders["test"], device)
     z_tr, y_tr  = extract_latents(lin_ae, loaders["train"], device)
     z_te, y_te  = extract_latents(lin_ae, loaders["test"],  device)

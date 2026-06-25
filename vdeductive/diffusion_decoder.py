@@ -60,7 +60,7 @@ and the CFL bound on dt is analysed in
 <https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/04-stability.md#3-numerical-stability-of-the-wave-update>`_.
 
 See also `docs/00-architecture.md section DiffusionDecoder
-<https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#vdtdiffusion_decoderpy--diffusiondecoder>`_
+<https://github.com/tuned-org-uk/wiring-autoencoder/blob/main/docs/00-architecture.md#vdeductivediffusion_decoderpy--diffusiondecoder>`_
 for the full module description.
 """
 from __future__ import annotations

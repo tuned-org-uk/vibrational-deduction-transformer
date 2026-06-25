@@ -1,5 +1,5 @@
 """
-tests/test_metrics.py  --  Unit tests for vdt/metrics.py (issue #32)
+tests/test_metrics.py  --  Unit tests for vdeductive/metrics.py (issue #32)
 
 Acceptance criteria from issue #32:
 
@@ -18,7 +18,7 @@ import math
 import pytest
 import torch
 
-from vdt.metrics import (
+from vdeductive.metrics import (
     compute_kl_S,
     compute_kl_tau,
     active_modes,
@@ -52,10 +52,10 @@ def _make_eigvals(q: int, uniform: bool = False) -> torch.Tensor:
     return torch.linspace(0.1, 2.0, q)
 
 
-def _make_vdt_and_spectral():
+def _make_vdeductive_and_spectral():
     """Construct a minimal WiringAutoencoder with ring-graph Laplacian."""
-    from vdt.laplacian import DifferentiableLaplacian
-    from vdt.model import WiringAutoencoder
+    from vdeductive.laplacian import DifferentiableLaplacian
+    from vdeductive.model import WiringAutoencoder
 
     W = torch.zeros(N, N)
     for i in range(N):
@@ -284,7 +284,7 @@ class TestLinearProbeAcc:
         reason="scikit-learn required",
     )
     def test_no_gradients_required(self):
-        from vdt.metrics import linear_probe_acc
+        from vdeductive.metrics import linear_probe_acc
         N_SAMPLES = 40
         mu     = torch.randn(N_SAMPLES, 16, requires_grad=True)
         labels = torch.randint(0, 4, (N_SAMPLES,))
@@ -299,7 +299,7 @@ class TestLinearProbeAcc:
     )
     def test_perfect_separability(self):
         """Linearly separable data should achieve high accuracy."""
-        from vdt.metrics import linear_probe_acc
+        from vdeductive.metrics import linear_probe_acc
         torch.manual_seed(0)
         N_SAMPLES = 200
         # Two well-separated Gaussians
@@ -325,7 +325,7 @@ class TestEvaluate:
         evaluate must return a dict with at least these keys:
         kl_S, kl_tau, active_modes, memory_snr, mean_elbo, spectral_entropy.
         """
-        model, U_q, eigvals_q = _make_vdt_and_spectral()
+        model, U_q, eigvals_q = _make_vdeductive_and_spectral()
         dl = _TinyDataLoader(n_batches=2)
         result = evaluate(model, dl, U_q, eigvals_q)
         expected_keys = {
@@ -335,7 +335,7 @@ class TestEvaluate:
         assert expected_keys.issubset(result.keys())
 
     def test_all_values_finite(self):
-        model, U_q, eigvals_q = _make_vdt_and_spectral()
+        model, U_q, eigvals_q = _make_vdeductive_and_spectral()
         dl = _TinyDataLoader(n_batches=2)
         result = evaluate(model, dl, U_q, eigvals_q)
         for k, v in result.items():
@@ -348,7 +348,7 @@ class TestEvaluate:
 
 class TestCompareIndices:
     def test_leaderboard_length_matches_index_count(self):
-        model, U_q, eigvals_q = _make_vdt_and_spectral()
+        model, U_q, eigvals_q = _make_vdeductive_and_spectral()
         dl    = _TinyDataLoader(n_batches=1)
         index_list = [
             ("idx_A", U_q, eigvals_q),
@@ -358,7 +358,7 @@ class TestCompareIndices:
         assert len(board) == 2
 
     def test_rank_1_has_bayes_factor_one(self):
-        model, U_q, eigvals_q = _make_vdt_and_spectral()
+        model, U_q, eigvals_q = _make_vdeductive_and_spectral()
         dl   = _TinyDataLoader(n_batches=1)
         index_list = [
             ("idx_A", U_q, eigvals_q),
@@ -369,7 +369,7 @@ class TestCompareIndices:
         assert board[0]["bayes_factor"] == pytest.approx(1.0, rel=1e-6)
 
     def test_leaderboard_sorted_by_elbo(self):
-        model, U_q, eigvals_q = _make_vdt_and_spectral()
+        model, U_q, eigvals_q = _make_vdeductive_and_spectral()
         dl   = _TinyDataLoader(n_batches=1)
         index_list = [
             ("idx_A", U_q, eigvals_q),

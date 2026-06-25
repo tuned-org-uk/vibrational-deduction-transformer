@@ -82,13 +82,13 @@ where the cross term \(\mu_z^\top L_s \mu_z\) is the graph Dirichlet energy of t
 
 ### 3.3 Module Changes
 
-#### `vdt/encoder.py` — `WiringEncoder` upgrade
+#### `vdeductive/encoder.py` — `WiringEncoder` upgrade
 
 - Replace `kl_loss` static method: instead of \(\mathrm{KL}(q\|\mathcal{N}(0,I))\), compute the Laplacian-precision KL above.
 - Add `sample_graph_laplacian(z_batch)` utility: builds a sparse kNN Laplacian from the batch of latent means at each forward pass.
 - Add `ModeWeightHead`: a small MLP or linear layer producing log-Gamma parameters \((a_k, b_k)\) for each mode weight \(\omega_k\); these parametrise \(q(\omega)\).
 
-#### `vdt/wiring_decoder.py` — `WiringDecoder` spectral-basis reparametrisation
+#### `vdeductive/wiring_decoder.py` — `WiringDecoder` spectral-basis reparametrisation
 
 Replace the current unconstrained MLP with an explicit spectral-basis loading decoder:
 
@@ -123,7 +123,7 @@ class SpectralLoadingDecoder(nn.Module):
 
 The output `W` feeds directly into `DifferentiableLaplacian` via a Cholesky-like edge weight synthesis: \(A_{ij} = (W_i - W_j)^\top (W_i - W_j)\), giving edge weights that are smooth functions of spectral mode activations.
 
-#### `vdt/spectral.py` — `TauModeKL` (new)
+#### `vdeductive/spectral.py` — `TauModeKL` (new)
 
 Replace the hard `spectral_freq_cost` with a proper variational KL:
 
@@ -145,7 +145,7 @@ def tau_mode_kl(log_a: torch.Tensor, log_b: torch.Tensor,
     return kl.sum(-1).mean()
 ```
 
-#### `vdt/model.py` — `WiringAutoencoder`
+#### `vdeductive/model.py` — `WiringAutoencoder`
 
 ```python
 class WiringAutoencoder(nn.Module):
@@ -185,7 +185,7 @@ class WiringAutoencoder(nn.Module):
                 "S_memory": S_memory, "eigvals": eigvals_q}
 ```
 
-#### New module: `vdt/spectral_memory.py` — `SpectralAssociativeMemory`
+#### New module: `vdeductive/spectral_memory.py` — `SpectralAssociativeMemory`
 
 ```python
 class SpectralAssociativeMemory(nn.Module):
@@ -220,9 +220,9 @@ class SpectralAssociativeMemory(nn.Module):
             self.S.data += (residual.T @ key) / key.size(0)
 
     @classmethod
-    def from_vdt(cls, vdt: WiringAutoencoder,
+    def from_vdeductive(cls, vdeductive: WiringAutoencoder,
                  loader, U_q, eigvals_q, d_model, **kw):
-        artefact = vdt.extract_spectral_artefact(loader, U_q, eigvals_q)
+        artefact = vdeductive.extract_spectral_artefact(loader, U_q, eigvals_q)
         return cls(artefact, d_model, **kw)
 ```
 

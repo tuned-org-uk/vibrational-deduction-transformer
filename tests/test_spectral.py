@@ -1,5 +1,5 @@
 """
-Unit tests for vdt/spectral.py --  additions: spectral_basis_kl, tau_mode_kl,
+Unit tests for vdeductive/spectral.py --  additions: spectral_basis_kl, tau_mode_kl,
 lambda_fingerprint_soft.
 
 Acceptance criteria from issue #24
@@ -29,7 +29,7 @@ import math
 import pytest
 import torch
 
-from vdt.spectral import (
+from vdeductive.spectral import (
     spectral_basis_kl,
     tau_mode_kl,
     TauModeDiffusion,

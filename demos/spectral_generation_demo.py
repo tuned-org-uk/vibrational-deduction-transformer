@@ -68,10 +68,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
-from vdt.metrics import spectral_entropy as v2_spectral_entropy
-from vdt.metrics import memory_snr as v2_memory_snr
-from vdt.metrics import active_modes as v2_active_modes
-from vdt.metrics import compute_kl_S, compute_kl_tau
+from vdeductive.metrics import spectral_entropy as v2_spectral_entropy
+from vdeductive.metrics import memory_snr as v2_memory_snr
+from vdeductive.metrics import active_modes as v2_active_modes
+from vdeductive.metrics import compute_kl_S, compute_kl_tau
 
 # ---------------------------------------------------------------------------
 # Reproducibility
@@ -980,7 +980,7 @@ def main() -> None:
     save_figures(out_dir, train_log, gen_results, entropy_results,
                  dataset, model, device)
 
-    #  metrics summary via vdt.metrics
+    #  metrics summary via vdeductive.metrics
     omega_bar  = model.mode_weights(n_samples=256, device=device)
     n_active   = v2_active_modes(omega_bar, delta=0.01)
     W_keys     = model.W_proj.T.detach().cpu()  # (tau_modes, latent_dim)

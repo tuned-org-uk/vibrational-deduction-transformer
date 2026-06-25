@@ -1,5 +1,5 @@
 """
-vdt/classifier.py  --  Vibrational Classifier (Option 6, issue #18).
+vdeductive/classifier.py  --  Vibrational Classifier (Option 6, issue #18).
 
 Provides a depth-supervised vibrational classifier built on VDT recurrent
 steps.  At each recurrent depth t the hidden state Q_t (B, N, d_model) is
@@ -30,13 +30,13 @@ Spectral memory initialisation ( upgrade)
 --------------------------------------------
 After loading a pre-trained WiringAutoencoder checkpoint:
 
-    memory = SpectralAssociativeMemory.from_vdt(vdt, U_q, eigvals_q,
+    memory = SpectralAssociativeMemory.from_vdeductive(vdeductive, U_q, eigvals_q,
                                                 d_model=hidden_dim)
     classifier.init_from_spectral_memory(memory, freeze=True)  # condition: spectral_memory
     classifier.init_from_spectral_memory(memory, freeze=False) # condition: spectral_memory_ft
 
 Ref: docs//03-branching.md -- Option 6
-Depends on: vdt/vdt.py (#17), vdt/spectral_memory.py (#28)
+Depends on: vdeductive/vdeductive.py (#17), vdeductive/spectral_memory.py (#28)
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import List, Optional, Tuple
 
-from .vdt import VDT
+from .vdeductive import VDT
 from .density import SignedDensityMatrix
 
 
@@ -171,7 +171,7 @@ class VibrationalClassifier(nn.Module):
         Laplacian-smoothness penalty weight.
     mu2 : float
         Density-matrix Frobenius penalty weight.
-    vdt_kwargs : dict or None
+    vdeductive_kwargs : dict or None
         Additional keyword arguments forwarded to VDT.__init__.
     """
 
@@ -184,7 +184,7 @@ class VibrationalClassifier(nn.Module):
         n_nodes: int,
         mu1: float = 0.01,
         mu2: float = 0.01,
-        vdt_kwargs: Optional[dict] = None,
+        vdeductive_kwargs: Optional[dict] = None,
     ) -> None:
         super().__init__()
         self.input_dim = input_dim
@@ -203,8 +203,8 @@ class VibrationalClassifier(nn.Module):
         nn.init.trunc_normal_(self.cls_token, std=0.02)
 
         # VDT recurrent block (shared weights across all K steps)
-        vdt_kw = vdt_kwargs or {}
-        self.vdt = VDT(d_model=d_model, **vdt_kw)
+        vdeductive_kw = vdeductive_kwargs or {}
+        self.vdeductive = VDT(d_model=d_model, **vdeductive_kw)
 
         # Classification head
         self.head = ClassificationHead(d_model=d_model, n_classes=n_classes)
@@ -231,7 +231,7 @@ class VibrationalClassifier(nn.Module):
         Parameters
         ----------
         memory : SpectralAssociativeMemory
-            Loaded from SpectralAssociativeMemory.from_vdt(...).
+            Loaded from SpectralAssociativeMemory.from_vdeductive(...).
         freeze : bool
             True  -> spectral_memory condition (frozen key matrix).
             False -> spectral_memory_ft condition (fine-tuned key matrix).
@@ -292,7 +292,7 @@ class VibrationalClassifier(nn.Module):
 
         for _ in range(self.depth):
             # VDT step: h (B, N+1, d_model) -> h' (B, N+1, d_model)
-            h = self.vdt(h)
+            h = self.vdeductive(h)
 
             # CLS position: index 0
             cls_out = h[:, 0, :]                  # (B, d_model)

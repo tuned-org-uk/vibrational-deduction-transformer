@@ -1,7 +1,7 @@
 """
 Wiring Autoencoder -- training entry point.
 
-Aligned with WiringAutoencoder v2 API (vdt/model.py).  The forward()
+Aligned with WiringAutoencoder v2 API (vdeductive/model.py).  The forward()
 signature changed substantially between the initial train.py and the
 current package:
 
@@ -91,10 +91,10 @@ import torch
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 
-from vdt import WiringAutoencoder, get_device
-from vdt.dataset import load_dataset, make_loaders
-from vdt.laplacian import DifferentiableLaplacian, MassMatrix
-from vdt.stability import pre_training_checks, spectral_kl_health_check
+from vdeductive import WiringAutoencoder, get_device
+from vdeductive.dataset import load_dataset, make_loaders
+from vdeductive.laplacian import DifferentiableLaplacian, MassMatrix
+from vdeductive.stability import pre_training_checks, spectral_kl_health_check
 
 
 def parse_args() -> argparse.Namespace:

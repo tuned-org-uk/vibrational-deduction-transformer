@@ -1,5 +1,5 @@
 """
-vdt/spectral_memory.py  --  SpectralAssociativeMemory
+vdeductive/spectral_memory.py  --  SpectralAssociativeMemory
 
 This module wraps the post-training spectral artefact A(I) produced by
 WiringAutoencoder.extract_spectral_artefact() into a pre-built
@@ -227,13 +227,13 @@ class SpectralAssociativeMemory(nn.Module):
             self.S_memory += torch.outer(value, key)
 
     # ------------------------------------------------------------------
-    # from_vdt -- post-training factory classmethod
+    # from_vdeductive -- post-training factory classmethod
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_vdt(
+    def from_vdeductive(
         cls,
-        vdt: "WiringAutoencoder",  # noqa: F821 -- forward reference
+        vdeductive: "WiringAutoencoder",  # noqa: F821 -- forward reference
         U_q: Tensor,
         eigvals_q: Tensor,
         d_model: int,
@@ -246,7 +246,7 @@ class SpectralAssociativeMemory(nn.Module):
 
         Parameters
         ----------
-        vdt : WiringAutoencoder
+        vdeductive : WiringAutoencoder
             A trained VDT  instance.
         U_q : Tensor
             Leading q eigenvectors of the frozen index Laplacian L(I).
@@ -269,7 +269,7 @@ class SpectralAssociativeMemory(nn.Module):
         ValueError
             If the returned S_memory side does not match d_model.
         """
-        artefact: Dict[str, Tensor] = vdt.extract_spectral_artefact(U_q, eigvals_q)
+        artefact: Dict[str, Tensor] = vdeductive.extract_spectral_artefact(U_q, eigvals_q)
         if "S_memory" not in artefact:
             raise KeyError(
                 "extract_spectral_artefact() did not return 'S_memory'. "

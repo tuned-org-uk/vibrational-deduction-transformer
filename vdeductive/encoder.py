@@ -37,9 +37,9 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
-from vdt.vdt import VDT
-from vdt.laplacian import DifferentiableLaplacian
-from vdt.spectral import lambda_fingerprint
+from vdeductive.vdt import VDT
+from vdeductive.laplacian import DifferentiableLaplacian
+from vdeductive.spectral import lambda_fingerprint
 
 
 # ---------------------------------------------------------------------------
@@ -244,7 +244,7 @@ class WiringEncoder(nn.Module):
         )
 
         # VDT recurrence stack.
-        self.vdt = VDT(
+        self.vdeductive = VDT(
             n_nodes=n_nodes,
             feat_dim=feat_dim,
             n_layers=n_layers,
@@ -319,10 +319,10 @@ class WiringEncoder(nn.Module):
             L_f = L_f.unsqueeze(0).expand(B, -1, -1)
 
         # -- VDT recurrence -----------------------------------------------
-        Q_K, _, _ = self.vdt(X0, L_f, eigvecs, lap)  # (B, N, d)
+        Q_K, _, _ = self.vdeductive(X0, L_f, eigvecs, lap)  # (B, N, d)
 
         # -- Modal projection z_modal = mean( Q_K @ U_m )  ----------------
-        z_modal = self.vdt.modal_projection(Q_K, eigvecs)  # (B, d)
+        z_modal = self.vdeductive.modal_projection(Q_K, eigvecs)  # (B, d)
 
         # -- Readout -------------------------------------------------------
         mu          = self.mu_head(z_modal)           # (B, latent_dim)

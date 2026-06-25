@@ -168,10 +168,10 @@ space can vastly outperform chain-of-thought on hard logical reasoning tasks.
 
   | LDT mechanism | VDT counterpart | Code location |
   |---|---|---|
-  | Recurrent lattice descent | Discrete damped-wave recurrence `Q_{t+1}` | `vdt/vdt.py` `VibrationalStateBlock.forward()` |
-  | Lattice alpha-projection | Modal projection onto eigenvectors `U_m` | `vdt/vdt.py` `VDT.modal_projection()` |
-  | Transformer forcing inside recurrence | Self-attention forcing term `B_t` | `vdt/vdt.py` `VibrationalStateBlock` |
-  | Consistency / validity tracking | Signed density matrix `ρ_plus − ρ_minus` | `vdt/density.py` `SignedDensityMatrix.update()` |
+  | Recurrent lattice descent | Discrete damped-wave recurrence `Q_{t+1}` | `vdeductive/vdeductive.py` `VibrationalStateBlock.forward()` |
+  | Lattice alpha-projection | Modal projection onto eigenvectors `U_m` | `vdeductive/vdeductive.py` `VDT.modal_projection()` |
+  | Transformer forcing inside recurrence | Self-attention forcing term `B_t` | `vdeductive/vdeductive.py` `VibrationalStateBlock` |
+  | Consistency / validity tracking | Signed density matrix `ρ_plus − ρ_minus` | `vdeductive/density.py` `SignedDensityMatrix.update()` |
 
   Where the LDT constrains each step to a **lattice of logically consistent states**,
   the VDT constrains the value space to the **spectral geometry of the ArrowSpace index** I.
@@ -188,5 +188,5 @@ space can vastly outperform chain-of-thought on hard logical reasoning tasks.
 ## See Also
 
 - `docs/architecture.md` — full data-flow diagram and module derivations
-- `vdt/spectral.py` — `spectral_freq_cost`, `TauModeDiffusion`, `lambda_fingerprint`
-- `vdt/laplacian.py` — `DifferentiableLaplacian` (ArrowSpace layer)
+- `vdeductive/spectral.py` — `spectral_freq_cost`, `TauModeDiffusion`, `lambda_fingerprint`
+- `vdeductive/laplacian.py` — `DifferentiableLaplacian` (ArrowSpace layer)

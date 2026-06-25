@@ -9,7 +9,7 @@ relevant source files.
 ## Model Parameters  (`model:`)
 
 These parameters control the architecture of `WiringAutoencoder` and are passed to
-[`vdt/model.py`](vdt/model.py) via `from_config()`.
+[`vdeductive/model.py`](vdeductive/model.py) via `from_config()`.
 
 ### `latent_dim`
 
@@ -22,7 +22,7 @@ layers.
 
 - **YAML key:** `model.latent_dim`
 - **Default:** `16`
-- **Code:** [`vdt/model.py` -- `WiringAutoencoder.__init__`](vdt/model.py)
+- **Code:** [`vdeductive/model.py` -- `WiringAutoencoder.__init__`](vdeductive/model.py)
 
 ---
 
@@ -34,7 +34,7 @@ VDT block; increasing it raises both parameter count and per-epoch cost.
 
 - **YAML key:** `model.hidden_dim`
 - **Default:** `32`
-- **Code:** [`vdt/model.py` -- `WiringAutoencoder.__init__`](vdt/model.py)
+- **Code:** [`vdeductive/model.py` -- `WiringAutoencoder.__init__`](vdeductive/model.py)
 
 ---
 
@@ -48,7 +48,7 @@ below.
 
 - **YAML key:** `model.q`
 - **Default:** falls back to `tau_modes` when absent
-- **Code:** [`vdt/spectral.py`](vdt/spectral.py), [`vdt/model.py`](vdt/model.py)
+- **Code:** [`vdeductive/spectral.py`](vdeductive/spectral.py), [`vdeductive/model.py`](vdeductive/model.py)
 
 ---
 
@@ -69,7 +69,7 @@ the heat kernel.
 
 - **YAML key:** `model.tau_modes`
 - **Default:** `4`
-- **Code:** [`vdt/spectral.py` -- `TauModeDiffusion`](vdt/spectral.py)
+- **Code:** [`vdeductive/spectral.py` -- `TauModeDiffusion`](vdeductive/spectral.py)
 
 ---
 
@@ -89,7 +89,7 @@ that could never be learned away.
 - **YAML key:** `model.lam_s`
 - **Default:** `0.2`
 - **Recommended increase if mode explosion persists:** `0.8` or higher
-- **Code:** [`vdt/spectral.py` -- `spectral_basis_kl`](vdt/spectral.py)
+- **Code:** [`vdeductive/spectral.py` -- `spectral_basis_kl`](vdeductive/spectral.py)
 
 ---
 
@@ -107,7 +107,7 @@ for high-frequency components.
 
 - **YAML key:** `model.tau`
 - **Default:** `0.5`
-- **Code:** [`vdt/spectral.py` -- `tau_mode_kl`](vdt/spectral.py), [`vdt/model.py` -- `build_L_f`](vdt/model.py)
+- **Code:** [`vdeductive/spectral.py` -- `tau_mode_kl`](vdeductive/spectral.py), [`vdeductive/model.py` -- `build_L_f`](vdeductive/model.py)
 
 ---
 
@@ -118,7 +118,7 @@ multi-head spectral attention followed by a position-wise MLP.
 
 - **YAML key:** `model.n_layers`
 - **Default:** `4`
-- **Code:** [`vdt/encoder.py`](vdt/encoder.py)
+- **Code:** [`vdeductive/encoder.py`](vdeductive/encoder.py)
 
 ---
 
@@ -129,7 +129,7 @@ Number of attention heads per VDT block in `WiringEncoder`.  Must evenly divide
 
 - **YAML key:** `model.n_heads`
 - **Default:** `4`
-- **Code:** [`vdt/encoder.py`](vdt/encoder.py)
+- **Code:** [`vdeductive/encoder.py`](vdeductive/encoder.py)
 
 ---
 
@@ -139,7 +139,7 @@ Dropout probability applied inside every VDT block.
 
 - **YAML key:** `model.dropout`
 - **Default:** `0.1`
-- **Code:** [`vdt/encoder.py`](vdt/encoder.py)
+- **Code:** [`vdeductive/encoder.py`](vdeductive/encoder.py)
 
 ---
 
@@ -151,7 +151,7 @@ stability, feature normalisation).  Separate from the eigensolver Tikhonov shift
 
 - **YAML key:** `model.eps`
 - **Default:** `0.3`
-- **Code:** [`vdt/encoder.py`](vdt/encoder.py)
+- **Code:** [`vdeductive/encoder.py`](vdeductive/encoder.py)
 
 ---
 
@@ -164,7 +164,7 @@ the normalised Laplacian from dominating the encoder attention.
 
 - **YAML key:** `model.mass_clip`
 - **Default:** `100.0` (tight; use `1e4` for very sparse graphs)
-- **Code:** [`vdt/model.py` -- `build_L_f`, `WiringAutoencoder.__init__`](vdt/model.py), [`vdt/laplacian.py`](vdt/laplacian.py)
+- **Code:** [`vdeductive/model.py` -- `build_L_f`, `WiringAutoencoder.__init__`](vdeductive/model.py), [`vdeductive/laplacian.py`](vdeductive/laplacian.py)
 
 ---
 
@@ -199,7 +199,7 @@ Mini-batch size.  On Apple Silicon (MPS) the `mps_batch_size` override is used
 automatically because MPS memory constraints are stricter than CUDA.
 
 - **YAML keys:** `training.batch_size`, `training.mps_batch_size`
-- **Code:** [`vdt/device.py`](vdt/device.py)
+- **Code:** [`vdeductive/device.py`](vdeductive/device.py)
 
 ---
 
@@ -262,7 +262,7 @@ Scalar weight applied to the density regularisation loss component if active.
 
 - **YAML key:** `training.density_loss_weight`
 - **Default:** `1.0`
-- **Code:** [`vdt/density.py`](vdt/density.py)
+- **Code:** [`vdeductive/density.py`](vdeductive/density.py)
 
 ---
 
@@ -275,7 +275,7 @@ through `log_a`; only the forward value seen by the special functions is clipped
 
 - **YAML key:** `training.a_min`
 - **Default:** `0.1`
-- **Code:** [`vdt/spectral.py` -- `tau_mode_kl`](vdt/spectral.py)
+- **Code:** [`vdeductive/spectral.py` -- `tau_mode_kl`](vdeductive/spectral.py)
 
 ---
 
@@ -297,7 +297,7 @@ remaining active, `N_active == q`).  For mode explosion, `lam_s` is the correct 
 
 - **YAML key:** `training.q_min`
 - **Default:** `2`
-- **Code:** [`vdt/spectral.py` -- `active_mode_penalty`, `count_active_modes`](vdt/spectral.py)
+- **Code:** [`vdeductive/spectral.py` -- `active_mode_penalty`, `count_active_modes`](vdeductive/spectral.py)
 
 ---
 
@@ -316,7 +316,7 @@ which `lam_s` is the relevant parameter.  Set to `0.0` to disable.
 - **YAML key:** `training.nu`
 - **Default:** `0.05`
 - **Recommended increase if mode explosion persists:** `0.2` or higher
-- **Code:** [`vdt/spectral.py` -- `active_mode_penalty`](vdt/spectral.py), [`vdt/model.py`](vdt/model.py)
+- **Code:** [`vdeductive/spectral.py` -- `active_mode_penalty`](vdeductive/spectral.py), [`vdeductive/model.py`](vdeductive/model.py)
 
 ---
 
@@ -327,14 +327,14 @@ Initial diffusion time for `TauModeDiffusion.log_t`.  The parameter is stored as
 
 - **YAML key:** `training.dt_init`
 - **Default:** `0.001`
-- **Code:** [`vdt/spectral.py` -- `TauModeDiffusion`](vdt/spectral.py)
+- **Code:** [`vdeductive/spectral.py` -- `TauModeDiffusion`](vdeductive/spectral.py)
 
 ---
 
 ## Graph Parameters  (`graph:`)
 
 These parameters control construction of the kNN feature graph and its Laplacian
-in [`vdt/laplacian.py`](vdt/laplacian.py).
+in [`vdeductive/laplacian.py`](vdeductive/laplacian.py).
 
 ### `knn_k`
 
@@ -344,7 +344,7 @@ frequency range available for mode selection.
 
 - **YAML key:** `graph.knn_k`
 - **Default:** `15`
-- **Code:** [`vdt/laplacian.py` -- `DifferentiableLaplacian.from_embeddings`](vdt/laplacian.py)
+- **Code:** [`vdeductive/laplacian.py` -- `DifferentiableLaplacian.from_embeddings`](vdeductive/laplacian.py)
 
 ---
 
@@ -356,7 +356,7 @@ distribution; larger values smooth it toward a uniform graph.
 
 - **YAML key:** `graph.sigma`
 - **Default:** `0.5`
-- **Code:** [`vdt/laplacian.py`](vdt/laplacian.py)
+- **Code:** [`vdeductive/laplacian.py`](vdeductive/laplacian.py)
 
 ---
 
@@ -369,7 +369,7 @@ eigenvalue 0 and all others lie in (0, 2].
 
 - **YAML key:** `graph.normalised`
 - **Default:** `true`
-- **Code:** [`vdt/laplacian.py`](vdt/laplacian.py)
+- **Code:** [`vdeductive/laplacian.py`](vdeductive/laplacian.py)
 
 ---
 
@@ -381,7 +381,7 @@ sparse operations.
 
 - **YAML key:** `graph.sparse`
 - **Default:** `false`
-- **Code:** [`vdt/laplacian.py`](vdt/laplacian.py)
+- **Code:** [`vdeductive/laplacian.py`](vdeductive/laplacian.py)
 
 ---
 
@@ -404,7 +404,7 @@ K_tau = U_k diag(exp(-t * lambda_k)) U_k^T
 Applying `K_tau` to the node embedding table `E` reconstructs each node's
 representation by spreading information along the graph's smoothest directions.  The
 learnable scalar `t` (diffusion time, initialised to `dt_init`) controls how far
-information propagates.  See [`vdt/spectral.py` -- `TauModeDiffusion`](vdt/spectral.py).
+information propagates.  See [`vdeductive/spectral.py` -- `TauModeDiffusion`](vdeductive/spectral.py).
 
 **Mode weights (Gamma variational posterior).**
 Each mode `k` is assigned a stochastic weight `omega_k ~ Gamma(a_k, b_k)` learned by
@@ -412,14 +412,14 @@ Each mode `k` is assigned a stochastic weight `omega_k ~ Gamma(a_k, b_k)` learne
 when `E[omega_k] = a_k / b_k > delta = 0.01`; otherwise it is dormant and contributes
 nothing to the reconstruction.  The number of active modes is tracked as `N_active` in
 every epoch output.  See
-[`vdt/spectral.py` -- `count_active_modes`, `active_mode_penalty`](vdt/spectral.py).
+[`vdeductive/spectral.py` -- `count_active_modes`, `active_mode_penalty`](vdeductive/spectral.py).
 
 **Spectral basis S (Gaussian variational posterior).**
 The `q x q` matrix `S` is a learned reparametrisation of the spectral loading.  Its
 prior variance per entry `(k, j)` is `1 / (lam_s * lambda_k)`, making the prior
 progressively tighter for high-frequency modes.  This is the mechanism by which
 `lam_s` induces sparsity.  See
-[`vdt/spectral.py` -- `spectral_basis_kl`](vdt/spectral.py).
+[`vdeductive/spectral.py` -- `spectral_basis_kl`](vdeductive/spectral.py).
 
 ### KL terms that regulate modes
 
