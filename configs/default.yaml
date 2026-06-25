@@ -24,6 +24,15 @@
 #   NOTE: q must be >= 6 for the entropy ceiling to have a non-zero
 #   gradient at the uniform attractor.  With q=2 the fixed point
 #   pi=[0.5,0.5] has zero gradient; nu_entropy has no effect.
+#
+# ELBO normalisation (issue #89, Fix B):
+#   - Added normalise_elbo_by_nodes under training:.  When true (default),
+#     forward() divides the raw recon_loss() output by N (the graph node
+#     count) so that all four ELBO terms share the same per-node scale.
+#     Without this normalisation the reconstruction term is O(N) times
+#     larger than the KL terms, suppressing the KL gradient and causing
+#     kl_S and kl_tau to collapse silently to zero.  Set to false to
+#     recover the pre-fix behaviour for ablation studies only.
 
 model:
   version: 2              # canonical v2 path in from_config()
@@ -75,6 +84,12 @@ training:
                    # across the softmax mode-weight proxy pi_k.
                    # Set to 0.0 to disable.  Logged as 'entropy_S'.
                    # Effective only when q >= 6 (see comment above).
+  # -- ELBO normalisation (issue #89, Fix B) --------------------------------
+  normalise_elbo_by_nodes: true  # divide recon_loss() by N before summing ELBO;
+                                  # brings reconstruction onto the same per-node
+                                  # scale as kl_z / kl_S / kl_tau so the KL
+                                  # gradient is not suppressed by a factor of N.
+                                  # Set to false for ablation only.
   dt_init: 0.005
 
 dataset:
