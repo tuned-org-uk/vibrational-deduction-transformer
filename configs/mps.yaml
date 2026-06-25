@@ -19,22 +19,42 @@
 #   Increasing q to 8 breaks the symmetry; nu_entropy=2.0 and lam_s=1.0
 #   provide sufficient gradient signal to drive mode selection.
 #
+# ELBO normalisation (issue #89, Fix B):
+#   - Added normalise_elbo_by_nodes under training:.  When true (default),
+#     forward() divides the raw recon_loss() output by N (the graph node
+#     count) so that all four ELBO terms share the same per-node scale.
+#     Without this normalisation the reconstruction term is O(N) times
+#     larger than the KL terms, suppressing the KL gradient and causing
+#     kl_S and kl_tau to collapse silently to zero.  Set to false to
+#     recover the pre-fix behaviour for ablation studies only.
+#
+# KL free-bits floor (issue #89, Fix A):
+#   - Added free_bits_z, free_bits_s, free_bits_tau under training:.
+#     Each KL term is clamped from below after per-dimension aggregation
+#     and before the ELBO sum, preventing the spectral or isotropic prior
+#     from being silently zeroed out by the reconstruction gradient.
+#     When a KL term is below its floor the gradient of that term is zero
+#     (standard torch.clamp behaviour); the posterior is free to match the
+#     prior on those dimensions.  Set all three to 0.0 for ablation only.
+#
 # Usage:
 #   python train.py --config configs/mps.yaml
 
 model:                    # taken from default.yml
   version: 2              # use canonical v2 from_config() path
   latent_dim: 16          # reduced from 32 -- enough for Cora 7-class
-  hidden_dim: 64          # widened from 32 to absorb q=8 mode capacity
-  q: 8                    # spectral modes -- increased from 2; minimum to escape uniform attractor
-  tau_modes: 8            # kept == q as recommended
+  hidden_dim: 256         # encoder / decoder hidden channel width
+  q: 16                   # number of spectral modes (SpectralLoadingDecoder + KL priors)
+                          # NOTE: minimum effective q for Option D is 6.
+                          # Below that the pi=[0.5,...] fixed point has zero gradient.
+  tau_modes: 16           # eigenvectors kept in TauModeDiffusion (== q is recommended)
   lam_s: 1.0              # spectral basis KL weight; increased from 0.4 to hold kl_S > 0
   tau: 1.0                # diffusion time scale; increased from 0.5 to resist kl_tau collapse
-  n_layers: 2             # VDT blocks -- reduced from 4; exercises stack without OOM
-  n_heads: 2              # attention heads -- matches small hidden_dim
+  n_layers: 4             # VDT blocks -- reduced from 4; exercises stack without OOM
+  n_heads: 4              # attention heads -- matches small hidden_dim
   dropout: 0.2            # unchanged
-  eps: 0.3                #
-  mass_clip: 100.0        # suppress lambda=1 MassMatrix singularity (issue #74)
+  eps: 0.3                # find a good value to create a proper network from the inputs
+  mass_clip: 99.0         # suppress lambda=1 MassMatrix singularity (issue #74)
   kl_z_warmup: 10
 
 graph:
@@ -62,6 +82,26 @@ training:
                           # set to 0.0 to disable.  2.0 chosen to dominate recon scale
                           # at the pi=[0.5,0.5] fixed point (~log(2)*2 ~ 1.4 nats).
   dt_init: 0.001          # conservative CFL-safe value (well below dynamic bound ~0.012)
+  # -- ELBO normalisation (issue #89, Fix B) --------------------------------
+  normalise_elbo_by_nodes: true  # divide recon_loss() by N before summing ELBO;
+                                  # brings reconstruction onto the same per-node
+                                  # scale as kl_z / kl_S / kl_tau so the KL
+                                  # gradient is not suppressed by a factor of N.
+                                  # Set to false for ablation only.
+  # -- KL free-bits floors (issue #89, Fix A) --------------------------------
+  free_bits_z:   0.5  # nats floor for kl_z (isotropic VAE KL);
+                      # kl_z = kl_z.clamp(min=free_bits_z) before ELBO sum.
+                      # Prevents the isotropic posterior from collapsing to
+                      # the prior while recon dominates.  Set to 0.0 to disable.
+  free_bits_s:   0.5  # nats floor for kl_S (spectral basis KL);
+                      # kl_S = kl_S.clamp(min=free_bits_s) before ELBO sum.
+                      # Critical for preventing kl_S -> 0 collapse observed
+                      # in Cora runs 1 and 2 (see issue #89).  Set to 0.0 to
+                      # disable (not recommended).
+  free_bits_tau: 0.1  # nats floor for kl_tau (mode-frequency KL);
+                      # kl_tau = kl_tau.clamp(min=free_bits_tau) before ELBO sum.
+                      # Smaller default than free_bits_s because the Gamma prior
+                      # range for kl_tau is narrower.  Set to 0.0 to disable.
 
 dataset:
   name: cora
