@@ -17,7 +17,7 @@ which is equivalent to *minimising* the following total loss::
 
 where
 
-    NLL_recon  =  -E_q[log p(x|z,W)]   (negative log-likelihood, minimised)
+    NLL_recon  =  -E_q[log p(x|z,W)] / N   (per-node NLL, minimised; issue #89)
     KL_z       =   KL( q(z)  || N(0,I)       )   -- isotropic
     KL_S       =   KL( q(S)  || p(S|I)       )   -- spectral basis
     KL_tau     =   KL( q(w)  || p(w|tau,L)   )   -- mode frequency
@@ -27,7 +27,21 @@ where
 All four KL terms are non-negative.  Minimising their sum is equivalent to
 maximising the ELBO::
 
-    ELBO  =  E_q[log p(x|z,W)]  -  KL_z  -  KL_S  -  KL_tau
+    ELBO  =  E_q[log p(x|z,W)] / N  -  KL_z  -  KL_S  -  KL_tau
+
+ELBO normalisation (issue #89, Fix B)
+--------------------------------------
+DiffusionDecoder.recon_loss() returns the *sum* of per-node NLL averaged
+over the batch, making it O(N) larger than the per-sample-mean KL terms.
+Dividing by N (self._n_nodes) brings all four ELBO terms onto the same
+per-node scale.  Without this normalisation the KL gradient signal is
+suppressed by a factor of ~N relative to the reconstruction gradient,
+causing kl_S and kl_tau to silently collapse to zero while the ELBO
+continues to descend (observed in runs 4 and 5 on Cora, N=2708).
+
+The reported ELBO value shifts by approximately -log(N) nats after this
+fix, but the gradient balance between reconstruction and all KL terms is
+now correct.
 
 Option D -- mode-entropy ceiling penalty (issue #82)
 ------------------------------------------------------
@@ -221,11 +235,11 @@ class WiringAutoencoder(nn.Module):
 
     which is equivalent to *maximising* the ELBO::
 
-        ELBO  =  E_q[log p(x|z,W)]  -  KL_z  -  KL_S  -  KL_tau
+        ELBO  =  E_q[log p(x|z,W)] / N  -  KL_z  -  KL_S  -  KL_tau
 
     where
 
-        NLL_recon  =  -E_q[log p(x|z,W)]   <- returned by recon_loss(), positive
+        NLL_recon  =  -E_q[log p(x|z,W)] / N   (per-node NLL; issue #89 Fix B)
         KL_z       =  KL( q(z)  || N(0,I)          )   -- isotropic
         KL_S       =  KL( q(S)  || p(S|I)          )   -- spectral basis
         KL_tau     =  KL( q(w)  || p(w|tau,Lambda) )   -- mode frequency
@@ -233,6 +247,16 @@ class WiringAutoencoder(nn.Module):
                       (absorbed into 'loss'; not a separate output key)
         ceiling    =  nu_entropy * H                    -- entropy ceiling (Option D)
                       returned as out['entropy_S']
+
+    ELBO normalisation (issue #89, Fix B)
+    ----------------------------------------
+    DiffusionDecoder.recon_loss() returns the sum of per-node NLL averaged
+    over the batch, making it O(N) times larger than the per-sample-mean KL
+    terms (kl_z, kl_S, kl_tau).  Without normalisation the KL gradient is
+    suppressed by ~N relative to the reconstruction gradient, causing kl_S
+    and kl_tau to collapse silently to zero.  Dividing by self._n_nodes
+    (the graph node count N) brings all four ELBO terms to the same
+    per-node scale and restores correct gradient balance.
 
     Option D -- mode-entropy ceiling (issue #82)
     -----------------------------------------------
@@ -648,9 +672,11 @@ class WiringAutoencoder(nn.Module):
                           plus the active-mode penalty, up to constants).
                           Computed as recon + kl_z + kl_S + kl_tau + floor + ceiling,
                           where floor is NOT returned as a separate key.
-            recon      -- NLL reconstruction term (positive; equals
-                          -E_q[log p(x|z,W)] up to the dropped
-                          0.5*D*log(2*pi) constant)
+            recon      -- per-node NLL reconstruction term (issue #89 Fix B):
+                          DiffusionDecoder.recon_loss(x, x_hat) / N.
+                          Normalised by N so all four ELBO terms share the
+                          same per-node scale and the KL gradient is not
+                          suppressed relative to the reconstruction gradient.
             kl_z       -- isotropic KL  KL(q(z) || N(0,I))
             kl_S       -- spectral basis KL  KL(q(S) || p(S|I))
             kl_tau     -- mode frequency KL  KL(q(w) || p(w|tau,L))
@@ -718,11 +744,13 @@ class WiringAutoencoder(nn.Module):
         )  # (B, D)
 
         # --- ELBO terms ---------------------------------------------------
-        # Term 1: NLL reconstruction term  -E_q[log p(x|z,W)]
-        # recon_loss() returns the *negative* log-likelihood (positive scalar).
-        # This is the quantity to minimise; it equals -E_q[log p(x|z,W)] up
-        # to the dropped constant 0.5*D*log(2*pi) -- see DiffusionDecoder.
-        recon = self.diffusion_decoder.recon_loss(x, x_hat)
+        # Term 1: per-node NLL reconstruction term (issue #89 Fix B).
+        # recon_loss() returns the *sum* of per-node NLL averaged over the
+        # batch, making it O(N) times larger than the per-sample-mean KL
+        # terms.  Dividing by self._n_nodes normalises all four ELBO terms
+        # to the same per-node scale and restores correct gradient balance
+        # between reconstruction and the KL regularisers.
+        recon = self.diffusion_decoder.recon_loss(x, x_hat) / self._n_nodes
 
         # Term 2: isotropic KL  KL(q(z) || N(0,I))  -- uses full latent_dim z
         kl_z = -0.5 * (1.0 + log_var - mu.pow(2) - log_var.exp()).sum(dim=-1).mean()
@@ -967,6 +995,14 @@ def from_config(
         matrix is built on E^T, giving the feature-space Gram matrix
         G = E^T E (D x D).  Passing E directly (N x D) would build a
         node-space Laplacian (N x N) and is incorrect for the encoder path.
+
+    ELBO normalisation (issue #89, Fix B)
+        forward() divides the raw recon_loss() output by self._n_nodes so
+        that the reconstruction term is on the same per-node scale as kl_z,
+        kl_S, and kl_tau.  The YAML config does not require any new key for
+        this fix -- it is always active.  The reported 'recon' value in the
+        training log will be approximately N times smaller than in runs
+        before this fix.
 
     YAML config example (v2)::
 
