@@ -37,6 +37,26 @@ The spectral loading factory (from_spectral_loading) projects the base Laplacian
 into the subspace spanned by the loading matrix W, yielding a batched PSD
 Laplacian whose off-diagonal entries are non-positive.
 
+Feature-space Laplacian convention (arrowspace / graph-wiring)
+--------------------------------------------------------------
+arrowspace and graph-wiring build the Laplacian in *feature* space, not in
+node space.  This means the adjacency matrix is computed on the *transpose*
+of the node-feature matrix E:
+
+    Node-feature matrix E  :  shape (N, D)  -- rows are nodes
+    Feature-space input    :  E.t()          -- shape (D, N)  -- rows are features
+
+When from_embeddings receives E.t() it treats each of the D features as a
+point in N-dimensional node space and builds a (D, D) Gram matrix:
+
+    G = E.t() @ E = E^T E   (D x D)
+
+rather than the node-space Gram matrix E @ E.t() (N x N).  The resulting
+Laplacian is therefore (D, D) and lives in feature space.
+
+Callers in model.py (from_config) and train.py always pass E.t().contiguous()
+so that the feature-space convention is respected throughout.
+
 Rayleigh Theory connection
 --------------------------
 For a vibrational system the Rayleigh quotient R(z) = z^T L z / z^T M z
@@ -227,6 +247,20 @@ class DifferentiableLaplacian(nn.Module):
     Laplacian that encodes positive-negative probability structure, consistent
     with the density-matrix interpretation in vdeductive/density.py.
 
+    Feature-space Laplacian convention (arrowspace / graph-wiring)
+    --------------------------------------------------------------
+    arrowspace and graph-wiring always build the Laplacian in *feature* space.
+    The from_embeddings factory receives the entities to connect as its first
+    argument.  To build a feature-space Laplacian from a node-feature matrix
+    E of shape (N, D), callers must pass E.t().contiguous() (shape D x N):
+
+        lap = DifferentiableLaplacian.from_embeddings(E.t().contiguous(), ...)
+
+    This makes the D features the "nodes" of the kNN graph and N the ambient
+    dimension.  The resulting Laplacian is (D, D) and operates in feature
+    space.  Passing E directly (shape N x D) builds a node-space Laplacian
+    (N, N), which is incorrect for the vibrational-deduction architecture.
+
     Parameters
     ----------
     n_nodes : int
@@ -248,9 +282,11 @@ class DifferentiableLaplacian(nn.Module):
         W shape: (B, N, q).  L_base shape: (N, N).
         Returns L shape: (B, N, N).
 
-    from_embeddings(embeddings, knn_k, sigma, normalised, sparse) -> DifferentiableLaplacian
-        Build a DifferentiableLaplacian from a node embedding matrix.
-        Constructs a kNN graph from pairwise RBF distances.
+    from_embeddings(points, knn_k, sigma, normalised, sparse) -> DifferentiableLaplacian
+        Build a DifferentiableLaplacian from a matrix of points.
+        Each row is treated as one entity (node) in the kNN graph.
+        For a feature-space Laplacian pass E.t().contiguous() where E is
+        the (N, D) node-feature matrix (arrowspace convention).
 
     Properties
     ----------
@@ -714,16 +750,47 @@ class DifferentiableLaplacian(nn.Module):
         sparse: bool = False,
     ) -> "DifferentiableLaplacian":
         """
-        Build a DifferentiableLaplacian from a node embedding matrix.
+        Build a DifferentiableLaplacian from a matrix of points.
 
-        Constructs a symmetric kNN graph using pairwise RBF distances, then
-        instantiates DifferentiableLaplacian with the resulting edge_index and
-        base_weights.
+        Each *row* of ``embeddings`` is treated as one entity (graph node)
+        in the kNN graph.  The pairwise squared distances are computed as::
+
+            dist2_ij = ||row_i - row_j||^2
+
+        and the RBF affinities as::
+
+            w_ij = exp( -dist2_ij / (2 * sigma^2) )
+
+        arrowspace / graph-wiring convention
+        -------------------------------------
+        The vibrational-deduction architecture builds the Laplacian in
+        *feature* space, not in node space.  Given a node-feature matrix
+        E of shape (N, D) (rows = nodes, columns = features), callers must
+        pass the *transpose* E.t().contiguous() (shape D x N) so that:
+
+          - The D features become the graph nodes (entities to connect).
+          - The N node values become the ambient coordinates.
+          - The Gram matrix computed internally is E^T E (D x D), the
+            correct feature-space Gram matrix.
+          - The returned Laplacian is (D, D), operating in feature space.
+
+        Passing E directly (N x D) builds a node-space Laplacian (N x N),
+        which is incorrect for the vibrational-deduction architecture.
+
+        Example::
+
+            # Feature-space Laplacian (correct for arrowspace):
+            lap = DifferentiableLaplacian.from_embeddings(
+                E.t().contiguous(), knn_k=15, sigma=1.2
+            )
+            # lap.n_nodes == D   (number of features)
 
         Parameters
         ----------
-        embeddings : Tensor  shape (N, D)
-            Node feature matrix.  Rows are nodes, columns are features.
+        embeddings : Tensor  shape (P, C)
+            Matrix of P points in C-dimensional space.  Each row is one
+            graph node.  For a feature-space Laplacian pass
+            E.t().contiguous() where E is the (N, D) node-feature matrix.
         knn_k : int
             Number of nearest neighbours per node (default 8).
         sigma : float
@@ -736,6 +803,7 @@ class DifferentiableLaplacian(nn.Module):
         Returns
         -------
         DifferentiableLaplacian
+            Instance with n_nodes == P (== D when E.t() is passed).
 
         Notes
         -----
