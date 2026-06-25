@@ -33,6 +33,15 @@
 #     larger than the KL terms, suppressing the KL gradient and causing
 #     kl_S and kl_tau to collapse silently to zero.  Set to false to
 #     recover the pre-fix behaviour for ablation studies only.
+#
+# KL free-bits floor (issue #89, Fix A):
+#   - Added free_bits_z, free_bits_s, free_bits_tau under training:.
+#     Each KL term is clamped from below after per-dimension aggregation
+#     and before the ELBO sum, preventing the spectral or isotropic prior
+#     from being silently zeroed out by the reconstruction gradient.
+#     When a KL term is below its floor the gradient of that term is zero
+#     (standard torch.clamp behaviour); the posterior is free to match the
+#     prior on those dimensions.  Set all three to 0.0 for ablation only.
 
 model:
   version: 2              # canonical v2 path in from_config()
@@ -90,6 +99,20 @@ training:
                                   # scale as kl_z / kl_S / kl_tau so the KL
                                   # gradient is not suppressed by a factor of N.
                                   # Set to false for ablation only.
+  # -- KL free-bits floors (issue #89, Fix A) --------------------------------
+  free_bits_z:   0.5  # nats floor for kl_z (isotropic VAE KL);
+                      # kl_z = kl_z.clamp(min=free_bits_z) before ELBO sum.
+                      # Prevents the isotropic posterior from collapsing to
+                      # the prior while recon dominates.  Set to 0.0 to disable.
+  free_bits_s:   0.5  # nats floor for kl_S (spectral basis KL);
+                      # kl_S = kl_S.clamp(min=free_bits_s) before ELBO sum.
+                      # Critical for preventing kl_S -> 0 collapse observed
+                      # in Cora runs 1 and 2 (see issue #89).  Set to 0.0 to
+                      # disable (not recommended).
+  free_bits_tau: 0.1  # nats floor for kl_tau (mode-frequency KL);
+                      # kl_tau = kl_tau.clamp(min=free_bits_tau) before ELBO sum.
+                      # Smaller default than free_bits_s because the Gamma prior
+                      # range for kl_tau is narrower.  Set to 0.0 to disable.
   dt_init: 0.005
 
 dataset:
