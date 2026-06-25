@@ -188,6 +188,20 @@ uv run benchmark.py --dataset cora --output data/Cora/results/ --config configs/
 uv run benchmark.py --dataset cora --output data/Cora/results/ --batch-size 16
 ```
 
+or:
+
+```bash
+# editable dev install (recommended for active work)
+pip install -e ".[dev,ogb,wandb]"
+
+# or regular install from PyPI once published
+pip install "vdt[ogb]"
+
+# then run from any directory
+vdt-train --config configs/mps.yaml --dataset cora
+vdt-train --config configs/mps_arxiv.yaml --dataset ogbn-arxiv
+```
+
 ### Apple Silicon (MPS) notes
 
 - Set `PYTORCH_ENABLE_MPS_FALLBACK=1` before running (the scripts print a reminder if not set).
