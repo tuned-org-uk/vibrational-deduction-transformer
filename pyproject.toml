@@ -5,43 +5,124 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "vdt"
 version = "0.1.0"
-description = "Variational Autoencoder with a differentiable graph-wiring generative path"
+description = "Vibrational Deduction Transformer -- spectral VAE with differentiable graph-wiring generative path"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { file = "LICENSE" }
 authors = [{ name = "Lorenzo Moriondo", email = "tunedconsulting@gmail.com" }]
-keywords = ["graph", "laplacian", "variational-autoencoder", "spectral", "arrowspace"]
-
-dependencies = [
-    "torch>=2.12",
-    "torch_geometric>=2.7",
-    "scipy>=1.17",
-    "numpy>=2.4",
-    "scikit-learn>=1.9",
-    "pyyaml>=6.0",
-    "tqdm>=4.67",
-    "pandas>=3.0",
-    "matplotlib>=3.10",
-    "wandb>=0.27",
+keywords = [
+    "graph",
+    "laplacian",
+    "variational-autoencoder",
+    "spectral",
+    "vibrational",
+    "arrowspace",
+    "graph-neural-network",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
 ]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["vdt*"] 
-exclude = ["tests*", "docs*", "demos*", "configs*"]
+# ---------------------------------------------------------------------------
+# Runtime dependencies
+# ---------------------------------------------------------------------------
+# torch and torch_geometric are NOT listed here because their correct wheel
+# depends on the CUDA / ROCm / MPS variant chosen by the user.  Install them
+# separately before (or after) installing vdt::
+#
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+#   pip install torch_geometric
+#   pip install vdt
+#
+# All other runtime dependencies are listed below.
+dependencies = [
+    "torch>=2.3",
+    "torch_geometric>=2.5",
+    "scipy>=1.13",
+    "numpy>=1.26",
+    "scikit-learn>=1.4",
+    "pyyaml>=6.0",
+    "tqdm>=4.66",
+    "pandas>=2.2",
+    "matplotlib>=3.8",
+]
 
+# ---------------------------------------------------------------------------
+# Optional extras
+# ---------------------------------------------------------------------------
 [project.optional-dependencies]
+# Experiment tracking
+wandb = ["wandb>=0.17"]
+
+# Benchmarking against OGB datasets
+ogb = ["ogb>=1.3"]
+
+# Development tools
 dev = [
     "pytest>=8",
     "ruff>=0.4",
     "mypy>=1.10",
+    "build>=1.0",
+    "twine>=5.0",
 ]
 
+# Convenience bundle for researchers running full experiments
+all = [
+    "wandb>=0.17",
+    "ogb>=1.3",
+    "torchvision>=0.18",
+]
+
+# ---------------------------------------------------------------------------
+# Console entry points
+# ---------------------------------------------------------------------------
+# After `pip install vdt` the following commands are available on PATH:
+#
+#   vdt-train   -- run a training experiment from a YAML config
+#   vdt-bench   -- run the benchmark suite
+#   vdt-vis     -- run the visualisation tools
+#
+[project.scripts]
+"vdt-train" = "vdt._cli.train:main"
+"vdt-bench" = "vdt._cli.bench:main"
+"vdt-vis"   = "vdt._cli.vis:main"
+
+# ---------------------------------------------------------------------------
+# Package discovery -- include the vdt package and its bundled configs
+# ---------------------------------------------------------------------------
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["vdt*"]
+exclude = ["tests*", "docs*", "demos*"]
+
+[tool.setuptools.package-data]
+vdt = [
+    "_configs/*.yaml",
+    "_configs/*.yml",
+    "py.typed",
+]
+
+# ---------------------------------------------------------------------------
+# Project URLs
+# ---------------------------------------------------------------------------
+[project.urls]
+"Homepage"    = "https://github.com/tuned-org-uk/vibrational-deduction-transformer"
+"Bug Tracker" = "https://github.com/tuned-org-uk/vibrational-deduction-transformer/issues"
+"Source"      = "https://github.com/tuned-org-uk/vibrational-deduction-transformer"
+
+# ---------------------------------------------------------------------------
+# Tool configuration
+# ---------------------------------------------------------------------------
 [tool.ruff]
 line-length = 100
 
 [tool.mypy]
 ignore_missing_imports = true
 
-[project.scripts]
-test = "pytest:main"
+[tool.pytest.ini_options]
+testpaths = ["tests"]

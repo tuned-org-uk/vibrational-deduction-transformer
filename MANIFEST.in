@@ -1,0 +1,24 @@
+# MANIFEST.in -- controls which files are included in the sdist.
+# The wheel is governed by pyproject.toml [tool.setuptools.package-data].
+
+# Include the top-level README, LICENSE and changelog
+include README.md
+include LICENSE
+include PARAMETERS.md
+
+# Include bundled configs shipped inside the vdt package
+recursive-include vdt/_configs *.yaml *.yml
+
+# Include the PEP 561 marker
+include vdt/py.typed
+
+# Exclude build artefacts and editor noise
+global-exclude __pycache__
+global-exclude *.py[cod]
+global-exclude *.so
+global-exclude .DS_Store
+exclude .env*
+prune checkpoints
+prune data
+prune results
+prune .venv
