@@ -43,16 +43,18 @@
 model:                    # taken from default.yml
   version: 2              # use canonical v2 from_config() path
   latent_dim: 16          # reduced from 32 -- enough for Cora 7-class
-  hidden_dim: 64          # widened from 32 to absorb q=8 mode capacity
-  q: 8                    # spectral modes -- increased from 2; minimum to escape uniform attractor
-  tau_modes: 8            # kept == q as recommended
+  hidden_dim: 256         # encoder / decoder hidden channel width
+  q: 16                   # number of spectral modes (SpectralLoadingDecoder + KL priors)
+                          # NOTE: minimum effective q for Option D is 6.
+                          # Below that the pi=[0.5,...] fixed point has zero gradient.
+  tau_modes: 16           # eigenvectors kept in TauModeDiffusion (== q is recommended)
   lam_s: 1.0              # spectral basis KL weight; increased from 0.4 to hold kl_S > 0
   tau: 1.0                # diffusion time scale; increased from 0.5 to resist kl_tau collapse
-  n_layers: 2             # VDT blocks -- reduced from 4; exercises stack without OOM
-  n_heads: 2              # attention heads -- matches small hidden_dim
+  n_layers: 4             # VDT blocks -- reduced from 4; exercises stack without OOM
+  n_heads: 4              # attention heads -- matches small hidden_dim
   dropout: 0.2            # unchanged
-  eps: 0.3                #
-  mass_clip: 100.0        # suppress lambda=1 MassMatrix singularity (issue #74)
+  eps: 0.3                # find a good value to create a proper network from the inputs
+  mass_clip: 99.0         # suppress lambda=1 MassMatrix singularity (issue #74)
   kl_z_warmup: 10
 
 graph:
