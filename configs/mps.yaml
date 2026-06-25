@@ -5,12 +5,19 @@
 # components: VDT blocks, SpectralLoadingDecoder, MassMatrix,
 # DifferentiableLaplacian, density-matrix loss.
 #
-# Peak memory estimate on Cora (N=2708, batch=4):
+# Peak memory estimate on Cora (N=2708, batch=4, q=8):
 #   L(z) sparse COO   : 4 x 40620 x 4   ~  0.6 MB
 #   eigvecs (q=8)     : 4 x 2708 x 8    ~  0.3 MB
 #   MHA activations   : 4 x 2708 x 64   ~  2.8 MB (manageable)
-#   model params      : latent=16,hid=64 ~  5 MB
+#   model params      : latent=16,hid=64 ~  8 MB
 #   Total peak        : << 1 GB
+#
+# Diagnostic reference: run-5 training_log.csv (50 epochs, Cora).
+# Root cause of uniform-mode attractor:
+#   q=2 gives a 2-element simplex; pi=[0.5,0.5] is a fixed point with
+#   zero gradient for both entropy ceiling and active-mode floor.
+#   Increasing q to 8 breaks the symmetry; nu_entropy=2.0 and lam_s=1.0
+#   provide sufficient gradient signal to drive mode selection.
 #
 # Usage:
 #   python train.py --config configs/mps.yaml
@@ -18,16 +25,16 @@
 model:                    # taken from default.yml
   version: 2              # use canonical v2 from_config() path
   latent_dim: 16          # reduced from 32 -- enough for Cora 7-class
-  hidden_dim: 32          # reduced from 256 -- cuts MHA activation by 16x
-  q: 2                    # spectral modes -- half of default; covers low-freq structure
-  tau_modes: 2            # keep == q as recommended
-  lam_s: 0.4             # spectral basis KL weight, changed from 0.01 
-  tau: 0.5                # diffusion time scale -- unchanged
+  hidden_dim: 64          # widened from 32 to absorb q=8 mode capacity
+  q: 8                    # spectral modes -- increased from 2; minimum to escape uniform attractor
+  tau_modes: 8            # kept == q as recommended
+  lam_s: 1.0              # spectral basis KL weight; increased from 0.4 to hold kl_S > 0
+  tau: 1.0                # diffusion time scale; increased from 0.5 to resist kl_tau collapse
   n_layers: 2             # VDT blocks -- reduced from 4; exercises stack without OOM
   n_heads: 2              # attention heads -- matches small hidden_dim
   dropout: 0.2            # unchanged
-  eps: 0.3                # 
-  mass_clip: 100.0       # suppress lambda=1 MassMatrix singularity (issue #74)
+  eps: 0.3                #
+  mass_clip: 100.0        # suppress lambda=1 MassMatrix singularity (issue #74)
   kl_z_warmup: 10
 
 graph:
@@ -37,8 +44,8 @@ graph:
   sparse: true            # lever 1: never materialise (B, N, N)
 
 training:
-  epochs: 50              # smoke-test length; increase once stable
-  batch_size: 4           # lever 2: minimal safe batch for 1B-reduced model on MPS
+  epochs: 100             # extended from 50; mode selection now has room to occur
+  batch_size: 4           # lever 2: minimal safe batch for reduced model on MPS
   mps_batch_size: 4       # explicit override
   lr: 1.0e-4
   weight_decay: 1.0e-5
@@ -49,8 +56,11 @@ training:
   device: auto
   density_loss_weight: 1.0
   a_min: 0.1              # prevent mode-weight collapse
-  q_min: 2                # minimum active modes (reduced from 4, matches q=8)
-  nu: 0.3                 # active-mode penalty weight
+  q_min: 4                # minimum active modes; increased from 2 to force half of q=8 active
+  nu: 1.0                 # active-mode penalty weight; increased from 0.3
+  nu_entropy: 2.0         # mode-entropy ceiling weight (Option D, issue #82);
+                          # set to 0.0 to disable.  2.0 chosen to dominate recon scale
+                          # at the pi=[0.5,0.5] fixed point (~log(2)*2 ~ 1.4 nats).
   dt_init: 0.001          # conservative CFL-safe value (well below dynamic bound ~0.012)
 
 dataset:
