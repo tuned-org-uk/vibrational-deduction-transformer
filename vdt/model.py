@@ -4,15 +4,16 @@ Wiring Autoencoder  --  model only.
 This module provides the single top-level model class::
 
     WiringAutoencoder   -- four-term ELBO (recon + kl_z + kl_S + kl_tau)
-                          with optional active-mode penalty.
+                          with optional active-mode floor penalty and
+                          mode-entropy ceiling penalty (Option D, issue #82).
 
-architecture (four-term ELBO, issue #27)
---------------------------------------------
+architecture (four-term ELBO + entropy ceiling, issue #27 / #82)
+----------------------------------------------------------------
 Assembles WiringEncoder, SpectralLoadingDecoder, and DiffusionDecoder
-under the four-term variational objective.  The ELBO is *maximised*,
+under the five-term variational objective.  The ELBO is *maximised*,
 which is equivalent to *minimising* the following total loss::
 
-    loss  =  NLL_recon  +  KL_z  +  KL_S  +  KL_tau  [+  penalty]
+    loss  =  NLL_recon  +  KL_z  +  KL_S  +  KL_tau  [+  floor]  [+  ceiling]
 
 where
 
@@ -20,12 +21,26 @@ where
     KL_z       =   KL( q(z)  || N(0,I)       )   -- isotropic
     KL_S       =   KL( q(S)  || p(S|I)       )   -- spectral basis
     KL_tau     =   KL( q(w)  || p(w|tau,L)   )   -- mode frequency
-    penalty    =   nu * relu(q_min - N_active)    -- active-mode floor (issue #68)
+    floor      =   nu * relu(q_min - N_active)    -- active-mode floor (issue #68)
+    ceiling    =   nu_entropy * H                 -- mode-entropy ceiling (Option D, issue #82)
 
 All four KL terms are non-negative.  Minimising their sum is equivalent to
 maximising the ELBO::
 
     ELBO  =  E_q[log p(x|z,W)]  -  KL_z  -  KL_S  -  KL_tau
+
+Option D -- mode-entropy ceiling penalty (issue #82)
+------------------------------------------------------
+The uniform-mode attractor observed in runs 4 and 5 is broken by adding an
+entropy ceiling penalty to the ELBO.  The penalty penalises HIGH Shannon
+entropy across the softmax-normalised mode-weight proxy pi_k::
+
+    pi_k      = softmax(log_a - log_b)         normalised mode weight proxy
+    H         = -sum_k pi_k * log(pi_k + eps)  Shannon entropy over modes
+    ceiling   = nu_entropy * mean_batch(H)
+
+The penalty is logged as 'entropy_S' in the per-step diagnostics dict and
+in the per-epoch training log CSV.  Set nu_entropy=0.0 to disable.
 
 Stability mitigations (issue #68)
 -----------------------------------
@@ -36,7 +51,7 @@ Two mitigations prevent mode-weight collapse during training:
     flows through log_a; only the forward value seen by the special
     functions is floored.
 
-2.  Active-mode penalty: active_mode_penalty(log_a, log_b, q_min, nu,
+2.  Active-mode floor penalty: active_mode_penalty(log_a, log_b, q_min, nu,
     delta) returns nu * relu(q_min - N_active) where N_active is the
     mean batch count of modes with E[omega_k] > delta.  The penalty is
     added to the total loss after the four ELBO terms.  Set nu=0 or
@@ -133,22 +148,29 @@ from .laplacian import DifferentiableLaplacian, MassMatrix
 # ---------------------------------------------------------------------------
 
 from .wiring_decoder import SpectralLoadingDecoder
-from .spectral import spectral_basis_kl, tau_mode_kl, active_mode_penalty, count_active_modes
+from .spectral import (
+    spectral_basis_kl,
+    tau_mode_kl,
+    active_mode_penalty,
+    count_active_modes,
+    mode_entropy_penalty,
+)
 
 
 # ---------------------------------------------------------------------------
-# WiringAutoencoder  ( -- four-term ELBO, issue #27)
+# WiringAutoencoder  ( -- four-term ELBO + entropy ceiling, issue #27 / #82)
 # ---------------------------------------------------------------------------
 
 class WiringAutoencoder(nn.Module):
     """
-    Wiring Autoencoder  -- four-term ELBO with spectral mode priors
-    and optional active-mode stability penalty (issue #68).
+    Wiring Autoencoder  -- four-term ELBO with spectral mode priors,
+    active-mode floor penalty (issue #68), and mode-entropy ceiling
+    penalty Option D (issue #82).
 
     Assembles WiringEncoder, SpectralLoadingDecoder, and DiffusionDecoder
-    under the four-term variational objective.  Training *minimises*::
+    under the variational objective.  Training *minimises*::
 
-        loss  =  NLL_recon  +  KL_z  +  KL_S  +  KL_tau  [+  penalty]
+        loss  =  NLL_recon  +  KL_z  +  KL_S  +  KL_tau  [+  floor]  [+  ceiling]
 
     which is equivalent to *maximising* the ELBO::
 
@@ -160,8 +182,24 @@ class WiringAutoencoder(nn.Module):
         KL_z       =  KL( q(z)  || N(0,I)          )   -- isotropic
         KL_S       =  KL( q(S)  || p(S|I)          )   -- spectral basis
         KL_tau     =  KL( q(w)  || p(w|tau,Lambda) )   -- mode frequency
-        penalty    =  nu * relu(q_min - N_active)       -- active-mode floor
+        floor      =  nu * relu(q_min - N_active)       -- active-mode floor
                       (absorbed into 'loss'; not a separate output key)
+        ceiling    =  nu_entropy * H                    -- entropy ceiling (Option D)
+                      returned as out['entropy_S']
+
+    Option D -- mode-entropy ceiling (issue #82)
+    -----------------------------------------------
+    Shannon entropy over the softmax-normalised mode-weight proxy::
+
+        pi_k    = softmax(log_a - log_b)
+        H       = -sum_k pi_k * log(pi_k + eps)
+        ceiling = nu_entropy * mean_batch(H)
+
+    Penalises UNIFORM mode activation (high H), pushing the posterior
+    toward sparse, low-entropy mode selection.  nu_entropy is read from
+    training.nu_entropy in the YAML config (default 0.5).  Set to 0.0 to
+    disable.  The value is returned as out['entropy_S'] so train.py can
+    log it alongside the existing KL diagnostics.
 
     Stability mitigations (issue #68)
     -----------------------------------
@@ -171,7 +209,7 @@ class WiringAutoencoder(nn.Module):
         min=a_min before lgamma/digamma.  Configured via ``a_min``
         (default 0.1).
 
-    2.  Active-mode penalty -- active_mode_penalty adds
+    2.  Active-mode floor penalty -- active_mode_penalty adds
         nu * relu(q_min - N_active) to the total loss, where N_active is
         the mean batch count of modes whose expected value E[omega_k]
         exceeds delta.  Configured via ``q_min`` (default 4) and
@@ -284,11 +322,16 @@ class WiringAutoencoder(nn.Module):
     q_min : int
         Minimum number of active spectral modes required.  When the mean
         batch count of modes with E[omega_k] > delta falls below q_min,
-        the active-mode penalty (nu * relu(q_min - N_active)) is added to
-        the total loss.  Default 4.  Set to 0 to disable.
+        the active-mode floor penalty (nu * relu(q_min - N_active)) is added
+        to the total loss.  Default 4.  Set to 0 to disable.
     nu : float
-        Lagrange multiplier weight for the active-mode penalty.  Default 1.0.
-        Set to 0.0 to disable.
+        Lagrange multiplier weight for the active-mode floor penalty.
+        Default 1.0.  Set to 0.0 to disable.
+    nu_entropy : float
+        Weight for the mode-entropy ceiling penalty (Option D, issue #82).
+        Penalises HIGH Shannon entropy across the mode-weight proxy pi_k.
+        Default 0.5.  Set to 0.0 to disable.  Corresponds to config key
+        training.nu_entropy.  The resulting penalty is logged as 'entropy_S'.
     mass_clip : float
         Maximum allowed value for any entry of MassMatrix.M_diag.  Passed
         to MassMatrix whenever build_L_f() is called (issue #74).  Prevents
@@ -314,6 +357,7 @@ class WiringAutoencoder(nn.Module):
         a_min: float = 0.1,
         q_min: int = 4,
         nu: float = 1.0,
+        nu_entropy: float = 0.5,
         mass_clip: float = 1e3,
     ) -> None:
         super().__init__()
@@ -325,6 +369,7 @@ class WiringAutoencoder(nn.Module):
         self.a_min = a_min
         self.q_min = q_min
         self.nu = nu
+        self.nu_entropy = nu_entropy
         self.mass_clip = mass_clip
 
         # Resolve n_nodes from the laplacian when not supplied explicitly.
@@ -494,25 +539,29 @@ class WiringAutoencoder(nn.Module):
 
         Returns
         -------
-        dict with exactly 10 keys:
-            loss     -- total loss scalar (minimise this; equals negative ELBO
-                        plus the active-mode penalty, up to constants).
-                        Computed as recon + kl_z + kl_S + kl_tau + penalty,
-                        but penalty is NOT returned as a separate key.
-            recon    -- NLL reconstruction term (positive; equals
-                        -E_q[log p(x|z,W)] up to the dropped
-                        0.5*D*log(2*pi) constant)
-            kl_z     -- isotropic KL  KL(q(z) || N(0,I))
-            kl_S     -- spectral basis KL  KL(q(S) || p(S|I))
-            kl_tau   -- mode frequency KL  KL(q(w) || p(w|tau,L))
-            x_hat    -- (B, D) reconstructed embeddings
-            z        -- (B, latent_dim) latent samples
-            mu       -- (B, latent_dim) posterior means
-            log_var  -- (B, latent_dim) posterior log-variances
-            N_active -- int, mean count of modes with E[omega_k] > delta
-                        across the batch.  Computed under no_grad via
-                        count_active_modes() (issue #77).  Feeds
-                        spectral_kl_health_check in train.py.
+        dict with exactly 11 keys:
+            loss       -- total loss scalar (minimise this; equals negative ELBO
+                          plus the active-mode penalty, up to constants).
+                          Computed as recon + kl_z + kl_S + kl_tau + floor + ceiling,
+                          where floor is NOT returned as a separate key.
+            recon      -- NLL reconstruction term (positive; equals
+                          -E_q[log p(x|z,W)] up to the dropped
+                          0.5*D*log(2*pi) constant)
+            kl_z       -- isotropic KL  KL(q(z) || N(0,I))
+            kl_S       -- spectral basis KL  KL(q(S) || p(S|I))
+            kl_tau     -- mode frequency KL  KL(q(w) || p(w|tau,L))
+            entropy_S  -- mode-entropy ceiling penalty (Option D, issue #82):
+                          nu_entropy * mean_batch(H) where H is the Shannon
+                          entropy of softmax(log_a - log_b).  Zero when
+                          nu_entropy=0.0.  Included in 'loss'.
+            x_hat      -- (B, D) reconstructed embeddings
+            z          -- (B, latent_dim) latent samples
+            mu         -- (B, latent_dim) posterior means
+            log_var    -- (B, latent_dim) posterior log-variances
+            N_active   -- int, mean count of modes with E[omega_k] > delta
+                          across the batch.  Computed under no_grad via
+                          count_active_modes() (issue #77).  Feeds
+                          spectral_kl_health_check in train.py.
         """
         B = x.shape[0]
 
@@ -585,10 +634,16 @@ class WiringAutoencoder(nn.Module):
         # a_min clamps exp(log_a) >= a_min before lgamma/digamma (issue #68).
         kl_tau = tau_mode_kl(log_a, log_b, eigvals_q, tau=self.tau, a_min=self.a_min)
 
-        # Active-mode penalty (issue #68): nu * relu(q_min - N_active).
+        # Active-mode floor penalty (issue #68): nu * relu(q_min - N_active).
         # Zero when nu=0 or q_min=0 (see active_mode_penalty docstring).
         # Folded into 'loss' only -- not returned as a separate output key.
         penalty = active_mode_penalty(log_a, log_b, q_min=self.q_min, nu=self.nu)
+
+        # Mode-entropy ceiling penalty (Option D, issue #82).
+        # Penalises HIGH Shannon entropy across softmax(log_a - log_b).
+        # Zero when nu_entropy=0.0 (fast-path; no gradient allocated).
+        # Returned as out['entropy_S'] for logging in train.py.
+        entropy_ceil = mode_entropy_penalty(log_a, log_b, nu_entropy=self.nu_entropy)
 
         # N_active diagnostic (issue #77): plain Python int, no gradient graph.
         # count_active_modes() shares the E[omega_k] = a/b computation with
@@ -598,7 +653,7 @@ class WiringAutoencoder(nn.Module):
 
         # Total loss (all four KL terms are non-negative by construction).
         # Minimising this loss is equivalent to maximising the ELBO.
-        loss = recon + kl_z + kl_S + kl_tau + penalty
+        loss = recon + kl_z + kl_S + kl_tau + penalty + entropy_ceil
 
         return {
             "loss": loss,
@@ -606,6 +661,7 @@ class WiringAutoencoder(nn.Module):
             "kl_z": kl_z,
             "kl_S": kl_S,
             "kl_tau": kl_tau,
+            "entropy_S": entropy_ceil,
             "x_hat": x_hat,
             "z": z,
             "mu": mu,
@@ -761,6 +817,13 @@ def from_config(
         identically to the new default (1e3), which is a tighter clip than
         the pre-#74 silent default of 1e6.
 
+    nu_entropy (issue #82)
+        training.nu_entropy is read and forwarded to
+        WiringAutoencoder.__init__ as nu_entropy.  Defaults to 0.5 when
+        absent.  Set to 0.0 in the config to disable the entropy ceiling
+        penalty entirely (backward-compatible; zero triggers the fast-path
+        in mode_entropy_penalty with no gradient allocation).
+
      YAML config example (v2)::
 
         model:
@@ -775,9 +838,10 @@ def from_config(
           n_heads: 4
           mass_clip: 1000.0    # issue #74
         training:
-          a_min: 0.1     # Gamma shape floor (issue #68)
-          q_min: 4       # min active modes (issue #68)
-          nu: 1.0        # active-mode penalty weight (issue #68)
+          a_min: 0.1       # Gamma shape floor (issue #68)
+          q_min: 4         # min active modes (issue #68)
+          nu: 1.0          # active-mode penalty weight (issue #68)
+          nu_entropy: 0.5  # entropy ceiling weight (Option D, issue #82)
         graph:
           knn_k: 15
           sigma: 0.5
@@ -832,6 +896,8 @@ def from_config(
         a_min=float(tc.get("a_min", 0.1)),
         q_min=int(tc.get("q_min", 4)),
         nu=float(tc.get("nu", 1.0)),
+        # Entropy ceiling penalty (Option D, issue #82)
+        nu_entropy=float(tc.get("nu_entropy", 0.5)),
         # MassMatrix clipping (issue #74)
         mass_clip=float(mc.get("mass_clip", 1e3)),
     )
