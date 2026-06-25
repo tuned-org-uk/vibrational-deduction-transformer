@@ -5,7 +5,7 @@ Priority: MPS (Apple Silicon) → CUDA → CPU.
 
 When MPS is selected, automatically sets PYTORCH_ENABLE_MPS_FALLBACK=1
 so ops unimplemented on MPS (e.g. aten::_linalg_eigh) silently fall
-back to CPU without crashing.  Note that vdt/spectral.py also offloads
+back to CPU without crashing.  Note that vdeductive/spectral.py also offloads
 all eigensolver calls to CPU explicitly, so in practice the fallback env
 var is belt-and-braces for any third-party code paths.
 """
@@ -74,5 +74,5 @@ def _set_mps_fallback(verbose: bool) -> None:
             print(
                 "[VDT] MPS selected — set PYTORCH_ENABLE_MPS_FALLBACK=1.\n"
                 "      All linalg.eigh calls are also offloaded to CPU "
-                "explicitly in vdt/spectral.py."
+                "explicitly in vdeductive/spectral.py."
             )

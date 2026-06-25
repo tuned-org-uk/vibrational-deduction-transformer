@@ -28,8 +28,8 @@ import math
 import pytest
 import torch
 
-from vdt.vdt import VibrationalStateBlock, _gershgorin_lambda_max
-from vdt.stability import stability_diagnostics
+from vdeductive.vdt import VibrationalStateBlock, _gershgorin_lambda_max
+from vdeductive.stability import stability_diagnostics
 
 
 # ---------------------------------------------------------------------------

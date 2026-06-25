@@ -1,5 +1,5 @@
 """
-Unit tests for vdt/laplacian.py and vdt/density.py  (issue #16).
+Unit tests for vdeductive/laplacian.py and vdeductive/density.py  (issue #16).
 
 Covers all acceptance criteria:
 
@@ -26,8 +26,8 @@ import warnings
 import pytest
 import torch
 
-from vdt.laplacian import DifferentiableLaplacian, MassMatrix
-from vdt.density import SignedDensityMatrix
+from vdeductive.laplacian import DifferentiableLaplacian, MassMatrix
+from vdeductive.density import SignedDensityMatrix
 
 
 # ---------------------------------------------------------------------------

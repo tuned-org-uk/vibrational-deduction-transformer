@@ -1,40 +1,40 @@
 """
-vdt -- Vibrational Deduction Transformer.
+vdeductive -- Vibrational Deduction Transformer.
 
 Public API
 ----------
 Core model::
 
-    from vdt import WiringAutoencoder
+    from vdeductive import WiringAutoencoder
     model = WiringAutoencoder.from_config(cfg, E)
 
 Spectral utilities::
 
-    from vdt import (
+    from vdeductive import (
         build_spectral_cache,
         mode_entropy_penalty,
     )
 
 Dataset helpers::
 
-    from vdt import load_dataset, make_loaders
+    from vdeductive import load_dataset, make_loaders
 
 Stability / health checks::
 
-    from vdt import pre_training_checks, spectral_kl_health_check
+    from vdeductive import pre_training_checks, spectral_kl_health_check
 
 Device selection::
 
-    from vdt import get_device
+    from vdeductive import get_device
 
 Version
 -------
-The installed package version is available as ``vdt.__version__``.
+The installed package version is available as ``vdeductive.__version__``.
 """
 from importlib.metadata import version, PackageNotFoundError
 
 try:
-    __version__: str = version("vdt")
+    __version__: str = version("vdeductive")
 except PackageNotFoundError:  # editable / source install without metadata
     __version__ = "0.0.0.dev"
 
@@ -44,7 +44,6 @@ from .dataset import load_dataset, make_loaders, NodeEmbeddingDataset
 from .laplacian import DifferentiableLaplacian, MassMatrix
 from .stability import pre_training_checks, spectral_kl_health_check
 from .spectral import (
-    build_feature_laplacian,
     mode_entropy_penalty,
 )
 

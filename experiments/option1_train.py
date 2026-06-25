@@ -41,7 +41,7 @@ Optionally include:
     eigvecs : (N_nodes, N_nodes)  pre-computed eigenvectors of L_f
 
 Ref: docs//03-branching.md -- Option 1
-Depends on: vdt/vib_autoencoder.py (#20), vdt/wiring_decoder.py
+Depends on: vdeductive/vib_autoencoder.py (#20), vdeductive/wiring_decoder.py
 """
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from vdt.vib_autoencoder import DeterministicSpectralAE
+from vdeductive.vib_autoencoder import DeterministicSpectralAE
 
 
 # ---------------------------------------------------------------------------

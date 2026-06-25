@@ -1,10 +1,10 @@
 """
-vdt/vib_autoencoder.py  --  Deterministic Vibrational Autoencoder (Option 1).
+vdeductive/vib_autoencoder.py  --  Deterministic Vibrational Autoencoder (Option 1).
 
 LEGACY / ABLATION BASELINE
 ---------------------------
 This module is NOT the canonical model.  The canonical variational model is
-WiringAutoencoder in vdt/model.py.
+WiringAutoencoder in vdeductive/model.py.
 
 This file is retained exclusively as an ablation baseline for:
   - Option 1 (#20, #30): deterministic AE regression check vs WiringAutoencoder.
@@ -12,7 +12,7 @@ This file is retained exclusively as an ablation baseline for:
     artefact (W_hat, omega_hat, S_memory) produced by extract_spectral_artefact().
 
 Do not import these classes in new production code.  Use WiringAutoencoder
-from vdt/model.py instead.
+from vdeductive/model.py instead.
 ---------------------------
 
 Two classes are provided:
@@ -44,7 +44,7 @@ Post-training, call extract_spectral_artefact() to produce the artefact
 dict (W_hat, omega_hat, S_memory) for downstream Option 6 use.
 
 Ref: docs//03-branching.md -- Option 1
-Depends on: vdt/vdt.py (#17), vdt/wiring_decoder.py (#26), vdt/spectral.py (#24)
+Depends on: vdeductive/vdeductive.py (#17), vdeductive/wiring_decoder.py (#26), vdeductive/spectral.py (#24)
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ import torch
 import torch.nn as nn
 from typing import Literal, Optional, Tuple
 
-from .vdt import VDT
+from .vdeductive import VDT
 from .wiring_decoder import SpectralLoadingDecoder
 from .diffusion_decoder import DiffusionDecoder
 from .spectral import spectral_freq_cost, tau_mode_kl
@@ -215,7 +215,7 @@ class DeterministicSpectralAE(nn.Module):
     ----------------------
     Call extract_spectral_artefact(U_q, eigvals_q) after training to
     produce the (W_hat, omega_hat, S_memory) dict that Option 6 (#18)
-    consumes via SpectralAssociativeMemory.from_vdt().
+    consumes via SpectralAssociativeMemory.from_vdeductive().
 
     Parameters
     ----------
@@ -363,7 +363,7 @@ class DeterministicSpectralAE(nn.Module):
             N = L_base.shape[0]
             if self._density is None:
                 self._density = __import__(
-                    "vdt.density", fromlist=["SignedDensityMatrix"]
+                    "vdeductive.density", fromlist=["SignedDensityMatrix"]
                 ).SignedDensityMatrix(n=N).to(x.device)
             rho = self._density.rho
             density_loss = self._density.trace_penalty()

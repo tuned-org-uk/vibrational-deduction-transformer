@@ -33,8 +33,8 @@ Integration points
 
 Depends on
 ----------
-  vdt.laplacian  : DifferentiableLaplacian (MassMatrix, dt_max_cfl)
-  vdt.spectral   : _safe_eigvalsh
+  vdeductive.laplacian  : DifferentiableLaplacian (MassMatrix, dt_max_cfl)
+  vdeductive.spectral   : _safe_eigvalsh
 """
 from __future__ import annotations
 
@@ -44,8 +44,8 @@ from typing import List, Optional
 
 import torch
 
-from vdt.spectral import _safe_eigvalsh
-from vdt.vdt import _gershgorin_lambda_max
+from vdeductive.spectral import _safe_eigvalsh
+from vdeductive.vdt import _gershgorin_lambda_max
 
 
 # ---------------------------------------------------------------------------

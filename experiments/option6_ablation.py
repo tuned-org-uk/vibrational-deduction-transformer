@@ -63,7 +63,7 @@ The data file must be a .pt dict with keys:
     L_f: (n_nodes, n_nodes)     float32 frozen index Laplacian
 
 Ref: docs//03-branching.md -- Option 6 / Track A ablation
-Depends on: vdt/classifier.py (#18), vdt/spectral_memory.py (#28), vdt/vib_autoencoder.py (#20)
+Depends on: vdeductive/classifier.py (#18), vdeductive/spectral_memory.py (#28), vdeductive/vib_autoencoder.py (#20)
 """
 from __future__ import annotations
 
@@ -80,7 +80,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-from vdt.classifier import VibrationalClassifier
+from vdeductive.classifier import VibrationalClassifier
 
 
 # ---------------------------------------------------------------------------
@@ -108,13 +108,13 @@ class ConditionConfig:
     freeze_key_matrix : bool
         If True (spectral_memory condition), key_matrix.requires_grad = False.
         Ignored when use_spectral_init is False.
-    freeze_vdt : bool
+    freeze_vdeductive : bool
         If True, all VDT weights are frozen except the classification head.
     """
     name: str
     use_spectral_init: bool = False
     freeze_key_matrix: bool = False
-    freeze_vdt: bool = False
+    freeze_vdeductive: bool = False
 
 
 # Three conditions: fine_tune_all removed (#29).
@@ -123,19 +123,19 @@ CONDITIONS: List[ConditionConfig] = [
         name="random_init",
         use_spectral_init=False,
         freeze_key_matrix=False,
-        freeze_vdt=False,
+        freeze_vdeductive=False,
     ),
     ConditionConfig(
         name="spectral_memory",
         use_spectral_init=True,
         freeze_key_matrix=True,
-        freeze_vdt=True,
+        freeze_vdeductive=True,
     ),
     ConditionConfig(
         name="spectral_memory_ft",
         use_spectral_init=True,
         freeze_key_matrix=False,
-        freeze_vdt=False,
+        freeze_vdeductive=False,
     ),
 ]
 
@@ -253,7 +253,7 @@ def load_artefact_from_checkpoint(
     -------
     dict with keys: W_hat, omega_hat, S_memory, eigvals_q
     """
-    from vdt.vib_autoencoder import DeterministicSpectralAE
+    from vdeductive.vib_autoencoder import DeterministicSpectralAE
 
     state = torch.load(ckpt_path, map_location="cpu")
     N     = L_f.shape[0]
@@ -384,8 +384,8 @@ def run_ablation_condition(
         )
         print(f"  key_matrix init from artefact, freeze={cond.freeze_key_matrix}")
 
-    if cond.freeze_vdt:
-        for param in model.vdt.parameters():
+    if cond.freeze_vdeductive:
+        for param in model.vdeductive.parameters():
             param.requires_grad_(False)
         print("  VDT weights frozen")
 

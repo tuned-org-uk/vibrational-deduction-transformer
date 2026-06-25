@@ -1,10 +1,10 @@
 """
-vdt._cli.vis -- console entry point for ``vdt-vis``.
+vdeductive._cli.vis -- console entry point for ``vdeductive-vis``.
 
 Thin shim around the top-level visualise.py script.  After
-``pip install vdt`` run::
+``pip install vdeductive`` run::
 
-    vdt-vis --help
+    vdeductive-vis --help
 
 All CLI flags are identical to visualise.py.  The script is resolved
 relative to the installed package root so it works from any directory.
@@ -17,7 +17,7 @@ from pathlib import Path
 
 def main() -> None:
     """
-    Entry point for the ``vdt-vis`` console command.
+    Entry point for the ``vdeductive-vis`` console command.
 
     Locates visualise.py at the repository root and executes it in the
     current process via runpy so that argparse reads sys.argv.
@@ -26,9 +26,9 @@ def main() -> None:
     _script = _root / "visualise.py"
     if not _script.exists():
         print(
-            "[vdt-vis] ERROR: could not locate visualise.py at:\n"
+            "[vdeductive-vis] ERROR: could not locate visualise.py at:\n"
             f"  {_script}\n"
-            "Make sure you installed vdt from the repository root with:\n"
+            "Make sure you installed vdeductive from the repository root with:\n"
             "  pip install -e .",
             file=sys.stderr,
         )

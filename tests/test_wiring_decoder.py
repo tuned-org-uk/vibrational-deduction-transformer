@@ -41,8 +41,8 @@ import pytest
 import torch
 import torch.nn as nn
 
-from vdt.wiring_decoder import SpectralLoadingDecoder, WiringDecoder
-from vdt.laplacian import DifferentiableLaplacian
+from vdeductive.wiring_decoder import SpectralLoadingDecoder, WiringDecoder
+from vdeductive.laplacian import DifferentiableLaplacian
 
 
 # ---------------------------------------------------------------------------

@@ -222,7 +222,7 @@ organised into five phases:
 
 | Phase | Issues | Focus |
 |---|---|---|
-| **0 -- Foundations** | #16, #17, #19, #24 | `laplacian.py`, `vdt.py`, `stability.py`, two KL functions in `spectral.py` |
+| **0 -- Foundations** | #16, #17, #19, #24 | `laplacian.py`, `vdeductive.py`, `stability.py`, two KL functions in `spectral.py` |
 | **1 -- Encoder/Decoder** | #25, #26 | `WiringEncoder` (isotropic KL + `ModeWeightHead`), `SpectralLoadingDecoder` |
 | **2 -- Model assembly** | #27 | `WiringAutoencoder`, three-term ELBO, `extract_spectral_artefact()` |
 | **3 -- Memory & Metrics** | #28, #32 | `SpectralAssociativeMemory`, 7-metric evaluation suite |

@@ -52,10 +52,10 @@ The VDT implements the same pattern in four corresponding mechanisms:
 
 | LDT mechanism | VDT implementation | Code location |
 |---|---|---|
-| Recurrent lattice descent | Discrete damped-wave recurrence `Q_{t+1} = 2Q_t - Q_{t-1} - dt² L_f Q_t - γΔQ + dt² B_t` | `vdt/vdt.py` `VibrationalStateBlock.forward()` |
-| Lattice alpha-projection | Modal projection onto leading eigenvectors `z = mean(Q_K ᵀ U_m)` | `vdt/vdt.py` `VDT.modal_projection()` |
-| Transformer forcing inside recurrence | Self-attention + FFN producing forcing term `B_t` at each wave step | `vdt/vdt.py` `VibrationalStateBlock` |
-| Consistency / validity tracking | Signed density matrix `ρ = ρ_plus − ρ_minus` updated from consecutive wave states | `vdt/density.py` `SignedDensityMatrix.update()` |
+| Recurrent lattice descent | Discrete damped-wave recurrence `Q_{t+1} = 2Q_t - Q_{t-1} - dt² L_f Q_t - γΔQ + dt² B_t` | `vdeductive/vdeductive.py` `VibrationalStateBlock.forward()` |
+| Lattice alpha-projection | Modal projection onto leading eigenvectors `z = mean(Q_K ᵀ U_m)` | `vdeductive/vdeductive.py` `VDT.modal_projection()` |
+| Transformer forcing inside recurrence | Self-attention + FFN producing forcing term `B_t` at each wave step | `vdeductive/vdeductive.py` `VibrationalStateBlock` |
+| Consistency / validity tracking | Signed density matrix `ρ = ρ_plus − ρ_minus` updated from consecutive wave states | `vdeductive/density.py` `SignedDensityMatrix.update()` |
 
 Where the LDT constrains each recurrent step to remain within a **lattice of logically
 consistent states**, the VDT constrains the transformer's value space to remain aligned
@@ -141,21 +141,21 @@ feed-forward / cross-attention value matrices.
 
 | Module | Role |
 |--------|------|
-| `vdt/encoder.py` | `WiringEncoder` -- VDT attention blocks + lambda-fingerprint; `ModeWeightHead` outputs `(log_a, log_b)` for tau-mode prior |
-| `vdt/vdt.py` | `VDTBlock` stack -- multi-head self-attention over graph eigenbasis; computes `rho_p`, `rho_m` density matrices per block |
-| `vdt/wiring_decoder.py` | `SpectralLoadingDecoder` -- $$z, U_q -> (W, \omega, S, L_z, log_var_S)$$; $$W = U_q diag(\omega) S$$; `log_var_S` from independent head |
-| `vdt/diffusion_decoder.py` | $$L(z), E -> x_hat$$ via taumode diffusion + MLP refinement |
-| `vdt/model.py` | `WiringAutoencoder` -- three-term ELBO; `forward()` returns dict `{loss, recon, kl_z, kl_S, kl_tau, x_hat, z, mu, log_var, N_active}`; `extract_spectral_artefact()` |
-| `vdt/vib_autoencoder.py` | `VibrationalAutoencoder` -- vibrational energy formulation with Rayleigh-Ritz mode selection |
-| `vdt/laplacian.py` | Differentiable Laplacian builder; `from_spectral_loading(W, L_base)`; `MassMatrix` conditioning |
-| `vdt/spectral.py` | `spectral_basis_kl`, `tau_mode_kl`, `laplacian_precision_kl`, `build_knn_laplacian`; linalg.eigh offloaded to CPU on MPS |
-| `vdt/density.py` | Density matrix utilities; positive/negative probability `rho_p`, `rho_m` |
-| `vdt/spectral_memory.py` | `SpectralAssociativeMemory` -- Hopfield memory pre-built from `A(I)`; delta-rule online updates |
-| `vdt/stability.py` | Training diagnostics; `spectral_kl_health_check` (6-level hierarchy); `N_active` mode counter |
-| `vdt/metrics.py` | Evaluation metrics: reconstruction MSE, linear probe accuracy, memory SNR, ELBO Bayes factor |
-| `vdt/classifier.py` | Downstream node-classification head using frozen `mu` embeddings |
-| `vdt/dataset.py` | Dataset helpers (MNIST, Cora, PubMed, custom CSV) |
-| `vdt/device.py` | Device resolution; MPS fallback env-var management |
+| `vdeductive/encoder.py` | `WiringEncoder` -- VDT attention blocks + lambda-fingerprint; `ModeWeightHead` outputs `(log_a, log_b)` for tau-mode prior |
+| `vdeductive/vdeductive.py` | `VDTBlock` stack -- multi-head self-attention over graph eigenbasis; computes `rho_p`, `rho_m` density matrices per block |
+| `vdeductive/wiring_decoder.py` | `SpectralLoadingDecoder` -- $$z, U_q -> (W, \omega, S, L_z, log_var_S)$$; $$W = U_q diag(\omega) S$$; `log_var_S` from independent head |
+| `vdeductive/diffusion_decoder.py` | $$L(z), E -> x_hat$$ via taumode diffusion + MLP refinement |
+| `vdeductive/model.py` | `WiringAutoencoder` -- three-term ELBO; `forward()` returns dict `{loss, recon, kl_z, kl_S, kl_tau, x_hat, z, mu, log_var, N_active}`; `extract_spectral_artefact()` |
+| `vdeductive/vib_autoencoder.py` | `VibrationalAutoencoder` -- vibrational energy formulation with Rayleigh-Ritz mode selection |
+| `vdeductive/laplacian.py` | Differentiable Laplacian builder; `from_spectral_loading(W, L_base)`; `MassMatrix` conditioning |
+| `vdeductive/spectral.py` | `spectral_basis_kl`, `tau_mode_kl`, `laplacian_precision_kl`, `build_knn_laplacian`; linalg.eigh offloaded to CPU on MPS |
+| `vdeductive/density.py` | Density matrix utilities; positive/negative probability `rho_p`, `rho_m` |
+| `vdeductive/spectral_memory.py` | `SpectralAssociativeMemory` -- Hopfield memory pre-built from `A(I)`; delta-rule online updates |
+| `vdeductive/stability.py` | Training diagnostics; `spectral_kl_health_check` (6-level hierarchy); `N_active` mode counter |
+| `vdeductive/metrics.py` | Evaluation metrics: reconstruction MSE, linear probe accuracy, memory SNR, ELBO Bayes factor |
+| `vdeductive/classifier.py` | Downstream node-classification head using frozen `mu` embeddings |
+| `vdeductive/dataset.py` | Dataset helpers (MNIST, Cora, PubMed, custom CSV) |
+| `vdeductive/device.py` | Device resolution; MPS fallback env-var management |
 | `train.py` | Training loop with W&B / CSV logging; `N_active` tracked per epoch |
 | `benchmark.py` | Evaluation suite -- 8 metrics + ELBO Bayes factor; auto-selects `mps.yaml` on Apple Silicon |
 | `visualise.py` | Visualisation suite for training curves, latent space, and spectral mode shapes |
@@ -195,17 +195,17 @@ or:
 pip install -e ".[dev,ogb,wandb]"
 
 # or regular install from PyPI once published
-pip install "vdt[ogb]"
+pip install "vdeductive[ogb]"
 
 # then run from any directory
-vdt-train --config configs/mps.yaml --dataset cora
-vdt-train --config configs/mps_arxiv.yaml --dataset ogbn-arxiv
+vdeductive-train --config configs/mps.yaml --dataset cora
+vdeductive-train --config configs/mps_arxiv.yaml --dataset ogbn-arxiv
 ```
 
 ### Apple Silicon (MPS) notes
 
 - Set `PYTORCH_ENABLE_MPS_FALLBACK=1` before running (the scripts print a reminder if not set).
-- All `linalg.eigh` calls are offloaded to CPU explicitly in `vdt/spectral.py`.
+- All `linalg.eigh` calls are offloaded to CPU explicitly in `vdeductive/spectral.py`.
 - `configs/mps.yaml` keeps `hidden_dim=32` and `batch_size=4` to avoid the ~28 GiB MHA
   activation tensor that the full config produces on Cora (`N=2708`).
 - The `MassMatrix` conditioning warning (`ratio > 100`) is benign on regular / k-NN graphs;
@@ -290,7 +290,7 @@ Batch size resolves as:
 
 ## Connection to ArrowSpace
 
-`vdt/laplacian.py` mirrors `ArrowSpaceBuilder.build()` logic from
+`vdeductive/laplacian.py` mirrors `ArrowSpaceBuilder.build()` logic from
 [pyarrowspace](https://github.com/tuned-org-uk/pyarrowspace) as a differentiable
 PyTorch layer so gradients flow through `L(z)`.
 
@@ -317,7 +317,7 @@ Index selection is made Bayesian via the ELBO Bayes factor.
 - **Davis, L., Haller, L., Alfarano, A., and Santolucito, M.** (2026).
   *Lattice Deduction Transformers.* arXiv:2605.08605.
   <https://arxiv.org/abs/2605.08605> — primary architectural inspiration for the
-  recurrent deductive refinement loop in `vdt/vdt.py`.
+  recurrent deductive refinement loop in `vdeductive/vdeductive.py`.
 - *The Little Book of Generative AI Foundations*, T. Chen, 2026
 - VDT paper (Moriondo, 2026) -- ArrowSpace / Graph Wiring
 - ArrowSpace technical report (Moriondo, 2026) -- see `docs/01-references.md`

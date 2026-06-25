@@ -6,11 +6,11 @@ include README.md
 include LICENSE
 include PARAMETERS.md
 
-# Include bundled configs shipped inside the vdt package
-recursive-include vdt/_configs *.yaml *.yml
+# Include bundled configs shipped inside the vdeductive package
+recursive-include vdeductive/_configs *.yaml *.yml
 
 # Include the PEP 561 marker
-include vdt/py.typed
+include vdeductive/py.typed
 
 # Exclude build artefacts and editor noise
 global-exclude __pycache__

@@ -50,7 +50,7 @@ so that rho_plus and rho_minus track the consecutive wave states
 (Q_curr -> bonding / constructive modes, Q_tp1 -> anti-bonding /
 destructive modes).  Without this call the density matrices would
 remain frozen at random initialisation and carry no wave information.
-See issue #51 and vdt/density.py for the full update derivation.
+See issue #51 and vdeductive/density.py for the full update derivation.
 
 Density matrix dimensionality
 -----------------------------
@@ -62,7 +62,7 @@ the graph size N and allows the density to represent covariance across
 feature channels rather than across nodes.
 
 The module accumulates per-step density matrices (rho_plus, rho_minus)
-from vdt/density.py, making the signed spectral energy available
+from vdeductive/density.py, making the signed spectral energy available
 downstream for the variational Gamma KL term (#24).
 
 Reference
@@ -81,8 +81,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from vdt.density import SignedDensityMatrix
-from vdt.laplacian import DifferentiableLaplacian
+from vdeductive.density import SignedDensityMatrix
+from vdeductive.laplacian import DifferentiableLaplacian
 
 
 # ---------------------------------------------------------------------------

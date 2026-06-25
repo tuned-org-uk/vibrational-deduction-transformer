@@ -501,7 +501,7 @@ $\log p(\Smat)\propto -\tfrac{1}{2}\,\mathrm{tr}(\Smat\T\boldsymbol{\Lambda}_{\t
 with two separate precision matrices.
 When $\boldsymbol{\Lambda}_{\text{col}} = \mathbf{I}$ this reduces exactly to
 Eq.~\eqref{eq:priorS-trace}.
-The implementation in \texttt{vdt/spectral.py::spectral\_basis\_kl} broadcasts
+The implementation in \texttt{vdeductive/spectral.py::spectral\_basis\_kl} broadcasts
 the precision vector \texttt{prec = lambda\_S * eigvals\_q} over the column
 axis of $\Smat$, which is the direct computational realisation of
 Eq.~\eqref{eq:priorS}: one scalar precision per row $k$, shared across
@@ -539,7 +539,7 @@ and $\mathbb{E}_q[\omega] = a/b$.  Substituting and simplifying gives:
 
 where $\psi$ is the digamma function and $r = \tau\lambda_k$.
 No Monte Carlo sampling is required.
-The implementation in \texttt{vdt/spectral.py::tau\_mode\_kl} follows
+The implementation in \texttt{vdeductive/spectral.py::tau\_mode\_kl} follows
 Eq.~\eqref{eq:kltau} exactly; note the \emph{negative} sign on
 $\ln\Gamma(a)$ and the additional $-a$ term, both of which arise from
 expanding the Gamma entropy.
@@ -729,7 +729,7 @@ rather than training from scratch.
 \subsection{Six-Level Hierarchy}
 \label{sec:stability:hierarchy}
 
-Training stability is analysed through a six-level hierarchy~\cite{moriondo2026vdt};
+Training stability is analysed through a six-level hierarchy~\cite{moriondo2026vdeductive};
 failures at lower levels must be resolved before diagnosing higher ones:
 
 \begin{enumerate}
@@ -755,7 +755,7 @@ failures at lower levels must be resolved before diagnosing higher ones:
 \end{enumerate}
 
 The executable form of this hierarchy is \texttt{pre\_training\_checks} in
-\texttt{vdt/stability.py}, which runs Levels 1--2 before any training step
+\texttt{vdeductive/stability.py}, which runs Levels 1--2 before any training step
 begins and raises a \texttt{RuntimeError} on hard failures.
 Soft per-epoch diagnostics are reported by \texttt{stability\_diagnostics}.
 The ordering is strict: the CFL bound at Level~1 is meaningless on a
@@ -1286,7 +1286,7 @@ L.~Moriondo,
 \newblock {\em Journal of Open Source Software}, vol.~10, no.~113, p.~9002, 2025.
 \newblock DOI: 10.21105/joss.09002.
 
-\bibitem{moriondo2026vdt};
+\bibitem{moriondo2026vdeductive};
 L.~Moriondo, 
 \newblock ``Vibrational Deductive Transformer, Code and Analysis'' 
 \href{https://github.com/tuned-org-uk/vibrational-deduction-transfomer}{%

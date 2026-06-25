@@ -16,7 +16,7 @@ so that the forward() test does not require a full graph topology.
 
 See also
 --------
-vdt/wiring_decoder.py : SpectralLoadingDecoder -- validation section in docstring.
+vdeductive/wiring_decoder.py : SpectralLoadingDecoder -- validation section in docstring.
 issue #55 : construction-time validation for d and q.
 """
 from __future__ import annotations
@@ -25,9 +25,9 @@ import torch
 from unittest.mock import patch
 
 try:
-    from vdt.wiring_decoder import SpectralLoadingDecoder
+    from vdeductive.wiring_decoder import SpectralLoadingDecoder
 except ImportError:
-    # Minimal stub so the test file is importable even without the full vdt package.
+    # Minimal stub so the test file is importable even without the full vdeductive package.
     import torch.nn as nn
 
     class SpectralLoadingDecoder(nn.Module):  # type: ignore[no-redef]
@@ -143,7 +143,7 @@ def test_forward_wrong_uq_shape_raises() -> None:
     with pytest.raises(ValueError, match=r"U_q"):
         # Patch from_spectral_loading so the test does not need a real Laplacian
         with patch(
-            "vdt.wiring_decoder.DifferentiableLaplacian.from_spectral_loading",
+            "vdeductive.wiring_decoder.DifferentiableLaplacian.from_spectral_loading",
             return_value=torch.zeros(B, 16, 16),
         ):
             dec(z, U_q_wrong, L_base)
@@ -158,7 +158,7 @@ def test_forward_correct_uq_shape_succeeds() -> None:
     L_base = torch.zeros(16, 16)
 
     with patch(
-        "vdt.wiring_decoder.DifferentiableLaplacian.from_spectral_loading",
+        "vdeductive.wiring_decoder.DifferentiableLaplacian.from_spectral_loading",
         return_value=torch.zeros(B, 16, 16),
     ):
         W, omega, S, L_z, log_var_S = dec(z, U_q, L_base)

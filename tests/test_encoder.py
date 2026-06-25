@@ -1,5 +1,5 @@
 """
-Unit tests for vdt/encoder.py -- WiringEncoder, ModeWeightHead.
+Unit tests for vdeductive/encoder.py -- WiringEncoder, ModeWeightHead.
 
 Acceptance criteria from issue #25
 -----------------------------------
@@ -19,7 +19,7 @@ import torch
 import torch.nn as nn
 from unittest.mock import patch
 
-from vdt.encoder import WiringEncoder, ModeWeightHead, kl_isotropic
+from vdeductive.encoder import WiringEncoder, ModeWeightHead, kl_isotropic
 
 torch.manual_seed(7)
 
@@ -58,7 +58,7 @@ class _StubLap:
         return torch.tensor(0.1)
 
 
-def _stub_vdt_forward(self, X0, L_f, eigvecs, lap):
+def _stub_vdeductive_forward(self, X0, L_f, eigvecs, lap):
     """
     Replaces VDT.forward.  Returns (Q_K, P, S) with the right shapes and
     live autograd graph so backward passes work.
@@ -86,8 +86,8 @@ class TestWiringEncoderForward:
         eigvecs = torch.eye(N)[:, :Q]        # (N, Q)
         lap     = _StubLap()
         with (
-            patch.object(type(encoder.vdt), "forward",      _stub_vdt_forward),
-            patch.object(type(encoder.vdt), "modal_projection", _stub_modal_projection),
+            patch.object(type(encoder.vdeductive), "forward",      _stub_vdeductive_forward),
+            patch.object(type(encoder.vdeductive), "modal_projection", _stub_modal_projection),
         ):
             return encoder(x, L_f=L_f, eigvecs=eigvecs, lap=lap)
 

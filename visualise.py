@@ -1,7 +1,7 @@
 """
 Visualisations for Wiring Autoencoder experiments.
 
-Aligned with WiringAutoencoder v2 API (vdt/model.py).
+Aligned with WiringAutoencoder v2 API (vdeductive/model.py).
 
 Changes from the stale version (issue #63):
 
@@ -83,8 +83,8 @@ def _build_spectral_preamble(cfg: dict, E, device: str = "cpu"):
     spectral_cache : tuple (full_eigvals (N,), full_eigvecs (N, N))
     """
     import torch
-    from vdt.laplacian import DifferentiableLaplacian
-    from vdt.spectral import _safe_eigh
+    from vdeductive.laplacian import DifferentiableLaplacian
+    from vdeductive.spectral import _safe_eigh
 
     gc = cfg.get("graph", {})
     base_lap = DifferentiableLaplacian.from_embeddings(
@@ -226,8 +226,8 @@ def plot_latent(checkpoint_path: str, dataset: str, out_dir: str) -> None:
         Output directory for latent_space.png and latent_space.json.
     """
     import torch
-    from vdt import WiringAutoencoder
-    from vdt.dataset import load_dataset, make_loaders
+    from vdeductive import WiringAutoencoder
+    from vdeductive.dataset import load_dataset, make_loaders
     from sklearn.decomposition import PCA
 
     ckpt = torch.load(checkpoint_path, map_location="cpu")
@@ -322,8 +322,8 @@ def plot_spectral(
         Number of prior samples to generate.  Default 200.
     """
     import torch
-    from vdt import WiringAutoencoder
-    from vdt.dataset import load_dataset
+    from vdeductive import WiringAutoencoder
+    from vdeductive.dataset import load_dataset
 
     ckpt = torch.load(checkpoint_path, map_location="cpu")
     cfg  = ckpt["cfg"]
@@ -406,8 +406,8 @@ def plot_taumode(checkpoint_path: str, dataset: str, out_dir: str) -> None:
         taumode_distribution.json.
     """
     import torch
-    from vdt import WiringAutoencoder
-    from vdt.dataset import load_dataset, make_loaders
+    from vdeductive import WiringAutoencoder
+    from vdeductive.dataset import load_dataset, make_loaders
     from scipy.stats import gaussian_kde
 
     ckpt = torch.load(checkpoint_path, map_location="cpu")
