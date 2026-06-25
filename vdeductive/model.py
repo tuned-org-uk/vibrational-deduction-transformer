@@ -43,6 +43,32 @@ The reported ELBO value shifts by approximately -log(N) nats after this
 fix, but the gradient balance between reconstruction and all KL terms is
 now correct.
 
+KL free-bits floor (issue #89, Fix A)
+--------------------------------------
+After per-dimension aggregation each KL term is clamped from below::
+
+    kl_z   = kl_z.clamp(min=free_bits_z)
+    kl_S   = kl_S.clamp(min=free_bits_s)
+    kl_tau = kl_tau.clamp(min=free_bits_tau)
+
+When a term is BELOW its floor the gradient of that term is zero
+(standard torch.clamp behaviour), which is the intended free-bits
+mechanic: the posterior is free to ignore the prior for that term
+until the KL exceeds the floor.  When the term is ABOVE the floor the
+gradient flows normally.
+
+The floors are applied AFTER per-dimension aggregation and BEFORE the
+ELBO sum, matching the Kingma et al. (2016) convention.  Three new
+constructor parameters control the floors:
+
+    free_bits_z   (default 0.5 nats) -- isotropic VAE KL
+    free_bits_s   (default 0.5 nats) -- spectral basis KL
+    free_bits_tau (default 0.1 nats) -- mode-frequency KL
+
+The smaller default for free_bits_tau reflects the narrower range of
+kl_tau (Gamma vs Gaussian prior) and prevents the floor from
+dominating the gradient when q is large.
+
 Option D -- mode-entropy ceiling penalty (issue #82)
 ------------------------------------------------------
 The uniform-mode attractor observed in runs 4 and 5 is broken by adding an
@@ -155,7 +181,7 @@ Data flow::
 
 latent_dim vs q
 ---------------
-``latent_dim`` is the dimension of the isotropic VAE latent z returned by
+``latent_dim`` is the dimension of the reparameterised VAE latent z returned by
 WiringEncoder (and exposed in the output dict).  ``q`` is the number of
 spectral modes consumed by SpectralLoadingDecoder and ModeWeightHead
 (log_a, log_b).  They may differ.
@@ -225,8 +251,8 @@ from .spectral import (
 class WiringAutoencoder(nn.Module):
     """
     Wiring Autoencoder  -- four-term ELBO with spectral mode priors,
-    active-mode floor penalty (issue #68), and mode-entropy ceiling
-    penalty Option D (issue #82).
+    active-mode floor penalty (issue #68), mode-entropy ceiling
+    penalty Option D (issue #82), and KL free-bits floor (issue #89 Fix A).
 
     Assembles WiringEncoder, SpectralLoadingDecoder, and DiffusionDecoder
     under the variational objective.  Training *minimises*::
@@ -257,6 +283,25 @@ class WiringAutoencoder(nn.Module):
     and kl_tau to collapse silently to zero.  Dividing by self._n_nodes
     (the graph node count N) brings all four ELBO terms to the same
     per-node scale and restores correct gradient balance.
+
+    KL free-bits floor (issue #89, Fix A)
+    ----------------------------------------
+    Each KL term is clamped from below after per-dimension aggregation and
+    before the ELBO sum::
+
+        kl_z   = kl_z.clamp(min=free_bits_z)
+        kl_S   = kl_S.clamp(min=free_bits_s)
+        kl_tau = kl_tau.clamp(min=free_bits_tau)
+
+    When a KL term is below its floor the gradient of that term is zero
+    (standard torch.clamp mechanic), preventing the spectral or isotropic
+    prior from being silently zeroed out by the reconstruction gradient.
+    When the term is above the floor the gradient flows normally.
+
+    This is the standard VAE free-bits fix (Kingma et al., 2016) adapted
+    to the three independent KL terms in this architecture.  The floors
+    are configured via constructor parameters free_bits_z, free_bits_s,
+    and free_bits_tau (see Parameters section below).
 
     Option D -- mode-entropy ceiling (issue #82)
     -----------------------------------------------
@@ -443,6 +488,24 @@ class WiringAutoencoder(nn.Module):
         Penalises HIGH Shannon entropy across the mode-weight proxy pi_k.
         Default 0.5.  Set to 0.0 to disable.  Corresponds to config key
         training.nu_entropy.  The resulting penalty is logged as 'entropy_S'.
+    free_bits_z : float
+        Free-bits floor (nats) applied to kl_z after per-dimension
+        aggregation (issue #89 Fix A).  kl_z = kl_z.clamp(min=free_bits_z).
+        When kl_z is below the floor the gradient of kl_z is zero; the
+        posterior is free to match the prior on those dimensions.  The floor
+        prevents the isotropic KL from being dominated to zero by the
+        reconstruction gradient.  Default 0.5.  Set to 0.0 to disable.
+    free_bits_s : float
+        Free-bits floor (nats) applied to kl_S (spectral basis KL) after
+        per-dimension aggregation (issue #89 Fix A).
+        kl_S = kl_S.clamp(min=free_bits_s).  Default 0.5.
+        Set to 0.0 to disable.
+    free_bits_tau : float
+        Free-bits floor (nats) applied to kl_tau (mode-frequency KL) after
+        per-dimension aggregation (issue #89 Fix A).
+        kl_tau = kl_tau.clamp(min=free_bits_tau).  Default 0.1.
+        Smaller default than free_bits_z / free_bits_s because the Gamma
+        prior range for kl_tau is narrower.  Set to 0.0 to disable.
     mass_clip : float
         Maximum allowed value for any entry of MassMatrix.M_diag.  Passed
         to MassMatrix whenever build_L_f() is called (issue #74).  Prevents
@@ -470,6 +533,9 @@ class WiringAutoencoder(nn.Module):
         q_min: int = 4,
         nu: float = 1.0,
         nu_entropy: float = 0.5,
+        free_bits_z: float = 0.5,
+        free_bits_s: float = 0.5,
+        free_bits_tau: float = 0.1,
         mass_clip: float = 1e3,
     ) -> None:
         super().__init__()
@@ -482,6 +548,9 @@ class WiringAutoencoder(nn.Module):
         self.q_min = q_min
         self.nu = nu
         self.nu_entropy = nu_entropy
+        self.free_bits_z = free_bits_z
+        self.free_bits_s = free_bits_s
+        self.free_bits_tau = free_bits_tau
         self.mass_clip = mass_clip
 
         # Resolve n_nodes from the laplacian when not supplied explicitly.
@@ -672,14 +741,20 @@ class WiringAutoencoder(nn.Module):
                           plus the active-mode penalty, up to constants).
                           Computed as recon + kl_z + kl_S + kl_tau + floor + ceiling,
                           where floor is NOT returned as a separate key.
+                          All three KL terms have been clamped by their
+                          respective free-bits floors before summation
+                          (issue #89 Fix A).
             recon      -- per-node NLL reconstruction term (issue #89 Fix B):
                           DiffusionDecoder.recon_loss(x, x_hat) / N.
                           Normalised by N so all four ELBO terms share the
                           same per-node scale and the KL gradient is not
                           suppressed relative to the reconstruction gradient.
-            kl_z       -- isotropic KL  KL(q(z) || N(0,I))
-            kl_S       -- spectral basis KL  KL(q(S) || p(S|I))
-            kl_tau     -- mode frequency KL  KL(q(w) || p(w|tau,L))
+            kl_z       -- isotropic KL  KL(q(z) || N(0,I)), after free-bits
+                          floor: kl_z.clamp(min=self.free_bits_z).
+            kl_S       -- spectral basis KL  KL(q(S) || p(S|I)), after
+                          free-bits floor: kl_S.clamp(min=self.free_bits_s).
+            kl_tau     -- mode frequency KL  KL(q(w) || p(w|tau,L)), after
+                          free-bits floor: kl_tau.clamp(min=self.free_bits_tau).
             entropy_S  -- mode-entropy ceiling penalty (Option D, issue #82):
                           nu_entropy * mean_batch(H) where H is the Shannon
                           entropy of softmax(log_a - log_b).  Zero when
@@ -768,6 +843,16 @@ class WiringAutoencoder(nn.Module):
         # log_a, log_b are (B, q) -- matching eigvals_q shape (q,).
         # a_min clamps exp(log_a) >= a_min before lgamma/digamma (issue #68).
         kl_tau = tau_mode_kl(log_a, log_b, eigvals_q, tau=self.tau, a_min=self.a_min)
+
+        # Free-bits floors (issue #89 Fix A).
+        # Applied after per-dimension aggregation and before the ELBO sum.
+        # When a KL term is below the floor its gradient is zero (torch.clamp
+        # behaviour); the posterior is free to ignore the prior on those
+        # dimensions.  When the term is above the floor the gradient flows
+        # normally.  Set free_bits_* to 0.0 in the config to disable.
+        kl_z   = kl_z.clamp(min=self.free_bits_z)
+        kl_S   = kl_S.clamp(min=self.free_bits_s)
+        kl_tau = kl_tau.clamp(min=self.free_bits_tau)
 
         # Active-mode floor penalty (issue #68): nu * relu(q_min - N_active).
         # Zero when nu=0 or q_min=0 (see active_mode_penalty docstring).
@@ -961,6 +1046,15 @@ def from_config(
         penalty entirely (backward-compatible; zero triggers the fast-path
         in mode_entropy_penalty with no gradient allocation).
 
+    free_bits (issue #89, Fix A)
+        training.free_bits_z, training.free_bits_s, and
+        training.free_bits_tau are read and forwarded to
+        WiringAutoencoder.__init__ as free_bits_z, free_bits_s, and
+        free_bits_tau respectively.  They default to 0.5 / 0.5 / 0.1
+        when absent, which are safe conservative values for Cora-scale
+        graphs.  Set all three to 0.0 in the config to recover the
+        pre-fix behaviour for ablation studies.
+
     n_nodes vs laplacian.n_nodes (Option A fix, issue #83)
         After the feature-space Laplacian change, lap.n_nodes == D (feature
         dimension), not N (graph node count).  All downstream buffers sized
@@ -1022,6 +1116,9 @@ def from_config(
           q_min: 4         # min active modes (issue #68)
           nu: 1.0          # active-mode penalty weight (issue #68)
           nu_entropy: 0.5  # entropy ceiling weight (Option D, issue #82)
+          free_bits_z:   0.5  # KL free-bits floor for kl_z (issue #89 Fix A)
+          free_bits_s:   0.5  # KL free-bits floor for kl_S
+          free_bits_tau: 0.1  # KL free-bits floor for kl_tau
         graph:
           knn_k: 15
           sigma: 0.5
@@ -1114,6 +1211,10 @@ def from_config(
         nu=float(tc.get("nu", 1.0)),
         # Entropy ceiling penalty (Option D, issue #82)
         nu_entropy=float(tc.get("nu_entropy", 0.5)),
+        # KL free-bits floors (issue #89, Fix A)
+        free_bits_z=float(tc.get("free_bits_z", 0.5)),
+        free_bits_s=float(tc.get("free_bits_s", 0.5)),
+        free_bits_tau=float(tc.get("free_bits_tau", 0.1)),
         # MassMatrix clipping (issue #74)
         mass_clip=float(mc.get("mass_clip", 1e3)),
     )
