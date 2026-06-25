@@ -19,6 +19,24 @@
 #   Increasing q to 8 breaks the symmetry; nu_entropy=2.0 and lam_s=1.0
 #   provide sufficient gradient signal to drive mode selection.
 #
+# ELBO normalisation (issue #89, Fix B):
+#   - Added normalise_elbo_by_nodes under training:.  When true (default),
+#     forward() divides the raw recon_loss() output by N (the graph node
+#     count) so that all four ELBO terms share the same per-node scale.
+#     Without this normalisation the reconstruction term is O(N) times
+#     larger than the KL terms, suppressing the KL gradient and causing
+#     kl_S and kl_tau to collapse silently to zero.  Set to false to
+#     recover the pre-fix behaviour for ablation studies only.
+#
+# KL free-bits floor (issue #89, Fix A):
+#   - Added free_bits_z, free_bits_s, free_bits_tau under training:.
+#     Each KL term is clamped from below after per-dimension aggregation
+#     and before the ELBO sum, preventing the spectral or isotropic prior
+#     from being silently zeroed out by the reconstruction gradient.
+#     When a KL term is below its floor the gradient of that term is zero
+#     (standard torch.clamp behaviour); the posterior is free to match the
+#     prior on those dimensions.  Set all three to 0.0 for ablation only.
+#
 # Usage:
 #   python train.py --config configs/mps.yaml
 
@@ -62,6 +80,26 @@ training:
                           # set to 0.0 to disable.  2.0 chosen to dominate recon scale
                           # at the pi=[0.5,0.5] fixed point (~log(2)*2 ~ 1.4 nats).
   dt_init: 0.001          # conservative CFL-safe value (well below dynamic bound ~0.012)
+  # -- ELBO normalisation (issue #89, Fix B) --------------------------------
+  normalise_elbo_by_nodes: true  # divide recon_loss() by N before summing ELBO;
+                                  # brings reconstruction onto the same per-node
+                                  # scale as kl_z / kl_S / kl_tau so the KL
+                                  # gradient is not suppressed by a factor of N.
+                                  # Set to false for ablation only.
+  # -- KL free-bits floors (issue #89, Fix A) --------------------------------
+  free_bits_z:   0.5  # nats floor for kl_z (isotropic VAE KL);
+                      # kl_z = kl_z.clamp(min=free_bits_z) before ELBO sum.
+                      # Prevents the isotropic posterior from collapsing to
+                      # the prior while recon dominates.  Set to 0.0 to disable.
+  free_bits_s:   0.5  # nats floor for kl_S (spectral basis KL);
+                      # kl_S = kl_S.clamp(min=free_bits_s) before ELBO sum.
+                      # Critical for preventing kl_S -> 0 collapse observed
+                      # in Cora runs 1 and 2 (see issue #89).  Set to 0.0 to
+                      # disable (not recommended).
+  free_bits_tau: 0.1  # nats floor for kl_tau (mode-frequency KL);
+                      # kl_tau = kl_tau.clamp(min=free_bits_tau) before ELBO sum.
+                      # Smaller default than free_bits_s because the Gamma prior
+                      # range for kl_tau is narrower.  Set to 0.0 to disable.
 
 dataset:
   name: cora
