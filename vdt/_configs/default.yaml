@@ -1,0 +1,55 @@
+# vdt default configuration -- bundled with the package.
+# Override any section by passing --config /path/to/your.yaml to vdt-train.
+# This file is resolved via importlib.resources so it works after pip install.
+model:
+  version: 2
+  latent_dim: 32
+  hidden_dim: 64
+  q: 8
+  tau_modes: 8
+  lam_s: 1.0
+  tau: 1.0
+  n_layers: 2
+  n_heads: 2
+  dropout: 0.1
+  eps: 0.3
+  mass_clip: 100.0
+  kl_z_warmup: 10
+
+graph:
+  knn_k: 35
+  sigma: 1.2
+  normalised: true
+  sparse: true
+
+training:
+  epochs: 100
+  batch_size: 64
+  lr: 0.0001
+  weight_decay: 1.0e-05
+  scheduler: cosine
+  warmup_epochs: 10
+  grad_clip: 1.0
+  seed: 42
+  device: auto
+  density_loss_weight: 1.0
+  a_min: 0.1
+  q_min: 4
+  nu: 1.0
+  nu_entropy: 2.0
+  dt_init: 0.001
+
+dataset:
+  name: cora
+  root: ./data
+  split:
+    - 0.8
+    - 0.1
+    - 0.1
+
+logging:
+  save_every_n_epochs: 10
+  use_wandb: false
+  project: vdt
+  log_every: 1
+  save_dir: ./checkpoints
