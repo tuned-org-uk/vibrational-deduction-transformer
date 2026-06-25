@@ -80,6 +80,20 @@ pre-computation block::
 This avoids the per-step O(N^2 q) outer-product fallback inside forward()
 and ensures mass_clip is applied before any forward pass.
 
+Feature-space Laplacian convention (arrowspace / graph-wiring)
+--------------------------------------------------------------
+arrowspace and graph-wiring build the Laplacian in *feature* space, not in
+node space.  from_config() therefore passes E.t().contiguous() (shape D x N)
+to DifferentiableLaplacian.from_embeddings() so that:
+
+  - D features become the graph nodes.
+  - The resulting Laplacian is (D x D) in feature space.
+  - The adjacency matrix is computed on the matrix transpose E^T, i.e.
+    the Gram matrix G = E^T E (D x D) rather than E E^T (N x N).
+
+Passing the raw E (shape N x D) would build a node-space Laplacian (N x N),
+which is incorrect for this architecture.
+
 Data flow::
 
     x  (B, D),  U_q (N, q),  eigvals_q (q,),  L_f (B, N, N)
@@ -235,6 +249,15 @@ class WiringAutoencoder(nn.Module):
     and pass the result to every train_one_epoch / eval_epoch call.
     This avoids the per-step fallback inside forward() (which reconstructs
     L_f from U_q and eigvals_q without mass_clip each time).
+
+    Feature-space Laplacian convention (arrowspace / graph-wiring)
+    ---------------------------------------------------------------
+    from_config() passes E.t().contiguous() (shape D x N) to
+    DifferentiableLaplacian.from_embeddings() so that the D features become
+    the graph nodes and the resulting Laplacian is (D x D) in feature space.
+    The adjacency matrix is therefore computed on E^T (the transpose of the
+    node-feature matrix), yielding the Gram matrix G = E^T E (D x D) rather
+    than E E^T (N x N).  This is the arrowspace convention.
 
     Note: the Laplacian-precision latent KL (Term 2, kl_lap) has been
     removed per PR #35.  L_z is synthesised inside SpectralLoadingDecoder
@@ -824,7 +847,15 @@ def from_config(
         penalty entirely (backward-compatible; zero triggers the fast-path
         in mode_entropy_penalty with no gradient allocation).
 
-     YAML config example (v2)::
+    Feature-space Laplacian convention (arrowspace / graph-wiring)
+        DifferentiableLaplacian.from_embeddings receives E.t().contiguous()
+        (shape D x N) so that the D features become the graph nodes and the
+        resulting Laplacian is (D x D) in feature space.  The adjacency
+        matrix is built on E^T, giving the feature-space Gram matrix
+        G = E^T E (D x D).  Passing E directly (N x D) would build a
+        node-space Laplacian (N x N) and is incorrect for this architecture.
+
+    YAML config example (v2)::
 
         model:
           version: 2
@@ -847,14 +878,18 @@ def from_config(
           sigma: 0.5
           normalised: true
           sparse: false
+        # NOTE: from_config passes E.t().contiguous() to from_embeddings
+        # internally -- callers always supply the raw (N x D) matrix E.
 
     Parameters
     ----------
     cfg : dict
         Parsed YAML config.  Must contain a 'model' key.
     E : torch.Tensor
-        Embedding table (N, D).  Also used to initialise the model's
-        internal self.embedding buffer.
+        Node-feature matrix (N, D).  The transpose E.t().contiguous() is
+        passed to DifferentiableLaplacian.from_embeddings() to build the
+        feature-space Laplacian.  The raw E is also used to initialise the
+        model's internal self.embedding buffer.
 
     Returns
     -------
@@ -867,8 +902,13 @@ def from_config(
     _ = int(mc.get("version", 1))
 
     gc = cfg.get("graph", {})
+
+    # Feature-space Laplacian (arrowspace / graph-wiring convention):
+    # Pass E.t().contiguous() (shape D x N) so that the D features become
+    # the graph nodes.  The resulting Laplacian is (D x D) in feature space,
+    # with adjacency built on the feature-transpose E^T.
     lap = DifferentiableLaplacian.from_embeddings(
-        E,
+        E.t().contiguous(),
         knn_k=gc.get("knn_k", 15),
         sigma=gc.get("sigma", 0.5),
         normalised=gc.get("normalised", True),
