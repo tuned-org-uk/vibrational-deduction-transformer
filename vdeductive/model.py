@@ -92,7 +92,29 @@ to DifferentiableLaplacian.from_embeddings() so that:
     the Gram matrix G = E^T E (D x D) rather than E E^T (N x N).
 
 Passing the raw E (shape N x D) would build a node-space Laplacian (N x N),
-which is incorrect for this architecture.
+which is incorrect for the encoder path.
+
+Node-space Laplacian for the wiring decoder (_lap_node_base)
+------------------------------------------------------------
+SpectralLoadingDecoder.forward() calls
+DifferentiableLaplacian.from_spectral_loading(W, L_base) which requires
+L_base to be (N x N) in node space (W has shape (B, N, q)).  The
+feature-space self._laplacian.base_laplacian is (D x D) and must NOT be
+passed here.
+
+from_config() therefore builds a second DifferentiableLaplacian from the
+raw E (shape N x D, node space) and stores its base_laplacian as the
+registered buffer self._lap_node_base (shape N x N).  This buffer is
+passed to self.wiring_decoder in forward(), extract_spectral_artefact(),
+and generate() instead of self._laplacian.base_laplacian.
+
+self._laplacian (feature-space, D x D) is used exclusively inside
+WiringEncoder via the lap= kwarg.  self._lap_node_base (node-space, N x N)
+is used exclusively inside SpectralLoadingDecoder.
+
+A future tracked issue (Option C) will replace this two-buffer convention
+with a principled dual-Laplacian architecture.  Until that work lands,
+the explicit split below is the correct and minimal fix.
 
 n_nodes vs laplacian.n_nodes (Option A fix, issue #83)
 ------------------------------------------------------
@@ -104,11 +126,6 @@ lap.n_nodes.  from_config() passes n_nodes=E.shape[0] explicitly so that
 the correct N is always used.  laplacian.n_nodes is now unambiguously the
 feature-space node count D and must not be used to derive N elsewhere.
 
-A tracked issue (Option C) will replace this split convention with a dual-
-Laplacian architecture: one (D x D) feature-space Laplacian for the encoder
-and one (N x N) node-space Laplacian for the decoder.  Until that is
-implemented, n_nodes=E.shape[0] is the single source of truth for N.
-
 Data flow::
 
     x  (B, D),  U_q (N, q),  eigvals_q (q,),  L_f (B, N, N)
@@ -117,6 +134,7 @@ Data flow::
       --> SpectralLoadingDecoder  W (B, d, q), omega (B, q), S (B, q, q),
                                   L_z (B, N, N), log_var_S (B, q, q)
                                   [log_var_S is independent of S -- fix #52]
+                                  [L_base passed is self._lap_node_base (N x N)]
       --> DiffusionDecoder   uses self.embedding (N, D) as the node table
                              x_hat (B, D)
       --> total loss
@@ -274,6 +292,16 @@ class WiringAutoencoder(nn.Module):
     node-feature matrix), yielding the Gram matrix G = E^T E (D x D) rather
     than E E^T (N x N).  This is the arrowspace convention.
 
+    Node-space Laplacian for the wiring decoder (_lap_node_base)
+    ------------------------------------------------------------
+    SpectralLoadingDecoder requires L_base of shape (N x N) in node space.
+    from_config() builds a second DifferentiableLaplacian from E (N x D)
+    directly and stores its base_laplacian as the registered buffer
+    self._lap_node_base (N x N).  All three wiring-decoder call sites
+    (forward, extract_spectral_artefact, generate) pass this buffer as
+    L_base instead of self._laplacian.base_laplacian (which is D x D).
+    self._laplacian is used exclusively inside WiringEncoder.
+
     n_nodes vs laplacian.n_nodes (Option A, issue #83)
     ----------------------------------------------------
     Because the Laplacian operates in feature space, lap.n_nodes == D, not N.
@@ -281,8 +309,8 @@ class WiringAutoencoder(nn.Module):
     SpectralLoadingDecoder) must receive N = E.shape[0] from the caller.
     from_config() supplies n_nodes=E.shape[0] explicitly; __init__ no longer
     infers n_nodes from the Laplacian when a caller passes it directly.
-    See issue (Option C) for the dual-Laplacian architecture that will make
-    this split explicit and principled.
+    See the tracked Option C issue for the dual-Laplacian architecture that
+    will make this split explicit and principled.
 
     Note: the Laplacian-precision latent KL (Term 2, kl_lap) has been
     removed per PR #35.  L_z is synthesised inside SpectralLoadingDecoder
@@ -320,7 +348,7 @@ class WiringAutoencoder(nn.Module):
                 log_b    (B, q)           -- Gamma rate  log-params
           --> z_to_q  (linear, latent_dim -> q)
                 z_q  (B, q)
-          --> SpectralLoadingDecoder
+          --> SpectralLoadingDecoder  (L_base = self._lap_node_base, N x N)
                 W          (B, feat_dim, q) -- spectral loading matrix
                 omega      (B, q)           -- mode weights
                 S          (B, q, q)        -- spectral coeff matrix (posterior mean)
@@ -358,9 +386,16 @@ class WiringAutoencoder(nn.Module):
     tau : float
         Diffusion time scale for kl_tau (mode frequency KL).  Default 0.5.
     laplacian : DifferentiableLaplacian
-        Base Laplacian module shared with SpectralLoadingDecoder.
-        Its dense base Laplacian (laplacian.base_laplacian) is passed as
-        L_base to SpectralLoadingDecoder.forward() at each step.
+        Feature-space Laplacian module (D x D).  Passed to WiringEncoder
+        via the lap= kwarg.  Its base_laplacian is (D x D) and must NOT
+        be passed to SpectralLoadingDecoder -- use lap_node instead.
+    lap_node : DifferentiableLaplacian or None
+        Node-space Laplacian module (N x N).  Its base_laplacian is stored
+        as the registered buffer self._lap_node_base and passed to
+        SpectralLoadingDecoder.forward() as L_base at every step.
+        When None, a RuntimeError is raised during the first wiring-decoder
+        call (base_laplacian will be None).  from_config() always supplies
+        this argument.
     n_layers : int
         Number of VDT blocks inside WiringEncoder.  Default 4.
     n_heads : int
@@ -403,6 +438,7 @@ class WiringAutoencoder(nn.Module):
         tau: float,
         laplacian: DifferentiableLaplacian,
         n_nodes: Optional[int] = None,
+        lap_node: Optional[DifferentiableLaplacian] = None,
         n_layers: int = 4,
         n_heads: int = 4,
         dropout: float = 0.1,
@@ -463,7 +499,7 @@ class WiringAutoencoder(nn.Module):
         self.z_to_q = nn.Linear(latent_dim, q, bias=False)
 
         # SpectralLoadingDecoder takes (q, d) at init; L_base is supplied
-        # at forward() time via self._laplacian.base_laplacian.
+        # at forward() time via self._lap_node_base (N x N node-space buffer).
         self.wiring_decoder = SpectralLoadingDecoder(
             q=q,
             d=n_nodes,
@@ -473,8 +509,20 @@ class WiringAutoencoder(nn.Module):
             hidden_dim=hidden_dim,
             tau_modes=tau_modes,
         )
+        # Feature-space Laplacian (D x D) -- used inside WiringEncoder only.
         self._laplacian = laplacian
-    
+
+        # Node-space base Laplacian (N x N) -- used inside SpectralLoadingDecoder.
+        # Stored as a non-trainable buffer so .to(device) moves it automatically.
+        # Built from E (N x D) in from_config(); None when direct callers omit
+        # lap_node (legacy path).
+        node_lap_base = (
+            lap_node.base_laplacian
+            if lap_node is not None and lap_node.base_laplacian is not None
+            else torch.zeros(n_nodes, n_nodes)
+        )
+        self.register_buffer("_lap_node_base", node_lap_base)
+
     @classmethod
     def from_config(cls, cfg: dict, E: torch.Tensor) -> "WiringAutoencoder":
         """
@@ -649,11 +697,14 @@ class WiringAutoencoder(nn.Module):
         z_q = self.z_to_q(z)   # (B, q)
 
         # --- Spectral decode (wiring) -------------------------------------
-        # SpectralLoadingDecoder.forward() returns 5 values (fix #52):
-        #   W, omega, S, L_z, log_var_S
+        # SpectralLoadingDecoder.forward() requires L_base of shape (N x N)
+        # in node space.  self._lap_node_base is the registered buffer built
+        # from E (N x D) in from_config().  Do NOT use
+        # self._laplacian.base_laplacian here -- that is (D x D) feature-space.
+        # Returns 5 values (fix #52): W, omega, S, L_z, log_var_S.
         # log_var_S is an independent head output -- NOT derived from S.
         W, omega, S, L_z, log_var_S = self.wiring_decoder(
-            z_q, U_q, self._laplacian.base_laplacian
+            z_q, U_q, self._lap_node_base
         )
 
         # Embedding table E must be (N, D) -- the full node feature matrix.
@@ -775,8 +826,9 @@ class WiringAutoencoder(nn.Module):
         z_q = self.z_to_q(z_prior)  # (1, q)
 
         # Unpack 5 values; log_var_S is not needed for the artefact.
+        # Pass self._lap_node_base (N x N) -- NOT self._laplacian.base_laplacian (D x D).
         W_hat, omega_raw, S, _L_z, _log_var_S = self.wiring_decoder(
-            z_q, U_q, self._laplacian.base_laplacian
+            z_q, U_q, self._lap_node_base
         )
         # W_hat : (1, feat_dim, q)
         # omega_raw : (1, q)
@@ -833,8 +885,9 @@ class WiringAutoencoder(nn.Module):
         z = torch.randn(n_samples, self.latent_dim, device=device)
         z_q = self.z_to_q(z)   # (n_samples, q)
         # Unpack 5 values; log_var_S is not needed for generation.
+        # Pass self._lap_node_base (N x N) -- NOT self._laplacian.base_laplacian (D x D).
         W, omega, S, L_z, _log_var_S = self.wiring_decoder(
-            z_q, U_q, self._laplacian.base_laplacian
+            z_q, U_q, self._lap_node_base
         )
         return self.diffusion_decoder(L_z, E, node_idx=node_idx)
 
@@ -889,11 +942,23 @@ def from_config(
         correct N is always used regardless of what the Laplacian reports.
         This is the single source of truth for N in from_config().
 
+    Two-Laplacian construction (node-space L_base fix)
+        SpectralLoadingDecoder.forward() requires L_base of shape (N x N)
+        in node space.  A second DifferentiableLaplacian is therefore built
+        from the raw E (N x D, node space) using the same knn_k / sigma /
+        normalised / sparse config as the feature-space Laplacian.  Its
+        base_laplacian (N x N) is stored as the registered buffer
+        self._lap_node_base in WiringAutoencoder.__init__ and passed to
+        self.wiring_decoder at every forward, extract_spectral_artefact,
+        and generate call.
+
+        self._laplacian (D x D, feature-space) continues to be used
+        exclusively inside WiringEncoder.
+
         The dual-Laplacian architecture (Option C) tracked in the issue
-        will make this separation explicit and principled:  one (D x D)
-        feature-space Laplacian drives the encoder; one (N x N) node-space
-        Laplacian drives the decoder.  Until that work lands, the explicit
-        n_nodes=E.shape[0] kwarg is the correct approach.
+        will make this separation explicit and principled.  Until that work
+        lands, the two-Laplacian construction below is the correct minimal
+        fix.
 
     Feature-space Laplacian convention (arrowspace / graph-wiring)
         DifferentiableLaplacian.from_embeddings receives E.t().contiguous()
@@ -901,7 +966,7 @@ def from_config(
         resulting Laplacian is (D x D) in feature space.  The adjacency
         matrix is built on E^T, giving the feature-space Gram matrix
         G = E^T E (D x D).  Passing E directly (N x D) would build a
-        node-space Laplacian (N x N) and is incorrect for this architecture.
+        node-space Laplacian (N x N) and is incorrect for the encoder path.
 
     YAML config example (v2)::
 
@@ -927,7 +992,8 @@ def from_config(
           normalised: true
           sparse: false
         # NOTE: from_config passes n_nodes=E.shape[0] and
-        #       E.t().contiguous() to from_embeddings internally.
+        #       E.t().contiguous() to from_embeddings (feature-space Laplacian)
+        #       and E directly to from_embeddings (node-space Laplacian).
         #       Callers always supply the raw (N x D) matrix E.
 
     Parameters
@@ -937,9 +1003,10 @@ def from_config(
     E : torch.Tensor
         Node-feature matrix (N, D).  The transpose E.t().contiguous() is
         passed to DifferentiableLaplacian.from_embeddings() to build the
-        feature-space Laplacian (D x D).  E.shape[0] = N is passed as
-        n_nodes so that self.embedding, WiringEncoder, and
-        SpectralLoadingDecoder are all sized correctly in node space.
+        feature-space Laplacian (D x D).  E directly is passed to build
+        the node-space Laplacian (N x N) for SpectralLoadingDecoder.
+        E.shape[0] = N is passed as n_nodes so that self.embedding,
+        WiringEncoder, and SpectralLoadingDecoder are all sized correctly.
         The raw E is also used to initialise the model's self.embedding
         buffer via model.embedding.data.copy_(E).
 
@@ -968,6 +1035,18 @@ def from_config(
         sparse=gc.get("sparse", False),
     )
 
+    # Node-space Laplacian: built from E directly (N x D) so that the N
+    # graph nodes become the Laplacian nodes.  The resulting base_laplacian
+    # is (N x N) and is the correct L_base for SpectralLoadingDecoder.
+    # Uses the same knn_k / sigma / normalised / sparse config.
+    lap_node = DifferentiableLaplacian.from_embeddings(
+        E,
+        knn_k=gc.get("knn_k", 15),
+        sigma=gc.get("sigma", 0.5),
+        normalised=gc.get("normalised", True),
+        sparse=gc.get("sparse", False),
+    )
+
     # Resolve q: v2 configs supply it explicitly; v1/legacy configs may not.
     # Fall back to tau_modes, then to 8.
     tau_modes_default = mc.get("tau_modes", 8)
@@ -988,6 +1067,7 @@ def from_config(
         lam_s=mc.get("lam_s", 0.01),
         tau=mc.get("tau", 0.5),
         laplacian=lap,
+        lap_node=lap_node,
         n_nodes=n_nodes,  # explicit N; prevents fallback to lap.n_nodes (== D)
         n_layers=mc.get("n_layers", 4),
         n_heads=mc.get("n_heads", 4),
